@@ -9,18 +9,26 @@ use spacetimedb::{table, Identity, Timestamp};
 // SHIP CONFIGURATION
 // ============================================================================
 
-/// Ship configuration singleton (id always 0)
+/// Ship configuration singleton defining the colony ship's parameters and simulation state.
 #[table(name = ship_config, public)]
 #[derive(Clone)]
 pub struct ShipConfig {
     #[primary_key]
+    /// Unique identifier (always 0 for singleton).
     pub id: u32,
+    /// Name of the colony ship.
     pub name: String,
+    /// Total number of decks on the ship.
     pub deck_count: u32,
+    /// Total number of crew members aboard.
     pub crew_count: u32,
+    /// Total number of passengers aboard.
     pub passenger_count: u32,
-    pub sim_time: f64, // Simulation time in hours
+    /// Current simulation time in hours since mission start.
+    pub sim_time: f64,
+    /// Time acceleration factor (1.0 = real-time).
     pub time_scale: f32,
+    /// Whether the simulation is currently paused.
     pub paused: bool,
 }
 
@@ -28,116 +36,170 @@ pub struct ShipConfig {
 // PEOPLE
 // ============================================================================
 
-/// Person - crew member, passenger, or player character
+/// Person aboard the colony ship, either crew member, passenger, or player character.
 #[table(name = person, public)]
 pub struct Person {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this person.
     pub id: u64,
+    /// First name of the person.
     pub given_name: String,
+    /// Last name of the person.
     pub family_name: String,
+    /// Whether this person is a crew member.
     pub is_crew: bool,
+    /// Whether this person is a player-controlled character.
     pub is_player: bool,
+    /// SpacetimeDB identity of the player controlling this person, if any.
     pub owner_identity: Option<Identity>,
 }
 
-/// Position in the ship
+/// Physical position of a person within the ship's coordinate system.
 #[table(name = position, public)]
 pub struct Position {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// ID of the room the person is currently in.
     pub room_id: u32,
+    /// X coordinate in meters (east-west axis).
     pub x: f32,
+    /// Y coordinate in meters (fore-aft axis).
     pub y: f32,
+    /// Z coordinate in meters (vertical axis, deck height).
     pub z: f32,
 }
 
-/// Active movement toward a destination
+/// Active movement state for a person navigating toward a destination.
 #[table(name = movement, public)]
 #[derive(Clone)]
 pub struct Movement {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// ID of the destination room.
     pub target_room_id: u32,
+    /// Target X coordinate in meters.
     pub target_x: f32,
+    /// Target Y coordinate in meters.
     pub target_y: f32,
+    /// Target Z coordinate in meters.
     pub target_z: f32,
+    /// Movement speed in meters per second.
     pub speed: f32,
-    /// Serialized path as comma-separated room IDs
+    /// Serialized navigation path as comma-separated room IDs.
     pub path: String,
+    /// Current index in the path being traversed.
     pub path_index: u32,
 }
 
-/// Physical and psychological needs (0.0 = satisfied, 1.0 = critical)
+/// Physical and psychological needs tracking for a person (0.0 = satisfied, 1.0 = critical).
 #[table(name = needs, public)]
 pub struct Needs {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// Hunger level (0.0 = full, 1.0 = starving).
     pub hunger: f32,
+    /// Fatigue level (0.0 = rested, 1.0 = exhausted).
     pub fatigue: f32,
+    /// Social need level (0.0 = satisfied, 1.0 = lonely).
     pub social: f32,
+    /// Comfort need level (0.0 = comfortable, 1.0 = miserable).
     pub comfort: f32,
+    /// Hygiene level (0.0 = clean, 1.0 = dirty).
     pub hygiene: f32,
-    pub health: f32, // 1.0 = healthy, 0.0 = dead
-    pub morale: f32, // 1.0 = happy, 0.0 = despairing
+    /// Health status (1.0 = healthy, 0.0 = dead).
+    pub health: f32,
+    /// Morale level (1.0 = happy, 0.0 = despairing).
+    pub morale: f32,
 }
 
-/// Big Five personality traits (0.0-1.0 each)
+/// Big Five personality traits for a person (0.0-1.0 normalized scale).
 #[table(name = personality, public)]
 pub struct Personality {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// Openness to experience trait.
     pub openness: f32,
+    /// Conscientiousness trait.
     pub conscientiousness: f32,
+    /// Extraversion trait.
     pub extraversion: f32,
+    /// Agreeableness trait.
     pub agreeableness: f32,
+    /// Neuroticism trait.
     pub neuroticism: f32,
 }
 
-/// Skill levels (0.0-1.0 each)
+/// Professional skill levels for a person (0.0-1.0 normalized scale).
 #[table(name = skills, public)]
 pub struct Skills {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// Engineering skill level.
     pub engineering: f32,
+    /// Medical skill level.
     pub medical: f32,
+    /// Piloting skill level.
     pub piloting: f32,
+    /// Science skill level.
     pub science: f32,
+    /// Social skill level.
     pub social: f32,
+    /// Combat skill level.
     pub combat: f32,
 }
 
-/// Current activity state
+/// Current activity state for a person's scheduled behavior.
 #[table(name = activity, public)]
 #[derive(Clone)]
 pub struct Activity {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
-    pub activity_type: u8, // ActivityType as u8
+    /// Type of activity (see activity_types module).
+    pub activity_type: u8,
+    /// Simulation time when this activity started in hours.
     pub started_at: f64,
-    pub duration: f32, // hours
+    /// Planned duration of the activity in hours.
+    pub duration: f32,
+    /// Room where the activity takes place, if applicable.
     pub target_room_id: Option<u32>,
 }
 
-/// Crew-specific data
+/// Crew-specific information for personnel assigned to ship operations.
 #[table(name = crew, public)]
 pub struct Crew {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
-    pub department: u8, // Department as u8
-    pub rank: u8,       // Rank as u8
-    pub shift: u8,      // Shift as u8
+    /// Department assignment (see departments module).
+    pub department: u8,
+    /// Rank within the crew hierarchy (see ranks module).
+    pub rank: u8,
+    /// Assigned duty shift (see shifts module).
+    pub shift: u8,
+    /// Room ID where this crew member is stationed.
     pub duty_station_id: u32,
+    /// Whether the crew member is currently on duty.
     pub on_duty: bool,
 }
 
-/// Passenger-specific data
+/// Passenger-specific information for civilians traveling aboard the colony ship.
 #[table(name = passenger, public)]
 pub struct Passenger {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
-    pub cabin_class: u8, // CabinClass as u8
+    /// Cabin class for accommodation (see cabin_classes module).
+    pub cabin_class: u8,
+    /// Destination colony or station.
     pub destination: String,
+    /// Passenger's profession or occupation.
     pub profession: String,
 }
 
@@ -145,215 +207,324 @@ pub struct Passenger {
 // SHIP STRUCTURE
 // ============================================================================
 
-/// Room/compartment on the ship
+/// Physical room or compartment aboard the ship with spatial properties.
 #[table(name = room, public)]
 pub struct Room {
     #[primary_key]
+    /// Unique identifier for this room.
     pub id: u32,
-    pub node_id: u64, // FK → GraphNode
+    /// Foreign key to GraphNode (logical representation).
+    pub node_id: u64,
+    /// Human-readable name of the room.
     pub name: String,
+    /// Type of room (see room_types module).
     pub room_type: u8,
+    /// Deck number where this room is located.
     pub deck: i32,
+    /// X coordinate of room's bottom-left corner in meters.
     pub x: f32,
+    /// Y coordinate of room's bottom-left corner in meters.
     pub y: f32,
+    /// Width of the room in meters (east-west).
     pub width: f32,
+    /// Height of the room in meters (fore-aft).
     pub height: f32,
+    /// Maximum occupancy capacity of the room.
     pub capacity: u32,
 }
 
-/// Logical graph node — every "thing" in the ship
+/// Logical graph node representing any functional entity in the ship's network.
 #[table(name = graph_node, public)]
 #[derive(Clone)]
 pub struct GraphNode {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this graph node.
     pub id: u64,
-    pub node_type: u8, // node_types::*
+    /// Type of node (see node_types module).
+    pub node_type: u8,
+    /// Human-readable name of this node.
     pub name: String,
-    pub function: u8, // room_types::* (what role this serves)
+    /// Functional role of this node (see room_types module).
+    pub function: u8,
+    /// Maximum capacity or occupancy for this node.
     pub capacity: u32,
-    pub required_area: f32, // computed from function + capacity + subsystem count
-    pub deck_preference: i32, // -1 = no preference, 0-5 = soft preference
-    pub group: u8,          // groups::* (command, engineering, etc.)
+    /// Required physical area in square meters.
+    pub required_area: f32,
+    /// Preferred deck for placement (-1 = no preference, 0+ = specific deck number).
+    pub deck_preference: i32,
+    /// Functional group classification (see groups module).
+    pub group: u8,
 }
 
-/// Logical graph edge — connection between two nodes
+/// Logical graph edge representing a connection between two nodes in the ship's network.
 #[table(name = graph_edge, public)]
 #[derive(Clone)]
 pub struct GraphEdge {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this edge.
     pub id: u64,
+    /// Foreign key to the source GraphNode.
     pub from_node: u64,
+    /// Foreign key to the target GraphNode.
     pub to_node: u64,
-    pub edge_type: u8, // edge_types::*
+    /// Type of connection (see edge_types module).
+    pub edge_type: u8,
+    /// Weight or cost of traversing this edge.
     pub weight: f32,
+    /// Whether the edge can be traversed in both directions.
     pub bidirectional: bool,
 }
 
-/// Door connecting two rooms with explicit wall info
+/// Physical door connecting two adjacent rooms with spatial and access properties.
 #[table(name = door, public)]
 pub struct Door {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this door.
     pub id: u64,
+    /// Foreign key to first Room.id connected by this door.
     pub room_a: u32,
+    /// Foreign key to second Room.id connected by this door.
     pub room_b: u32,
-    pub wall_a: u8,               // wall_sides::* (which wall of room_a)
-    pub wall_b: u8,               // wall_sides::* (which wall of room_b)
-    pub position_along_wall: f32, // DEPRECATED — use door_x/door_y instead
-    pub width: f32,               // door opening width (default 3.0)
-    pub access_level: u8,         // access_levels::*
-    pub door_x: f32,              // absolute world X position of door center
-    pub door_y: f32,              // absolute world Y position of door center
+    /// Wall side in room_a where door is located (see wall_sides module).
+    pub wall_a: u8,
+    /// Wall side in room_b where door is located (see wall_sides module).
+    pub wall_b: u8,
+    /// DEPRECATED: Position along wall (use door_x/door_y instead).
+    pub position_along_wall: f32,
+    /// Width of the door opening in meters (default 3.0).
+    pub width: f32,
+    /// Required access level to traverse (see access_levels module).
+    pub access_level: u8,
+    /// Absolute world X coordinate of door center in meters.
+    pub door_x: f32,
+    /// Absolute world Y coordinate of door center in meters.
+    pub door_y: f32,
 }
 
-/// Generated corridor — first-class entity
+/// Procedurally generated corridor providing primary navigation paths between rooms.
 #[table(name = corridor, public)]
 pub struct Corridor {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this corridor.
     pub id: u64,
+    /// Deck number where this corridor is located.
     pub deck: i32,
-    pub corridor_type: u8, // corridor_types::*
+    /// Type of corridor (see corridor_types module).
+    pub corridor_type: u8,
+    /// X coordinate of corridor's bottom-left corner in meters.
     pub x: f32,
+    /// Y coordinate of corridor's bottom-left corner in meters.
     pub y: f32,
+    /// Width of the corridor in meters.
     pub width: f32,
+    /// Length of the corridor in meters.
     pub length: f32,
-    pub orientation: u8, // 0=horizontal, 1=vertical
-    pub carries: u8,     // bitmask: carries_flags::*
+    /// Orientation of the corridor (0=horizontal, 1=vertical).
+    pub orientation: u8,
+    /// Infrastructure types carried by this corridor (bitmask, see carries_flags module).
+    pub carries: u8,
 }
 
-/// Elevator or ladder shaft spanning multiple decks
+/// Vertical shaft for elevators or ladders connecting multiple decks.
 #[table(name = vertical_shaft, public)]
 pub struct VerticalShaft {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this vertical shaft.
     pub id: u64,
-    pub shaft_type: u8, // shaft_types::*
+    /// Type of vertical transport (see shaft_types module).
+    pub shaft_type: u8,
+    /// Human-readable name of the shaft.
     pub name: String,
+    /// X coordinate of shaft center in meters.
     pub x: f32,
+    /// Y coordinate of shaft center in meters.
     pub y: f32,
-    pub decks_served: String, // comma-separated: "0,1,2,3,4,5"
+    /// Comma-separated list of deck numbers served (e.g., "0,1,2,3,4,5").
+    pub decks_served: String,
+    /// Width of the shaft in meters.
     pub width: f32,
+    /// Height of the shaft in meters.
     pub height: f32,
 }
 
-/// Per-deck atmosphere state
+/// Atmospheric conditions and life support status for a single deck.
 #[table(name = deck_atmosphere, public)]
 pub struct DeckAtmosphere {
     #[primary_key]
+    /// Deck number for this atmosphere record.
     pub deck: i32,
-    pub oxygen: f32,      // 0.0-1.0 (nominal ~0.21)
-    pub co2: f32,         // 0.0-1.0 (danger > 0.04)
-    pub humidity: f32,    // 0.0-1.0 (comfort 0.4-0.6)
-    pub temperature: f32, // Celsius (comfort 20-24)
-    pub pressure: f32,    // kPa (nominal ~101)
+    /// Oxygen concentration (0.0-1.0, nominal ~0.21).
+    pub oxygen: f32,
+    /// CO2 concentration (0.0-1.0, danger > 0.04).
+    pub co2: f32,
+    /// Relative humidity (0.0-1.0, comfort 0.4-0.6).
+    pub humidity: f32,
+    /// Temperature in degrees Celsius (comfort 20-24).
+    pub temperature: f32,
+    /// Air pressure in kilopascals (nominal ~101).
+    pub pressure: f32,
 }
 
 // ============================================================================
 // SHIP SYSTEMS & RESOURCES
 // ============================================================================
 
-/// Ship system — top-level category (Power, Life Support, etc.)
-/// Health/status computed from child subsystems.
+/// Top-level ship system category aggregating subsystems (e.g., Power, Life Support).
 #[table(name = ship_system, public)]
 #[derive(Clone)]
 pub struct ShipSystem {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this ship system.
     pub id: u64,
+    /// Human-readable name of the system.
     pub name: String,
+    /// Type of ship system (see system_types module).
     pub system_type: u8,
-    pub overall_health: f32, // computed: avg of subsystem health
-    pub overall_status: u8,  // computed: worst subsystem status
-    pub priority: u8,        // power_priorities::*
+    /// Overall health computed as average of child subsystem health (0.0-1.0).
+    pub overall_health: f32,
+    /// Overall status computed as worst child subsystem status (see system_statuses module).
+    pub overall_status: u8,
+    /// Power priority for resource allocation (see power_priorities module).
+    pub priority: u8,
 }
 
-/// Subsystem — functional unit within a system (e.g. O2 Generator within Life Support)
+/// Functional subsystem within a parent ship system (e.g., O2 Generator in Life Support).
 #[table(name = subsystem, public)]
 #[derive(Clone)]
 pub struct Subsystem {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this subsystem.
     pub id: u64,
+    /// Foreign key to parent ShipSystem.id.
     pub system_id: u64,
+    /// Human-readable name of the subsystem.
     pub name: String,
+    /// Type of subsystem (see subsystem_types module).
     pub subsystem_type: u8,
+    /// Current health of the subsystem (0.0-1.0).
     pub health: f32,
+    /// Current operational status (see system_statuses module).
     pub status: u8,
-    pub node_id: u64,    // FK → GraphNode (which logical node this lives in)
-    pub power_draw: f32, // kW required
+    /// Foreign key to GraphNode where this subsystem is physically located.
+    pub node_id: u64,
+    /// Power consumption in kilowatts.
+    pub power_draw: f32,
+    /// Number of crew required to operate this subsystem.
     pub crew_required: u8,
 }
 
-/// Individual component within a subsystem (pump, valve, sensor, etc.)
+/// Individual physical component within a subsystem (pump, valve, sensor, etc.).
 #[table(name = system_component, public)]
 #[derive(Clone)]
 pub struct SystemComponent {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this component.
     pub id: u64,
+    /// Foreign key to parent Subsystem.id.
     pub subsystem_id: u64,
+    /// Human-readable name of the component.
     pub name: String,
+    /// Type of component (see component_types module).
     pub component_type: u8,
+    /// Current health of the component (0.0-1.0).
     pub health: f32,
+    /// Current operational status (see system_statuses module).
     pub status: u8,
+    /// X coordinate of component location in meters.
     pub position_x: f32,
+    /// Y coordinate of component location in meters.
     pub position_y: f32,
+    /// Required maintenance interval in hours.
     pub maintenance_interval_hours: f32,
+    /// Simulation time when last maintenance was performed.
     pub last_maintenance: f64,
 }
 
-/// Physical infrastructure routing (power cable, water pipe, etc.)
+/// Physical infrastructure routing element (power cable, water pipe, etc.) within corridors.
 #[table(name = infra_edge, public)]
 #[derive(Clone)]
 pub struct InfraEdge {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this infrastructure edge.
     pub id: u64,
-    pub graph_edge_id: u64, // FK → GraphEdge
-    pub edge_type: u8,      // infra_types::*
-    pub corridor_id: u64,   // FK → Corridor (which corridor carries this)
+    /// Foreign key to logical GraphEdge.id.
+    pub graph_edge_id: u64,
+    /// Type of infrastructure (see infra_types module).
+    pub edge_type: u8,
+    /// Foreign key to Corridor.id where this infrastructure runs.
+    pub corridor_id: u64,
+    /// Maximum capacity of this infrastructure element.
     pub capacity: f32,
+    /// Current flow or load through this element.
     pub current_flow: f32,
+    /// Health of the infrastructure element (0.0-1.0).
     pub health: f32,
 }
 
-/// Ship-wide resource storage (singleton, id=0)
+/// Ship-wide resource storage tracking current levels and maximum capacities (singleton, id=0).
 #[table(name = ship_resources, public)]
 pub struct ShipResources {
     #[primary_key]
+    /// Unique identifier (always 0 for singleton).
     pub id: u32,
+    /// Current power reserves in kilowatt-hours.
     pub power: f32,
+    /// Current water reserves in cubic meters.
     pub water: f32,
+    /// Current oxygen reserves in kilograms.
     pub oxygen: f32,
+    /// Current food reserves in kilograms.
     pub food: f32,
+    /// Current fuel reserves in kilograms.
     pub fuel: f32,
+    /// Current spare parts inventory in units.
     pub spare_parts: f32,
-    // Capacities
+    /// Maximum power storage capacity in kilowatt-hours.
     pub power_cap: f32,
+    /// Maximum water storage capacity in cubic meters.
     pub water_cap: f32,
+    /// Maximum oxygen storage capacity in kilograms.
     pub oxygen_cap: f32,
+    /// Maximum food storage capacity in kilograms.
     pub food_cap: f32,
+    /// Maximum fuel storage capacity in kilograms.
     pub fuel_cap: f32,
+    /// Maximum spare parts storage capacity in units.
     pub spare_parts_cap: f32,
 }
 
-/// Active maintenance task targeting a specific component
+/// Active maintenance task assigned to repair or service a system component.
 #[table(name = maintenance_task, public)]
 #[derive(Clone)]
 pub struct MaintenanceTask {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this maintenance task.
     pub id: u64,
-    pub component_id: u64, // FK → SystemComponent
-    pub subsystem_id: u64, // FK → Subsystem (denormalized for quick lookup)
+    /// Foreign key to SystemComponent.id being serviced.
+    pub component_id: u64,
+    /// Foreign key to Subsystem.id (denormalized for quick lookup).
+    pub subsystem_id: u64,
+    /// Foreign key to Person.id of assigned crew member, if any.
     pub assigned_crew_id: Option<u64>,
+    /// Priority level of this task (higher is more urgent).
     pub priority: f32,
-    pub progress: f32, // 0.0-1.0
+    /// Task completion progress (0.0-1.0).
+    pub progress: f32,
+    /// Simulation time when this task was created.
     pub created_at: f64,
+    /// Required skill type to perform this task (see skill_types module).
     pub required_skill: u8,
+    /// Estimated duration to complete task in hours.
     pub duration_hours: f32,
 }
 
@@ -361,39 +532,54 @@ pub struct MaintenanceTask {
 // SOCIAL
 // ============================================================================
 
-/// Relationship between two people
+/// Social relationship between two people aboard the ship.
 #[table(name = relationship, public)]
 pub struct Relationship {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this relationship.
     pub id: u64,
+    /// Foreign key to first Person.id.
     pub person_a: u64,
+    /// Foreign key to second Person.id.
     pub person_b: u64,
-    pub relationship_type: u8, // RelationshipType as u8
-    pub strength: f32,         // -1.0 to 1.0
-    pub familiarity: f32,      // 0.0 to 1.0
+    /// Type of relationship (see relationship_types module).
+    pub relationship_type: u8,
+    /// Relationship strength (-1.0 = hostile, 1.0 = close).
+    pub strength: f32,
+    /// Familiarity level (0.0 = strangers, 1.0 = well-known).
+    pub familiarity: f32,
+    /// Simulation time of last social interaction.
     pub last_interaction: f64,
 }
 
-/// Active conversation
+/// Active conversation between two people with topic and state tracking.
 #[table(name = conversation, public)]
 #[derive(Clone)]
 pub struct Conversation {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this conversation.
     pub id: u64,
-    pub topic: u8, // ConversationTopic as u8
-    pub state: u8, // ConversationState as u8
+    /// Conversation topic (see conversation_topics module).
+    pub topic: u8,
+    /// Conversation state (see conversation_states module).
+    pub state: u8,
+    /// Simulation time when this conversation started.
     pub started_at: f64,
+    /// Foreign key to first Person.id participating.
     pub participant_a: u64,
+    /// Foreign key to second Person.id participating.
     pub participant_b: u64,
 }
 
-/// Marker: person is currently in a conversation
+/// Marker table indicating a person is currently engaged in a conversation.
 #[table(name = in_conversation, public)]
 pub struct InConversation {
     #[primary_key]
+    /// Foreign key to Person.id.
     pub person_id: u64,
+    /// Foreign key to Conversation.id.
     pub conversation_id: u64,
 }
 
@@ -401,33 +587,45 @@ pub struct InConversation {
 // EVENTS
 // ============================================================================
 
-/// Active event (emergency, celebration, etc.)
+/// Active ship event such as emergency, celebration, or incident.
 #[table(name = event, public)]
 #[derive(Clone)]
 pub struct Event {
     #[primary_key]
     #[auto_inc]
+    /// Unique identifier for this event.
     pub id: u64,
-    pub event_type: u8, // EventType as u8
+    /// Type of event (see event_types module).
+    pub event_type: u8,
+    /// Room where the event is taking place.
     pub room_id: u32,
+    /// Simulation time when this event started.
     pub started_at: f64,
+    /// Duration of the event in hours.
     pub duration: f32,
-    pub state: u8, // EventState as u8
+    /// Current state of the event (see event_states module).
+    pub state: u8,
+    /// Number of responders needed to handle this event.
     pub responders_needed: u8,
+    /// Number of responders currently assigned to this event.
     pub responders_assigned: u8,
-    pub severity: f32, // 0.0-1.0
+    /// Severity level of the event (0.0 = minor, 1.0 = critical).
+    pub severity: f32,
 }
 
 // ============================================================================
 // PLAYERS
 // ============================================================================
 
-/// Connected player session
+/// Active player connection session to the SpacetimeDB server.
 #[table(name = connected_player, public)]
 pub struct ConnectedPlayer {
     #[primary_key]
+    /// SpacetimeDB identity of the connected player.
     pub identity: Identity,
+    /// Foreign key to Person.id controlled by this player, if assigned.
     pub person_id: Option<u64>,
+    /// Timestamp when the player connected to the server.
     pub connected_at: Timestamp,
 }
 
