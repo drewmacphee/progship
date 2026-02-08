@@ -214,17 +214,17 @@ fn select_activity(
 
 fn should_be_on_duty(shift: u8, hour: f32) -> bool {
     match shift {
-        shifts::ALPHA => hour >= 6.0 && hour < 14.0,
-        shifts::BETA => hour >= 14.0 && hour < 22.0,
-        shifts::GAMMA => hour >= 22.0 || hour < 6.0,
+        shifts::ALPHA => (6.0..14.0).contains(&hour),
+        shifts::BETA => (14.0..22.0).contains(&hour),
+        shifts::GAMMA => !(6.0..22.0).contains(&hour),
         _ => false,
     }
 }
 
 fn is_meal_time(hour: f32) -> bool {
-    (hour >= 7.0 && hour < 8.0) ||   // Breakfast
-    (hour >= 12.0 && hour < 13.0) ||  // Lunch
-    (hour >= 18.0 && hour < 19.0) // Dinner
+    (7.0..8.0).contains(&hour) ||   // Breakfast
+    (12.0..13.0).contains(&hour) ||  // Lunch
+    (18.0..19.0).contains(&hour) // Dinner
 }
 
 fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
@@ -233,7 +233,7 @@ fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
     }
     // Crew sleeps based on shift
     else {
-        hour >= 22.0 || hour < 6.0
+        !(6.0..22.0).contains(&hour)
     }
 }
 
@@ -570,7 +570,7 @@ pub fn tick_social(ctx: &ReducerContext, sim_time: f64) {
     }
 
     // Start conversations between pairs in the same room
-    for (_room_id, people) in &room_occupants {
+    for people in room_occupants.values() {
         if people.len() < 2 {
             continue;
         }

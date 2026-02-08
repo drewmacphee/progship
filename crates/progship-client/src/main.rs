@@ -3,6 +3,19 @@
 //! Top-down 3D view of the colony ship. All simulation runs on the server.
 //! The client renders the world, follows the player, and sends input.
 
+// TODO: Fix these clippy lints incrementally
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::if_same_then_else)]
+#![allow(clippy::useless_format)]
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use spacetimedb_sdk::{DbContext, Table};

@@ -1961,7 +1961,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     || test_y < hull_length
                         && grid[test_x.min(hull_width - 1)][test_y] == CELL_MAIN_CORRIDOR
                 {
-                    let target = find_spine_segment(test_y).or_else(|| {
+                    let target = find_spine_segment(test_y).or({
                         // Check if it's in a cross-corridor
                         None
                     });
@@ -2222,7 +2222,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(mid_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::WEST);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2239,7 +2239,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             }
                         } else if let Some(cr) = find_cross_room(mid_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::WEST);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2257,7 +2257,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                         }
                     } else if cell == CELL_SERVICE_CORRIDOR {
                         let key = (pr.room_id, svc_rid, wall_sides::WEST);
-                        if !door_set.iter().any(|k| *k == key) {
+                        if !door_set.contains(&key) {
                             ctx.db.door().insert(Door {
                                 id: 0,
                                 room_a: pr.room_id,
@@ -2286,7 +2286,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(mid_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::EAST);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2303,7 +2303,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             }
                         } else if let Some(cr) = find_cross_room(mid_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::EAST);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2321,7 +2321,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                         }
                     } else if cell == CELL_SERVICE_CORRIDOR {
                         let key = (pr.room_id, svc_rid, wall_sides::EAST);
-                        if !door_set.iter().any(|k| *k == key) {
+                        if !door_set.contains(&key) {
                             ctx.db.door().insert(Door {
                                 id: 0,
                                 room_a: pr.room_id,
@@ -2350,7 +2350,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(test_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::NORTH);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2367,7 +2367,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             }
                         } else if let Some(cr) = find_cross_room(test_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::NORTH);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2397,7 +2397,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(test_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::SOUTH);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -2414,7 +2414,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             }
                         } else if let Some(cr) = find_cross_room(test_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::SOUTH);
-                            if !door_set.iter().any(|k| *k == key) {
+                            if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
                                     id: 0,
                                     room_a: pr.room_id,
@@ -4420,7 +4420,7 @@ fn generate_crew(ctx: &ReducerContext, count: u32) {
             morale: 0.7 + (i % 5) as f32 * 0.05,
         });
 
-        let base = (i as f32 * 0.618033988) % 1.0;
+        let base = (i as f32 * 0.618_034) % 1.0;
         ctx.db.personality().insert(Personality {
             person_id,
             openness: 0.3 + base * 0.4,
@@ -4539,7 +4539,7 @@ fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count: u32) {
             morale: 0.7 + (i % 4) as f32 * 0.06,
         });
 
-        let base = ((i + 40) as f32 * 0.618033988) % 1.0;
+        let base = ((i + 40) as f32 * 0.618_034) % 1.0;
         ctx.db.personality().insert(Personality {
             person_id,
             openness: 0.4 + base * 0.3,

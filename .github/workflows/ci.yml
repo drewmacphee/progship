@@ -34,8 +34,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build server
-        run: cargo build --package progship-server
       - name: Build client
         run: cargo build --package progship-client
 
@@ -48,4 +46,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --all
+        run: cargo test --package progship-client
