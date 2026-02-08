@@ -1,0 +1,35 @@
+# ProgShip Core - Requirements
+# Using uv for fast package management: https://github.com/astral-sh/uv
+# Install with: uv pip install -r requirements.txt
+
+# Core dependencies
+jsonschema>=4.20.0  # JSON schema validation
+
+# CLI framework
+click>=8.1.7  # Command-line interface
+
+# Progress bars
+tqdm>=4.66.0  # Progress indicators for pipelines
+
+# Data handling
+pyyaml>=6.0.1  # YAML configuration files
+pydantic>=2.5.0  # Data validation and settings
+
+# AI/ML Pipeline - Phase 3: Description Generation
+ollama>=0.4.0  # Local LLM inference via Ollama
+
+# AI/ML Pipeline - Phase 4: Image Generation
+diffusers>=0.32.0  # Hugging Face Diffusers for Flux.2
+accelerate>=1.2.0  # Accelerate library for fast inference
+safetensors>=0.4.0  # Safe tensors format
+sentencepiece>=0.1.99  # Text tokenization
+pillow>=10.0.0  # Image processing
+numpy>=1.24.0  # Numerical operations
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Development
+black>=23.12.0  # Code formatting
+ruff>=0.1.9  # Linting

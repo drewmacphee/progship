@@ -1,0 +1,49 @@
+{
+  "ship_types": [
+    {
+      "id": "colony_stacked",
+      "name": "Colony Ship - Stacked Fusion",
+      "construction_type": "stacked_fusion",
+      "default_style": "ceramic_white",
+      "size_class": "capital",
+      "typical_rooms": ["bridge", "crew_quarters", "hydroponics", "medical_bay", "engineering", "cargo_bay"],
+      "description": "Large cylindrical colony ship with stacked decks around a central fusion reactor core. Designed for long-duration missions with thousands of colonists in cryosleep."
+    },
+    {
+      "id": "colony_rotating",
+      "name": "Colony Ship - Rotating Ring",
+      "construction_type": "rotating_ring",
+      "default_style": "ceramic_white",
+      "size_class": "capital",
+      "typical_rooms": ["bridge", "crew_quarters", "hydroponics", "medical_bay", "engineering", "observation_deck"],
+      "description": "Massive rotating ring structure providing artificial gravity through centrifugal force. Central hub contains engineering and docking facilities."
+    },
+    {
+      "id": "colony_solar_sail",
+      "name": "Colony Ship - Solar Sail",
+      "construction_type": "solar_sail",
+      "default_style": "minimalist_composite",
+      "size_class": "large",
+      "typical_rooms": ["bridge", "crew_quarters", "hydroponics", "medical_bay", "sail_control"],
+      "description": "Lightweight colony ship propelled by enormous solar sails. Minimalist design prioritizes efficiency over comfort."
+    },
+    {
+      "id": "military_destroyer",
+      "name": "Military Destroyer",
+      "construction_type": "modular",
+      "default_style": "metal_grated",
+      "size_class": "medium",
+      "typical_rooms": ["bridge", "crew_quarters", "armory", "engineering", "tactical", "medical_bay"],
+      "description": "Combat-oriented vessel with modular weapon systems and heavy armor plating. Industrial aesthetic with exposed structural elements."
+    },
+    {
+      "id": "science_vessel",
+      "name": "Science Research Vessel",
+      "construction_type": "modular",
+      "default_style": "high_tech_clean",
+      "size_class": "medium",
+      "typical_rooms": ["bridge", "crew_quarters", "laboratory", "observation_deck", "sample_storage", "engineering"],
+      "description": "Specialized research ship with extensive laboratory facilities and sensor arrays. Clean, high-tech interior optimized for scientific work."
+    }
+  ]
+}

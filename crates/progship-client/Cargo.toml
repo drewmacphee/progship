@@ -1,0 +1,10 @@
+[package]
+name = "progship-client"
+description = "ProgShip - Colony Ship Survival Game (Bevy client)"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+progship-client-sdk = { path = "../progship-client-sdk" }
+bevy = "0.15"
+spacetimedb-sdk = "1.12"

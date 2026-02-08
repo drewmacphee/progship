@@ -1,0 +1,148 @@
+{
+  "fixtures": [
+    {
+      "id": "ceiling_panel_ambient",
+      "name": "Ceiling Panel Ambient Light",
+      "type": "area",
+      "base_description": "A single square ceiling light panel fixture designed for spaceship interior ambient lighting. The fixture is 2 meters by 2 meters by 10 centimeters, designed to mount flush into ceiling grid systems. Front face is a translucent white acrylic diffuser panel that glows evenly when illuminated. Behind the diffuser is an LED array providing soft, shadow-free illumination at 5000K cool white color temperature. The panel has a subtle recessed frame (2cm wide) around the perimeter in brushed aluminum. Four corner mounting clips are visible but minimal. When powered, the entire panel glows uniformly without visible hotspots or individual LED points. Light output is diffuse and even, suitable for general room illumination. The fixture has a slight convex curve to the diffuser surface to prevent dust accumulation. Overall aesthetic is clean and modern, similar to office or laboratory ceiling fixtures but more refined (think Apple Store or modern hospital lighting). This should be rendered as a single complete light fixture showing both the glowing face (illuminated) and the frame/mounting details. Product photography style with soft glow effect to show it as an active light source, clean white background, centered composition.",
+      "intensity": 1.0,
+      "color": [1.0, 1.0, 1.0],
+      "range": 15.0,
+      "bounding_box": {
+        "width": 2.0,
+        "height": 0.1,
+        "depth": 2.0,
+        "origin": "top_center"
+      },
+      "variants": [
+        {
+          "id": "ambient_white_soft",
+          "style_tags": ["ceramic_white", "minimalist"],
+          "description_override": null,
+          "intensity_multiplier": 1.0,
+          "color_override": [0.98, 0.98, 1.0]
+        }
+      ]
+    },
+    {
+      "id": "console_spot",
+      "name": "Console Spotlight",
+      "type": "spot",
+      "base_description": "A single adjustable spotlight fixture designed for task lighting over control consoles and workstations. The fixture consists of a cylindrical housing (15cm diameter, 20cm long) in brushed aluminum or white powder coat finish. Front has a focusing lens (8cm diameter) with subtle ribbed texture. Housing mounts on a ball-joint swivel mechanism allowing 180-degree adjustment. Base mount is a circular plate (12cm diameter) with three visible mounting bolts. Interior contains high-CRI LED producing focused 4000K neutral white light with adjustable beam angle (15-45 degrees). Power cable runs through articulated arm to ceiling mount. When illuminated, creates a defined cone of light without harsh edges. Small indicator LED on base shows power status (dim blue). Overall aesthetic is functional and industrial-modern, similar to architect desk lamps or professional photography lights. This should be rendered as a single complete spotlight fixture showing the housing, lens, adjustment mechanism, and base clearly. Product photography style with subtle glow from the lens to indicate it's a light source, slight angle to show adjustment mechanism, clean background.",
+      "intensity": 2.0,
+      "color": [1.0, 0.98, 0.95],
+      "range": 5.0,
+      "bounding_box": {
+        "width": 0.15,
+        "height": 0.2,
+        "depth": 0.15,
+        "origin": "bottom_center"
+      },
+      "variants": [
+        {
+          "id": "spot_console_adjustable",
+          "style_tags": ["ceramic_white", "modern"],
+          "description_override": null,
+          "intensity_multiplier": 1.2,
+          "color_override": null
+        }
+      ]
+    },
+    {
+      "id": "wall_strip_accent",
+      "name": "Wall Strip Accent Light",
+      "type": "area",
+      "base_description": "A single linear LED strip light fixture designed for wall edge accent lighting. The fixture is a long narrow channel (4 meters long, 5cm wide, 5cm deep) in anodized aluminum or white powder coat finish. Front face has a translucent white acrylic diffuser strip covering the LED elements. Housing has a subtle L-shaped profile allowing it to mount in corners where walls meet ceiling or floor. Back has continuous mounting channel with clips every 50cm. LEDs inside produce warm 3500K light with even distribution along the entire length. End caps are rounded and finished to match housing. Very slim profile (only 5cm protrusion from wall). When illuminated, creates a continuous glowing line with no visible individual LED points. Power input at one end with minimal connector housing (5cm cube). Overall aesthetic is architectural and minimal, similar to modern building accent lighting or cove lighting systems. This should be rendered as a single complete strip light unit showing the full 4-meter length, housing profile, diffuser, and mounting details. Product photography style with soft glow effect along the length, slight angle to show the profile and mounting channel, clean background.",
+      "intensity": 0.5,
+      "color": [1.0, 0.95, 0.85],
+      "range": 3.0,
+      "bounding_box": {
+        "width": 4.0,
+        "height": 0.05,
+        "depth": 0.05,
+        "origin": "bottom_center"
+      },
+      "variants": [
+        {
+          "id": "strip_warm_edge",
+          "style_tags": ["ceramic_white", "modern"],
+          "description_override": null,
+          "intensity_multiplier": 0.8,
+          "color_override": [1.0, 0.93, 0.82]
+        }
+      ]
+    },
+    {
+      "id": "emergency_point",
+      "name": "Emergency Point Light",
+      "type": "point",
+      "base_description": "A single emergency light fixture designed for alert and backup lighting. The fixture is a compact rectangular housing (20cm wide, 20cm tall, 10cm deep) in industrial red powder coat or grey metal finish. Front has a domed red/amber lens (10cm diameter) made of impact-resistant polycarbonate. Housing includes visible mounting flanges with four bolts and wire conduit entry at back. Top has a small status indicator light (green when normal, flashing when active). Lens has radial ribbing pattern for wide light dispersion. During normal operation emits low-intensity red glow (0.3 intensity) for visibility. During emergencies increases to full brightness with optional pulsing. Back of housing shows battery compartment access panel with warning labels. Weatherproof rating indicated by rubber gasket around lens. Overall aesthetic is utilitarian and safety-focused, similar to industrial emergency lights or submarine alarm lights (think Alien or Das Boot emergency lighting). This should be rendered as a single complete emergency light unit showing the housing, lens, mounting flanges, and indicator clearly. Product photography style with subtle red/amber glow from lens to show it's a light source, slight angle to show mounting and construction, clean background.",
+      "intensity": 0.3,
+      "color": [1.0, 0.3, 0.1],
+      "range": 4.0,
+      "bounding_box": {
+        "width": 0.2,
+        "height": 0.2,
+        "depth": 0.1,
+        "origin": "bottom_center"
+      },
+      "variants": [
+        {
+          "id": "emergency_red_pulse",
+          "style_tags": ["industrial", "military"],
+          "description_override": null,
+          "intensity_multiplier": 1.0,
+          "color_override": [1.0, 0.2, 0.0]
+        }
+      ]
+    },
+    {
+      "id": "engineering_work_light",
+      "name": "Engineering Work Light",
+      "type": "spot",
+      "base_description": "A single high-intensity work light fixture designed for engineering spaces and maintenance areas. The fixture consists of a robust cylindrical housing (30cm diameter, 40cm tall) in industrial yellow powder coat or grey metal with yellow safety stripes. Large front lens (25cm diameter) is thick tempered glass with protective wire cage overlay. Housing mounts on heavy-duty ball-joint with locking knob, attached to a U-bracket ceiling mount. Interior contains high-output LED array producing bright 5500K daylight color temperature (3.0 intensity, 8-meter range). Handle on top for manual adjustment with rubberized grip. Power cable is thick armored conduit. Back of housing has cooling fins for heat dissipation. On/off switch with weatherproof cover on side of housing. Overall aesthetic is heavy industrial and utilitarian, similar to construction site lighting or ship engine room work lights (think Alien engineering deck or submarine maintenance lighting). This should be rendered as a single complete work light unit showing housing, lens, cage, mounting bracket, handle, and industrial details clearly. Product photography style with bright glow from lens showing it's a powerful light source, angle to show construction and mounting hardware, clean background.",
+      "intensity": 3.0,
+      "color": [1.0, 1.0, 1.0],
+      "range": 8.0,
+      "bounding_box": {
+        "width": 0.3,
+        "height": 0.4,
+        "depth": 0.3,
+        "origin": "bottom_center"
+      },
+      "variants": [
+        {
+          "id": "work_bright_adjustable",
+          "style_tags": ["industrial"],
+          "description_override": null,
+          "intensity_multiplier": 1.5,
+          "color_override": null
+        }
+      ]
+    },
+    {
+      "id": "corridor_recessed",
+      "name": "Corridor Recessed Light",
+      "type": "point",
+      "base_description": "A single recessed ceiling light fixture designed for corridor and passage lighting. The fixture is a circular unit (30cm diameter, 10cm total depth with only 2cm protruding below ceiling) designed for flush mounting in ceiling panels. Visible trim ring is brushed aluminum (30cm outer diameter, 2cm wide) sitting flush with ceiling surface. Center has a white diffuser dome (20cm diameter) made of translucent polycarbonate. Interior LED produces diffused 4500K cool white light (0.8 intensity, 6-meter range). Dome has subtle frosted texture to eliminate hotspots. Three spring clips on sides (not visible when installed) hold unit in ceiling cutout. Minimal junction box behind (8cm depth). When illuminated, provides even downward light distribution with soft edge falloff. No harsh shadows or glare. Overall aesthetic is architectural and minimal, similar to modern home or office recessed lighting but more refined (think high-end hotel or museum lighting). This should be rendered as a single complete recessed light fixture showing both the trim ring and diffuser dome, as viewed from below when installed. Product photography style with soft glow from diffuser showing it's illuminated, straight-on view to show circular form clearly, clean grey background to simulate ceiling.",
+      "intensity": 0.8,
+      "color": [1.0, 0.98, 1.0],
+      "range": 6.0,
+      "bounding_box": {
+        "width": 0.3,
+        "height": 0.1,
+        "depth": 0.3,
+        "origin": "top_center"
+      },
+      "variants": [
+        {
+          "id": "recessed_corridor_flush",
+          "style_tags": ["ceramic_white", "minimalist"],
+          "description_override": null,
+          "intensity_multiplier": 1.0,
+          "color_override": null
+        }
+      ]
+    }
+  ]
+}

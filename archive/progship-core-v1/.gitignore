@@ -1,0 +1,58 @@
+# ProgShip Core .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# AI Models (large files)
+*.pth
+*.pt
+*.safetensors
+*.ckpt
+models/downloaded/
+
+# Generated Assets
+output/
+generated/
+*.glb
+*.gltf
+*.fbx
+images/generated/

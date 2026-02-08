@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "progship"
+version = "0.1.0"
+description = "Engine-agnostic ship generation pipeline with AI asset creation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jsonschema>=4.20.0",
+    "click>=8.1.7",
+    "pyyaml>=6.0.1",
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.0",
+    "ruff>=0.1.9",
+]
+
+[project.scripts]
+progship = "progship.cli:main"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"

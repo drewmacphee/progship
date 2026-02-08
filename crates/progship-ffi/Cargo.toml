@@ -1,0 +1,14 @@
+[package]
+name = "progship-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C FFI bindings for ProgShip simulation engine"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+progship-core = { path = "../progship-core" }
+
+[build-dependencies]
+cbindgen = "0.26"

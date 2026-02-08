@@ -1,0 +1,43 @@
+[
+  {
+    "id": "console_command",
+    "name": "Command Console",
+    "dimensions": { "x": 1, "y": 1, "z": 1 },
+    "constraints": [ "AgainstWall" ],
+    "tags": [ "tech", "control" ],
+    "asset_path": "res://addons/cogito/Assets/Models/Kenney/barrel.glb"
+  },
+  {
+    "id": "bunk_bed",
+    "name": "Crew Bunk",
+    "dimensions": { "x": 1, "y": 2, "z": 1 },
+    "constraints": [ "AgainstWall" ],
+    "tags": [ "furniture", "sleep" ],
+    "asset_path": "res://addons/cogito/Assets/Models/Kenney/chest.glb"
+  },
+  {
+    "id": "reactor_core",
+    "name": "Reactor Core",
+    "dimensions": { "x": 2, "y": 2, "z": 2 },
+    "constraints": [ "Center" ],
+    "tags": [ "power", "critical" ],
+    "asset_path": "res://addons/cogito/Assets/Models/Kenney/barrel.glb"
+  },
+  {
+    "id": "storage_crate",
+    "name": "Supply Crate",
+    "dimensions": { "x": 1, "y": 1, "z": 1 },
+    "constraints": [],
+    "tags": [ "storage" ],
+    "asset_path": "res://addons/cogito/Assets/Models/Kenney/chest.glb"
+  },
+  {
+    "id": "light_fixture",
+    "name": "Ceiling Light",
+    "dimensions": { "x": 0.5, "y": 0.1, "z": 0.5 },
+    "constraints": [ "Ceiling" ],
+    "tags": [ "light" ],
+    "asset_path": ""
+  }
+]
+

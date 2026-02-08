@@ -1,0 +1,201 @@
+{
+  "main": {
+    "id": "6df8ea0941493d4a",
+    "type": "split",
+    "children": [
+      {
+        "id": "046d8abb8afca5d1",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "a6ef9cc98d09d5ba",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Design/Procedural Generation.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Procedural Generation"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "40f04649a76a56a2",
+    "type": "split",
+    "children": [
+      {
+        "id": "220c6c4566eec4d7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "90b2e3104b073e45",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "2a3c56c97e3a7aeb",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "c50b1f4280e87526",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "6c173573f9594906",
+    "type": "split",
+    "children": [
+      {
+        "id": "bfd498e23ecc6a92",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "252e342a488be489",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Design/Procedural Generation.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Procedural Generation"
+            }
+          },
+          {
+            "id": "d11557ebaa9e441e",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Design/Procedural Generation.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Procedural Generation"
+            }
+          },
+          {
+            "id": "bd176cedaaf32185",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "1bafb255ded23ada",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "505f235b1fbb6008",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Design/Procedural Generation.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Procedural Generation"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "a6ef9cc98d09d5ba",
+  "lastOpenFiles": [
+    "Design/GitHub CICD Pipeline.md",
+    "Design/Automated Game Testing.md",
+    "Design/Agent Best Practices.md",
+    "Ideas/Modular Generation Architecture.md",
+    "Ideas/Colony Ship Types.md",
+    "Design/Phase Roadmap.md",
+    "Design/Architecture Overview.md",
+    "Reference/Technical Constraints.md",
+    "Home.md",
+    "Ideas/Open Problems.md",
+    "Ideas/Gemini Vision.md",
+    "Design/Procedural Generation.md"
+  ]
+}

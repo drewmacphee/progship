@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StyleDescriptors",
+  "description": "Defines visual style palettes and aesthetics",
+  "type": "object",
+  "properties": {
+    "style_descriptors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/StyleDescriptor" }
+    }
+  },
+  "required": ["style_descriptors"],
+  "definitions": {
+    "StyleDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z_]+$" },
+        "name": { "type": "string" },
+        "material_palette": { "type": "array", "items": { "type": "string" } },
+        "color_palette": { "type": "array", "items": { "type": "string" } },
+        "wear_level": { "type": "string", "enum": ["pristine", "clean", "lived_in", "worn", "damaged"] },
+        "aesthetic_tags": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name", "material_palette", "color_palette", "wear_level", "aesthetic_tags"]
+    }
+  }
+}

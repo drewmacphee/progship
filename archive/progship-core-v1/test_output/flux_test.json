@@ -1,0 +1,10 @@
+{
+  "prompt": "A futuristic reactor core in a spaceship, white ceramic materials, clean aesthetic, technical lighting",
+  "negative_prompt": null,
+  "seed": 42,
+  "model": "segmind/Segmind-Vega",
+  "resolution": 512,
+  "steps": 25,
+  "guidance_scale": 7.5,
+  "timestamp": "2026-01-20T13:07:39.152613"
+}

@@ -1,0 +1,27 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
+.idea/
+.vscode/
+bin/
+obj/
+*.user
+*.userprefs
+target/
+
+# ProgShip artifacts
+save.bin
+*_dump.txt
+*.wasm
+.spacetimedb/
+
+# Obsidian workspace (user-specific)
+.obsidian/workspace.json
+.obsidian/cache/
+archive/Hunyuan3D-2/
+
+# Large binary archives
+archive/models/
+archive/godot-prototype/

@@ -1,0 +1,153 @@
+{
+  "elements": [
+    {
+      "id": "wall_ceramic_white",
+      "name": "Ceramic White Wall Panel",
+      "type": "wall",
+      "category": "structural",
+      "base_description": "A single modular wall panel designed for spaceship interior construction. The panel is a rectangular piece measuring 4 meters wide by 3.5 meters tall by 0.2 meters thick. Surface finish is smooth ceramic white composite material with a subtle matte sheen. The panel features minimal geometric detailing - two vertical seam lines dividing it into three sections, with flush-mounted conduit channels running vertically near each seam. Small circular access ports (approximately 5cm diameter) are positioned every meter along the conduit channels. Edges have beveled trim for secure interlocking with adjacent panels. The overall aesthetic is clean, minimalist, and medical-grade, similar to clean room or hospital interior walls. Construction appears seamless and monolithic despite being modular. This should be rendered as a single flat panel piece suitable for game engine placement, not as a full wall section or room corner. Product photography style with clean edges and clear geometry.",
+      "dimensions": {
+        "length": 4.0,
+        "height": 3.5,
+        "thickness": 0.2
+      },
+      "material_hints": ["ceramic", "composite"],
+      "variants": [
+        {
+          "id": "ceramic_white_clean",
+          "style_tags": ["ceramic_white", "minimalist"],
+          "description_override": null,
+          "model_hints": {
+            "panel_count": 2,
+            "seam_type": "flush"
+          }
+        }
+      ]
+    },
+    {
+      "id": "floor_metal_grate",
+      "name": "Metal Grate Floor Tile",
+      "type": "floor",
+      "category": "structural",
+      "base_description": "A single square floor tile designed for industrial spaceship flooring. The tile is precisely 2 meters by 2 meters by 5 centimeters thick. Material is reinforced metal composite with a matte gunmetal grey finish. The top surface features a geometric pattern of hexagonal perforations (each hexagon approximately 2cm across) creating a grate-like appearance that allows air circulation and drainage. Between the perforations, the surface has subtle anti-slip texture ridges running diagonally. The tile edges have interlocking tabs for secure connection to adjacent tiles. Corner mounting holes (1cm diameter) are present at each corner for bolting to substructure. The underside shows structural ribbing in an X-pattern for weight distribution and strength. Overall aesthetic is utilitarian and industrial, similar to factory floor grating or starship engineering deck flooring (think Alien or The Expanse utility areas). This should be rendered as a single flat floor tile piece, not as a full floor surface or pattern. Product photography style showing both top surface detail and edge profile clearly.",
+      "dimensions": {
+        "length": 2.0,
+        "width": 2.0,
+        "thickness": 0.05
+      },
+      "material_hints": ["metal", "composite"],
+      "variants": [
+        {
+          "id": "grate_standard",
+          "style_tags": ["ceramic_white", "industrial"],
+          "description_override": null,
+          "model_hints": {
+            "perforation_pattern": "hexagonal",
+            "perforation_size": 0.02
+          }
+        }
+      ]
+    },
+    {
+      "id": "ceiling_panel_lit",
+      "name": "Illuminated Ceiling Panel",
+      "type": "ceiling",
+      "category": "structural",
+      "base_description": "A single square ceiling panel with integrated lighting system. The panel measures 2 meters by 2 meters by 10 centimeters thick. Front face is smooth ceramic white composite with a subtle recessed grid pattern dividing it into four quadrants. Each quadrant contains diffuse LED lighting behind translucent white acrylic, creating even illumination without visible individual lights. The grid lines between quadrants are shallow channels (1cm deep) with matte chrome trim. Edges have beveled mounting flanges for flush installation with adjacent panels. The panel surface is slightly convex (domed) to prevent dust accumulation. Four corner mounting brackets are recessed into the edges. When illuminated, the entire panel glows with warm white light (3000K-4000K color temperature). The aesthetic is clean and modern, similar to office ceiling tiles but more refined and futuristic (think Apple Store or modern hospital lighting). This should be rendered as a single ceiling panel piece with visible lighting elements, not as a full ceiling grid. Product photography style showing both the panel face and edge details, with soft glow effect to indicate lighting capability.",
+      "dimensions": {
+        "length": 2.0,
+        "width": 2.0,
+        "thickness": 0.1
+      },
+      "material_hints": ["ceramic", "glass", "composite"],
+      "variants": [
+        {
+          "id": "panel_lit_white",
+          "style_tags": ["ceramic_white"],
+          "description_override": null,
+          "model_hints": {
+            "light_emission": true,
+            "grid_divisions": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "door_sliding_standard",
+      "name": "Standard Sliding Door",
+      "type": "door",
+      "category": "passage",
+      "base_description": "A single sliding door assembly designed for spaceship interior passages. The door measures 1.2 meters wide by 2.5 meters tall by 10 centimeters thick when closed. Construction uses two white ceramic composite panels that slide apart horizontally when activated. The center of each panel features a transparent viewport (40cm circular window) made of reinforced acrylic or polycarbonate, allowing visibility when door is closed. Between the two panels when closed is a recessed vertical seam with rubber pressure seal. On the right side of the door frame is a backlit touch-sensitive control panel (20cm square) showing door status with glowing blue indicators. The door frame is brushed aluminum with rounded edges. Top and bottom of frame contain the sliding track mechanisms (partially visible). Door panels have subtle vertical ribbing for structural reinforcement. Overall aesthetic is clean and Star Trek-like - functional, minimal, and futuristic. When rendered, show door in closed position as a single complete assembly (both panels together), not open or separated. Product photography style showing the full door unit clearly with frame, panels, viewports, and control panel all visible.",
+      "dimensions": {
+        "width": 1.2,
+        "height": 2.5,
+        "thickness": 0.1
+      },
+      "material_hints": ["ceramic", "glass", "composite"],
+      "door_type": "sliding",
+      "opening_direction": "sideways",
+      "variants": [
+        {
+          "id": "sliding_white_viewport",
+          "style_tags": ["ceramic_white", "minimalist"],
+          "description_override": null,
+          "model_hints": {
+            "viewport_size": 0.4,
+            "panel_count": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "door_airlock",
+      "name": "Airlock Pressure Door",
+      "type": "door",
+      "category": "passage",
+      "base_description": "A single heavy-duty airlock pressure door assembly for critical spaceship passages. The door measures 1.5 meters wide by 2.8 meters tall by 30 centimeters thick. Construction is industrial-grade with a circular door panel (approximately 1.3 meters diameter) mounted in a rectangular reinforced frame. The door face features three concentric circular pressure seal rings (thick rubber gaskets) and eight radial locking bolt mechanisms positioned around the perimeter. Center of door has an emergency manual override wheel (60cm diameter, red-painted with cross-spoke handles). Around the wheel are status indicator lights (three lights: green for sealed, yellow for cycling, red for unsealed). Frame is heavy brushed steel with exposed bolts and warning stripes (yellow and black diagonal stripes) around the perimeter. Top right of frame has a ruggedized control panel with large physical buttons. Hydraulic assist pistons are partially visible at top and bottom of frame. Overall aesthetic is utilitarian and submarine-like (think Alien, The Expanse, or Das Boot) - function over form, heavy industrial design. This should be rendered as a complete closed airlock door unit showing the full frame, door face, seals, wheel, and all mechanical details. Product photography style with clear view of all components and mechanical features.",
+      "dimensions": {
+        "width": 1.5,
+        "height": 2.8,
+        "thickness": 0.3
+      },
+      "material_hints": ["metal", "composite", "rubber"],
+      "door_type": "airlock",
+      "opening_direction": "inward",
+      "variants": [
+        {
+          "id": "airlock_heavy",
+          "style_tags": ["industrial", "military"],
+          "description_override": null,
+          "model_hints": {
+            "seal_rings": 3,
+            "locking_bolts": 8
+          }
+        }
+      ]
+    },
+    {
+      "id": "corridor_standard",
+      "name": "Standard Corridor Section",
+      "type": "corridor",
+      "category": "passage",
+      "base_description": "A single complete corridor section module designed for spaceship interior passages. The module is a self-contained rectangular passage measuring 4 meters long by 2 meters wide by 3 meters tall internally. Walls are smooth ceramic white composite panels with minimal seam lines. Floor is metal grate (hexagonal perforation pattern) in matte grey, providing industrial functionality. Ceiling is smooth white with two recessed lighting strips running the full length along the edges where ceiling meets walls, providing indirect lighting. The corridor has open passages at both ends (no doors in this base module). Walls have occasional small conduit panels and junction boxes (10cm square) positioned at regular intervals. One wall features a recessed emergency equipment panel (fire extinguisher compartment, 50cm tall). Overall aesthetic combines clean habitation area (walls/ceiling) with functional engineering area (floor), similar to Star Trek corridor sections or The Expanse ship passages. This should be rendered as a complete corridor module piece showing all four interior walls, floor, and ceiling as a cohesive unit, with clear view through both open ends. Product photography style with orthographic or slight perspective view to show depth and construction clearly.",
+      "dimensions": {
+        "length": 4.0,
+        "height": 3.0,
+        "width": 2.0
+      },
+      "material_hints": ["ceramic", "metal", "composite"],
+      "corridor_width": 2.0,
+      "variants": [
+        {
+          "id": "corridor_white_lit",
+          "style_tags": ["ceramic_white"],
+          "description_override": null,
+          "model_hints": {
+            "lighting_strips": true,
+            "handrails": false
+          }
+        }
+      ]
+    }
+  ]
+}

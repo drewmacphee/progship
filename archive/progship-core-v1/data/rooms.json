@@ -1,0 +1,64 @@
+{
+  "rooms": [
+    {
+      "id": "bridge",
+      "name": "Bridge",
+      "dimensions": {
+        "width": 12.0,
+        "height": 3.5,
+        "depth": 10.0
+      },
+      "characteristic_facilities": ["command_console"],
+      "spatial_constraints": ["TopDeck: preferred"],
+      "description": "Ship command and control center with navigation systems"
+    },
+    {
+      "id": "crew_quarters",
+      "name": "Crew Quarters",
+      "dimensions": {
+        "width": 8.0,
+        "height": 3.0,
+        "depth": 8.0
+      },
+      "characteristic_facilities": [],
+      "spatial_constraints": [],
+      "description": "Living space for crew members"
+    },
+    {
+      "id": "engineering",
+      "name": "Engineering Bay",
+      "dimensions": {
+        "width": 15.0,
+        "height": 6.0,
+        "depth": 12.0
+      },
+      "characteristic_facilities": ["reactor_core"],
+      "spatial_constraints": ["BottomDeck: required", "AccessFromMultipleSides: true"],
+      "description": "Engineering systems and reactor core"
+    },
+    {
+      "id": "medical_bay",
+      "name": "Medical Bay",
+      "dimensions": {
+        "width": 10.0,
+        "height": 3.0,
+        "depth": 8.0
+      },
+      "characteristic_facilities": ["medical_scanner"],
+      "spatial_constraints": ["NearCrew: preferred"],
+      "description": "Medical treatment and diagnostic facilities"
+    },
+    {
+      "id": "cargo_bay",
+      "name": "Cargo Bay",
+      "dimensions": {
+        "width": 20.0,
+        "height": 5.0,
+        "depth": 15.0
+      },
+      "characteristic_facilities": [],
+      "spatial_constraints": ["LargeClearSpace: required"],
+      "description": "Storage and cargo handling area"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/progship-server",
+    "crates/progship-client-sdk",
+    "crates/progship-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/drewmacphee/progship"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# ECS (with serialization support)
+hecs = { version = "0.10", features = ["column-serialize"] }
+
+# Randomness
+rand = "0.8"
+
+# Bevy (for viewer)
+bevy = "0.15"

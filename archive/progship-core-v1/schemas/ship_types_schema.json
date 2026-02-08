@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ShipTypes",
+  "description": "Defines ship archetypes with construction types and default style descriptors",
+  "type": "object",
+  "properties": {
+    "ship_types": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ShipType" }
+    }
+  },
+  "required": ["ship_types"],
+  "definitions": {
+    "ShipType": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z_]+$" },
+        "name": { "type": "string" },
+        "construction_type": {
+          "type": "string",
+          "enum": ["stacked_fusion", "rotating_ring", "solar_sail", "generation_ship", "modular", "asteroid_converted"]
+        },
+        "default_style": { "type": "string", "pattern": "^[a-z_]+$" },
+        "size_class": { "type": "string", "enum": ["small", "medium", "large", "capital"] },
+        "typical_rooms": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name", "construction_type", "default_style", "size_class"]
+    }
+  }
+}

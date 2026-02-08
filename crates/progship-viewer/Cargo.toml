@@ -1,0 +1,11 @@
+[package]
+name = "progship-viewer"
+description = "Visualization for progship simulation using Bevy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+progship-core = { path = "../progship-core" }
+bevy = { workspace = true }
+hecs = { workspace = true }

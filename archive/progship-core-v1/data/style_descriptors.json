@@ -1,0 +1,58 @@
+{
+  "style_descriptors": [
+    {
+      "id": "ceramic_white",
+      "name": "Ceramic & White",
+      "material_palette": ["ceramic", "plastic", "composite", "glass"],
+      "color_palette": ["white", "light grey", "off-white", "pale blue"],
+      "wear_level": "clean",
+      "aesthetic_tags": ["minimalist", "clinical", "modern", "smooth"],
+      "description": "Clean, minimalist aesthetic with ceramic and plastic surfaces. Dominated by whites and light greys with smooth, uncluttered lines. Evokes medical/scientific environments."
+    },
+    {
+      "id": "metal_grated",
+      "name": "Metal & Grated",
+      "material_palette": ["metal", "steel", "aluminum", "iron"],
+      "color_palette": ["gunmetal", "dark grey", "rust brown", "black"],
+      "wear_level": "worn",
+      "aesthetic_tags": ["industrial", "rugged", "utilitarian", "exposed"],
+      "description": "Heavy industrial aesthetic with exposed metal grating, riveted panels, and visible structural elements. Shows wear and tear with rust spots and scratched surfaces."
+    },
+    {
+      "id": "minimalist_composite",
+      "name": "Minimalist Composite",
+      "material_palette": ["composite", "carbon fiber", "polymer", "titanium"],
+      "color_palette": ["charcoal", "silver", "dark blue", "black"],
+      "wear_level": "pristine",
+      "aesthetic_tags": ["minimalist", "sleek", "high-tech", "efficient"],
+      "description": "Ultra-modern minimalist design using advanced composite materials. Dark, sleek surfaces with precision engineering. Every element serves a purpose with no ornamentation."
+    },
+    {
+      "id": "high_tech_clean",
+      "name": "High-Tech Clean",
+      "material_palette": ["polished metal", "glass", "LED panels", "touchscreens"],
+      "color_palette": ["chrome", "white", "cyan blue", "soft white glow"],
+      "wear_level": "pristine",
+      "aesthetic_tags": ["futuristic", "clean", "sophisticated", "bright"],
+      "description": "Cutting-edge technology aesthetic with polished surfaces, integrated displays, and ambient lighting. Bright, clean spaces with holographic interfaces and seamless panels."
+    },
+    {
+      "id": "lived_in_utility",
+      "name": "Lived-In Utility",
+      "material_palette": ["metal", "plastic", "fabric", "rubber"],
+      "color_palette": ["beige", "olive green", "grey", "faded blue"],
+      "wear_level": "lived_in",
+      "aesthetic_tags": ["practical", "worn", "comfortable", "patched"],
+      "description": "Functional spaces showing years of use. Patched panels, personal modifications, worn surfaces. Equipment maintained but showing age. Feels like a working ship, not a showroom."
+    },
+    {
+      "id": "organic_bio",
+      "name": "Organic Bio-Tech",
+      "material_palette": ["bio-composite", "living tissue", "cartilage", "chitin"],
+      "color_palette": ["bone white", "flesh pink", "dark purple", "green bioluminescence"],
+      "wear_level": "pristine",
+      "aesthetic_tags": ["organic", "alien", "flowing", "unsettling"],
+      "description": "Alien bio-engineered ship with grown rather than built components. Curved, organic surfaces that pulse and breathe. Bioluminescent accents. Deeply unsettling to human sensibilities."
+    }
+  ]
+}

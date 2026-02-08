@@ -1,0 +1,148 @@
+{
+  "facilities": [
+    {
+      "id": "reactor_core",
+      "name": "Fusion Reactor Core",
+      "category": "power",
+      "base_description": "A large vertical cylindrical fusion reactor power generator, 4 meters wide and 6 meters tall. The main body is a thick cylinder with visible horizontal segmentation rings every meter. Around the middle section are 3-4 prominent glowing blue plasma containment rings that encircle the cylinder. Heavy radiation shielding panels cover the lower section. Multiple thick power conduits and coolant pipes emerge from the top. The surface has visible panel lines, access hatches, and warning labels. Industrial sci-fi power plant aesthetic - looks like a fusion reactor from Alien or The Expanse engine room. Should clearly read as a large cylindrical power generation device, not abstract art.",
+      "bounding_box": {
+        "width": 4.0,
+        "height": 6.0,
+        "depth": 4.0,
+        "origin": "bottom_center"
+      },
+      "attachment_points": [
+        {
+          "id": "coolant_inlet",
+          "position": [-1.5, 3.0, 0.0],
+          "type": "pipe_connector"
+        },
+        {
+          "id": "coolant_outlet",
+          "position": [1.5, 3.0, 0.0],
+          "type": "pipe_connector"
+        },
+        {
+          "id": "power_conduit",
+          "position": [0.0, 5.5, 0.0],
+          "type": "electrical"
+        }
+      ],
+      "spatial_constraints": [
+        "RequiresFloor: true",
+        "ExclusionRadius: 2.0",
+        "AccessClearance: 1.5"
+      ],
+      "variants": [
+        {
+          "id": "colony_ceramic",
+          "style_tags": ["ceramic", "white", "clean", "minimalist"],
+          "description_override": "Fusion reactor core with smooth white ceramic housing and subtle blue accent lighting around plasma rings",
+          "model_hints": {
+            "complexity": "moderate",
+            "symmetry": "radial"
+          }
+        },
+        {
+          "id": "military_grated",
+          "style_tags": ["metal", "grated", "industrial", "worn"],
+          "description_override": "Heavy-duty fusion reactor with exposed metal grating, riveted steel panels, and warning stripes. Shows signs of wear and maintenance access ports.",
+          "model_hints": {
+            "complexity": "detailed",
+            "symmetry": "radial"
+          }
+        },
+        {
+          "id": "high_tech",
+          "style_tags": ["polished", "chrome", "futuristic", "displays"],
+          "description_override": "Sleek fusion reactor with polished chrome casing, integrated status displays, and cyan holographic monitoring systems",
+          "model_hints": {
+            "complexity": "moderate",
+            "symmetry": "radial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "command_console",
+      "name": "Command Console",
+      "category": "navigation",
+      "base_description": "A curved spaceship command console workstation, approximately 3 meters wide and 1.2 meters tall. Features a semi-circular desk surface with an integrated control panel. The front face has 3-5 large rectangular touchscreen displays arranged in a curved array showing ship status, navigation maps, and system readouts. Below the screens are physical control interfaces: rows of labeled buttons, touch-sensitive panels, and status indicator lights. The console has a raised lip/edge around the control surface. Includes a recessed area for operator seating or standing. Modern starship bridge aesthetic with clearly visible screens, buttons, and control surfaces - looks like something from Star Trek or The Expanse bridge.",
+      "bounding_box": {
+        "width": 3.0,
+        "height": 1.2,
+        "depth": 1.5,
+        "origin": "bottom_center"
+      },
+      "attachment_points": [
+        {
+          "id": "data_connection",
+          "position": [0.0, 0.5, -0.7],
+          "type": "data"
+        },
+        {
+          "id": "power_input",
+          "position": [-1.0, 0.3, -0.7],
+          "type": "electrical"
+        }
+      ],
+      "spatial_constraints": [
+        "RequiresFloor: true",
+        "PlaceByWall: preferred",
+        "AccessClearance: 1.0"
+      ],
+      "variants": [
+        {
+          "id": "colony_ceramic",
+          "style_tags": ["ceramic", "touchscreen", "minimalist"],
+          "description_override": "Sleek white ceramic command console with large glowing touchscreen displays showing navigation data. Multiple rectangular screens arranged in curved array. Clean white control panel with backlit touch buttons and status LEDs. Modern spaceship bridge workstation."
+        },
+        {
+          "id": "military_grated",
+          "style_tags": ["metal", "physical_controls", "ruggedized"],
+          "description_override": "Ruggedized metal console with physical switches, dials, and small reinforced displays"
+        }
+      ]
+    },
+    {
+      "id": "medical_scanner",
+      "name": "Medical Scanner Bed",
+      "category": "medical",
+      "base_description": "A horizontal medical examination bed/table with overhead diagnostic scanning equipment, approximately 2.5 meters long. The bed itself is a padded surface mounted on a solid base/pedestal. Rising from behind the head of the bed is a curved overhead arm/gantry that extends over the patient area. This arm contains the scanning equipment - a thick ring or rectangular sensor array that can move along the length of the body. The sides have small display screens showing vital signs and scan results. Medical equipment aesthetic similar to CT scanner or Star Trek medical bay. Should clearly show: horizontal bed + overhead scanning arch/ring.",
+      "bounding_box": {
+        "width": 2.5,
+        "height": 2.0,
+        "depth": 1.0,
+        "origin": "bottom_center"
+      },
+      "attachment_points": [
+        {
+          "id": "medical_data",
+          "position": [1.0, 1.5, 0.0],
+          "type": "data"
+        },
+        {
+          "id": "power",
+          "position": [-1.0, 0.2, 0.0],
+          "type": "electrical"
+        }
+      ],
+      "spatial_constraints": [
+        "RequiresFloor: true",
+        "AccessClearance: 1.2"
+      ],
+      "variants": [
+        {
+          "id": "colony_ceramic",
+          "style_tags": ["ceramic", "clean", "clinical"],
+          "description_override": "Pristine white medical bed with smooth ceramic surfaces and holographic vital sign displays"
+        },
+        {
+          "id": "military_grated",
+          "style_tags": ["metal", "utilitarian", "ruggedized"],
+          "description_override": "Functional military-grade medical bed with metal frame and hardened monitoring equipment"
+        }
+      ]
+    }
+  ]
+}
