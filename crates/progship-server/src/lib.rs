@@ -3,10 +3,10 @@
 //! Colony ship simulation running as a SpacetimeDB module.
 //! All simulation logic runs here as reducers; clients are thin renderers.
 
-mod tables;
 mod generation;
-mod simulation;
 mod reducers;
+mod simulation;
+mod tables;
 
-pub use tables::*;
 pub use reducers::*;
+pub use tables::*;

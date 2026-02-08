@@ -1,8 +1,8 @@
 //! Client-facing reducers for game interaction and simulation ticking.
 
-use spacetimedb::{reducer, ReducerContext, Table};
-use crate::tables::*;
 use crate::simulation;
+use crate::tables::*;
+use spacetimedb::{reducer, ReducerContext, Table};
 
 // ============================================================================
 // PLAYER REDUCERS
@@ -31,7 +31,12 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 /// Player joins the game and creates their character
 #[reducer]
 pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String, is_crew: bool) {
-    log::info!("Player joining: {} {} (crew: {})", given_name, family_name, is_crew);
+    log::info!(
+        "Player joining: {} {} (crew: {})",
+        given_name,
+        family_name,
+        is_crew
+    );
 
     if let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) {
         if player.person_id.is_some() {
@@ -40,17 +45,24 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
         }
     }
 
-    let person_id = ctx.db.person().insert(Person {
-        id: 0,
-        given_name,
-        family_name,
-        is_crew,
-        is_player: true,
-        owner_identity: Some(ctx.sender),
-    }).id;
+    let person_id = ctx
+        .db
+        .person()
+        .insert(Person {
+            id: 0,
+            given_name,
+            family_name,
+            is_crew,
+            is_player: true,
+            owner_identity: Some(ctx.sender),
+        })
+        .id;
 
     // Start in the first corridor on deck 0
-    let start_room = ctx.db.room().iter()
+    let start_room = ctx
+        .db
+        .room()
+        .iter()
         .find(|r| r.deck == 0 && r.room_type == crate::tables::room_types::CORRIDOR);
     let (start_room_id, start_x, start_y) = if let Some(r) = &start_room {
         (r.id, r.x, r.y)
@@ -66,25 +78,39 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
     ctx.db.position().insert(Position {
         person_id,
         room_id: start_room_id,
-        x: start_x, y: start_y, z: 0.0,
+        x: start_x,
+        y: start_y,
+        z: 0.0,
     });
 
     ctx.db.needs().insert(Needs {
         person_id,
-        hunger: 0.0, fatigue: 0.0, social: 0.0, comfort: 0.0, hygiene: 0.0,
-        health: 1.0, morale: 0.8,
+        hunger: 0.0,
+        fatigue: 0.0,
+        social: 0.0,
+        comfort: 0.0,
+        hygiene: 0.0,
+        health: 1.0,
+        morale: 0.8,
     });
 
     ctx.db.personality().insert(Personality {
         person_id,
-        openness: 0.5, conscientiousness: 0.5, extraversion: 0.5,
-        agreeableness: 0.5, neuroticism: 0.3,
+        openness: 0.5,
+        conscientiousness: 0.5,
+        extraversion: 0.5,
+        agreeableness: 0.5,
+        neuroticism: 0.3,
     });
 
     ctx.db.skills().insert(Skills {
         person_id,
-        engineering: 0.3, medical: 0.2, piloting: 0.2,
-        science: 0.2, social: 0.3, combat: 0.2,
+        engineering: 0.3,
+        medical: 0.2,
+        piloting: 0.2,
+        science: 0.2,
+        social: 0.3,
+        combat: 0.2,
     });
 
     ctx.db.activity().insert(Activity {
@@ -125,8 +151,12 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
 /// Player movement input — bounded to room, can move through doors
 #[reducer]
 pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
-    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else { return };
-    let Some(person_id) = player.person_id else { return };
+    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = player.person_id else {
+        return;
+    };
 
     let player_radius = 0.5; // collision padding for player size
 
@@ -139,8 +169,11 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             let half_w = room.width / 2.0 - player_radius;
             let half_h = room.height / 2.0 - player_radius;
 
-            if new_x >= room.x - half_w && new_x <= room.x + half_w &&
-               new_y >= room.y - half_h && new_y <= room.y + half_h {
+            if new_x >= room.x - half_w
+                && new_x <= room.x + half_w
+                && new_y >= room.y - half_h
+                && new_y <= room.y + half_h
+            {
                 pos.x = new_x;
                 pos.y = new_y;
                 ctx.db.position().person_id().update(pos);
@@ -159,9 +192,13 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             } else {
                 (0, false)
             };
-            if !is_connected { continue; }
+            if !is_connected {
+                continue;
+            }
 
-            let Some(cur_room) = ctx.db.room().id().find(current_room_id) else { continue };
+            let Some(cur_room) = ctx.db.room().id().find(current_room_id) else {
+                continue;
+            };
             let door_x = door.door_x;
             let door_y = door.door_y;
 
@@ -188,13 +225,21 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             let on_south = (door_y - room_south).abs() < wall_tol;
 
             // Check player is moving toward the door's wall
-            let moving_toward = if on_east { dx > 0.0 }
-                else if on_west { dx < 0.0 }
-                else if on_north { dy < 0.0 }
-                else if on_south { dy > 0.0 }
-                else { true }; // embedded/interior doors — always passable
+            let moving_toward = if on_east {
+                dx > 0.0
+            } else if on_west {
+                dx < 0.0
+            } else if on_north {
+                dy < 0.0
+            } else if on_south {
+                dy > 0.0
+            } else {
+                true
+            }; // embedded/interior doors — always passable
 
-            if !moving_toward { continue; }
+            if !moving_toward {
+                continue;
+            }
 
             if let Some(other_room) = ctx.db.room().id().find(other_room_id) {
                 let half_w = other_room.width / 2.0 - player_radius;
@@ -205,11 +250,19 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
                 let entry_x;
                 let entry_y;
                 if dx.abs() > dy.abs() {
-                    entry_x = if dx > 0.0 { door_x + offset } else { door_x - offset };
+                    entry_x = if dx > 0.0 {
+                        door_x + offset
+                    } else {
+                        door_x - offset
+                    };
                     entry_y = door_y;
                 } else {
                     entry_x = door_x;
-                    entry_y = if dy > 0.0 { door_y + offset } else { door_y - offset };
+                    entry_y = if dy > 0.0 {
+                        door_y + offset
+                    } else {
+                        door_y - offset
+                    };
                 }
                 // Clamp to destination room bounds
                 pos.x = entry_x.clamp(other_room.x - half_w, other_room.x + half_w);
@@ -239,12 +292,20 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
 /// Player interacts with a nearby person (start conversation)
 #[reducer]
 pub fn player_interact(ctx: &ReducerContext, target_person_id: u64) {
-    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else { return };
-    let Some(person_id) = player.person_id else { return };
+    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = player.person_id else {
+        return;
+    };
 
     // Check they're in the same room
-    let Some(my_pos) = ctx.db.position().person_id().find(person_id) else { return };
-    let Some(their_pos) = ctx.db.position().person_id().find(target_person_id) else { return };
+    let Some(my_pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(their_pos) = ctx.db.position().person_id().find(target_person_id) else {
+        return;
+    };
 
     if my_pos.room_id != their_pos.room_id {
         log::warn!("Can't interact - not in same room");
@@ -252,36 +313,79 @@ pub fn player_interact(ctx: &ReducerContext, target_person_id: u64) {
     }
 
     // Check neither is in a conversation
-    if ctx.db.in_conversation().person_id().find(person_id).is_some() ||
-       ctx.db.in_conversation().person_id().find(target_person_id).is_some() {
+    if ctx
+        .db
+        .in_conversation()
+        .person_id()
+        .find(person_id)
+        .is_some()
+        || ctx
+            .db
+            .in_conversation()
+            .person_id()
+            .find(target_person_id)
+            .is_some()
+    {
         log::warn!("Can't interact - someone is already in a conversation");
         return;
     }
 
-    let sim_time = ctx.db.ship_config().id().find(0).map(|c| c.sim_time).unwrap_or(0.0);
+    let sim_time = ctx
+        .db
+        .ship_config()
+        .id()
+        .find(0)
+        .map(|c| c.sim_time)
+        .unwrap_or(0.0);
 
-    let conv_id = ctx.db.conversation().insert(Conversation {
-        id: 0,
-        topic: conversation_topics::GREETING,
-        state: conversation_states::ACTIVE,
-        started_at: sim_time,
-        participant_a: person_id,
-        participant_b: target_person_id,
-    }).id;
+    let conv_id = ctx
+        .db
+        .conversation()
+        .insert(Conversation {
+            id: 0,
+            topic: conversation_topics::GREETING,
+            state: conversation_states::ACTIVE,
+            started_at: sim_time,
+            participant_a: person_id,
+            participant_b: target_person_id,
+        })
+        .id;
 
-    ctx.db.in_conversation().insert(InConversation { person_id, conversation_id: conv_id });
-    ctx.db.in_conversation().insert(InConversation { person_id: target_person_id, conversation_id: conv_id });
+    ctx.db.in_conversation().insert(InConversation {
+        person_id,
+        conversation_id: conv_id,
+    });
+    ctx.db.in_conversation().insert(InConversation {
+        person_id: target_person_id,
+        conversation_id: conv_id,
+    });
 }
 
 /// Player performs an action at their current location
 #[reducer]
 pub fn player_action(ctx: &ReducerContext, action: u8) {
-    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else { return };
-    let Some(person_id) = player.person_id else { return };
-    let Some(pos) = ctx.db.position().person_id().find(person_id) else { return };
-    let Some(room) = ctx.db.room().id().find(pos.room_id) else { return };
-    let Some(mut needs) = ctx.db.needs().person_id().find(person_id) else { return };
-    let sim_time = ctx.db.ship_config().id().find(0).map(|c| c.sim_time).unwrap_or(0.0);
+    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = player.person_id else {
+        return;
+    };
+    let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(room) = ctx.db.room().id().find(pos.room_id) else {
+        return;
+    };
+    let Some(mut needs) = ctx.db.needs().person_id().find(person_id) else {
+        return;
+    };
+    let sim_time = ctx
+        .db
+        .ship_config()
+        .id()
+        .find(0)
+        .map(|c| c.sim_time)
+        .unwrap_or(0.0);
 
     match action {
         // Eat (must be in mess/galley)
@@ -315,16 +419,16 @@ pub fn player_action(ctx: &ReducerContext, action: u8) {
             if let Some(node_id) = room_node_id {
                 for mut sub in ctx.db.subsystem().iter() {
                     if sub.node_id == node_id && sub.health < 0.9 {
-                    sub.health = (sub.health + 0.2).min(1.0);
-                    if sub.health > 0.8 {
-                        sub.status = system_statuses::NOMINAL;
-                    } else if sub.health > 0.5 {
-                        sub.status = system_statuses::DEGRADED;
+                        sub.health = (sub.health + 0.2).min(1.0);
+                        if sub.health > 0.8 {
+                            sub.status = system_statuses::NOMINAL;
+                        } else if sub.health > 0.5 {
+                            sub.status = system_statuses::DEGRADED;
+                        }
+                        ctx.db.subsystem().id().update(sub);
+                        repaired = true;
+                        break;
                     }
-                    ctx.db.subsystem().id().update(sub);
-                    repaired = true;
-                    break;
-                }
                 }
             }
             if repaired {
@@ -350,7 +454,9 @@ pub fn player_action(ctx: &ReducerContext, action: u8) {
             }
         }
         // Hygiene (must be in quarters)
-        6 if room_types::is_quarters(room.room_type) || room.room_type == room_types::SHARED_BATHROOM => {
+        6 if room_types::is_quarters(room.room_type)
+            || room.room_type == room_types::SHARED_BATHROOM =>
+        {
             needs.hygiene = (needs.hygiene - 0.5).max(0.0);
             ctx.db.needs().person_id().update(needs);
             if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
@@ -369,10 +475,18 @@ pub fn player_action(ctx: &ReducerContext, action: u8) {
 /// Use an elevator to travel to a different deck
 #[reducer]
 pub fn player_use_elevator(ctx: &ReducerContext, target_deck: i32) {
-    let Some(cp) = ctx.db.connected_player().identity().find(ctx.sender) else { return };
-    let Some(person_id) = cp.person_id else { return };
-    let Some(pos) = ctx.db.position().person_id().find(person_id) else { return };
-    let Some(current_room) = ctx.db.room().id().find(pos.room_id) else { return };
+    let Some(cp) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = cp.person_id else {
+        return;
+    };
+    let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(current_room) = ctx.db.room().id().find(pos.room_id) else {
+        return;
+    };
 
     // Must be in an elevator shaft
     if current_room.room_type != room_types::ELEVATOR_SHAFT {
@@ -382,7 +496,13 @@ pub fn player_use_elevator(ctx: &ReducerContext, target_deck: i32) {
 
     // Service elevators require crew status
     if current_room.name.contains("Service") {
-        let is_crew = ctx.db.person().id().find(person_id).map(|p| p.is_crew).unwrap_or(false);
+        let is_crew = ctx
+            .db
+            .person()
+            .id()
+            .find(person_id)
+            .map(|p| p.is_crew)
+            .unwrap_or(false);
         if !is_crew {
             log::warn!("Service elevator restricted to crew");
             return;
@@ -412,10 +532,18 @@ pub fn player_use_elevator(ctx: &ReducerContext, target_deck: i32) {
 /// Use a ladder shaft to move one deck up or down
 #[reducer]
 pub fn player_use_ladder(ctx: &ReducerContext, direction: i32) {
-    let Some(cp) = ctx.db.connected_player().identity().find(ctx.sender) else { return };
-    let Some(person_id) = cp.person_id else { return };
-    let Some(pos) = ctx.db.position().person_id().find(person_id) else { return };
-    let Some(current_room) = ctx.db.room().id().find(pos.room_id) else { return };
+    let Some(cp) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = cp.person_id else {
+        return;
+    };
+    let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(current_room) = ctx.db.room().id().find(pos.room_id) else {
+        return;
+    };
 
     if current_room.room_type != room_types::LADDER_SHAFT {
         log::warn!("Not in a ladder shaft");
@@ -426,9 +554,13 @@ pub fn player_use_ladder(ctx: &ReducerContext, direction: i32) {
 
     // Find connected ladder on target deck
     for door in ctx.db.door().iter() {
-        let other_id = if door.room_a == pos.room_id { door.room_b }
-                       else if door.room_b == pos.room_id { door.room_a }
-                       else { continue };
+        let other_id = if door.room_a == pos.room_id {
+            door.room_b
+        } else if door.room_b == pos.room_id {
+            door.room_a
+        } else {
+            continue;
+        };
         if let Some(other_room) = ctx.db.room().id().find(other_id) {
             if other_room.room_type == room_types::LADDER_SHAFT && other_room.deck == target_deck {
                 let mut p = pos;
@@ -459,10 +591,16 @@ fn find_elevator_on_deck(ctx: &ReducerContext, start_room: u32, target_deck: i32
             }
         }
         for door in ctx.db.door().iter() {
-            let other = if door.room_a == current { door.room_b }
-                       else if door.room_b == current { door.room_a }
-                       else { continue };
-            if visited.contains(&other) { continue; }
+            let other = if door.room_a == current {
+                door.room_b
+            } else if door.room_b == current {
+                door.room_a
+            } else {
+                continue;
+            };
+            if visited.contains(&other) {
+                continue;
+            }
             // Only follow elevator shaft connections
             if let Some(other_room) = ctx.db.room().id().find(other) {
                 if other_room.room_type == room_types::ELEVATOR_SHAFT {
@@ -506,8 +644,12 @@ pub fn set_time_scale(ctx: &ReducerContext, scale: f32) {
 /// Main simulation tick - called by client or scheduled reducer
 #[reducer]
 pub fn tick(ctx: &ReducerContext, delta_seconds: f32) {
-    let Some(mut config) = ctx.db.ship_config().id().find(0) else { return };
-    if config.paused { return; }
+    let Some(mut config) = ctx.db.ship_config().id().find(0) else {
+        return;
+    };
+    if config.paused {
+        return;
+    }
 
     let scaled_delta = delta_seconds * config.time_scale;
     let delta_hours = scaled_delta as f64 / 3600.0;

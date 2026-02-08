@@ -3,8 +3,8 @@
 //! Top-down 3D view of the colony ship. All simulation runs on the server.
 //! The client renders the world, follows the player, and sends input.
 
-use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
+use bevy::prelude::*;
 use spacetimedb_sdk::{DbContext, Table};
 
 use progship_client_sdk::*;
@@ -25,18 +25,21 @@ fn main() {
         .insert_resource(PlayerState::default())
         .insert_resource(UiState::default())
         .add_systems(Startup, setup_3d)
-        .add_systems(Update, (
-            connect_to_server,
-            process_messages,
-            auto_join_game,
-            player_input,
-            camera_follow_player,
-            sync_rooms,
-            sync_people,
-            render_hud,
-            render_info_panel,
-            render_toasts,
-        ))
+        .add_systems(
+            Update,
+            (
+                connect_to_server,
+                process_messages,
+                auto_join_game,
+                player_input,
+                camera_follow_player,
+                sync_rooms,
+                sync_people,
+                render_hud,
+                render_info_panel,
+                render_toasts,
+            ),
+        )
         .run();
 }
 
@@ -162,8 +165,7 @@ fn setup_3d(mut commands: Commands) {
     // Top-down camera looking straight down
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 80.0, 0.0)
-            .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
+        Transform::from_xyz(0.0, 80.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
         PlayerCamera,
     ));
 
@@ -186,7 +188,10 @@ fn setup_3d(mut commands: Commands) {
     // HUD - ship info (top-left)
     commands.spawn((
         Text::new("Connecting to SpacetimeDB..."),
-        TextFont { font_size: 14.0, ..default() },
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
         TextColor(Color::WHITE),
         Node {
             position_type: PositionType::Absolute,
@@ -200,7 +205,10 @@ fn setup_3d(mut commands: Commands) {
     // HUD - needs bars (bottom-left)
     commands.spawn((
         Text::new(""),
-        TextFont { font_size: 13.0, ..default() },
+        TextFont {
+            font_size: 13.0,
+            ..default()
+        },
         TextColor(Color::srgb(0.8, 1.0, 0.8)),
         Node {
             position_type: PositionType::Absolute,
@@ -214,7 +222,10 @@ fn setup_3d(mut commands: Commands) {
     // Info panel (right side — room info, selected NPC, or ship overview)
     commands.spawn((
         Text::new(""),
-        TextFont { font_size: 12.0, ..default() },
+        TextFont {
+            font_size: 12.0,
+            ..default()
+        },
         TextColor(Color::srgb(0.9, 0.9, 0.8)),
         Node {
             position_type: PositionType::Absolute,
@@ -229,7 +240,10 @@ fn setup_3d(mut commands: Commands) {
     // Toast container (top-center)
     commands.spawn((
         Text::new(""),
-        TextFont { font_size: 14.0, ..default() },
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
         TextColor(Color::srgb(1.0, 0.9, 0.3)),
         Node {
             position_type: PositionType::Absolute,
@@ -261,33 +275,34 @@ fn connect_to_server(mut state: ResMut<ConnectionState>) {
     {
         Ok(conn) => {
             info!("Connected! Subscribing to tables...");
-            conn.subscription_builder()
-                .subscribe(["SELECT * FROM ship_config",
-                           "SELECT * FROM room",
-                           "SELECT * FROM door",
-                           "SELECT * FROM corridor",
-                           "SELECT * FROM vertical_shaft",
-                           "SELECT * FROM graph_node",
-                           "SELECT * FROM graph_edge",
-                           "SELECT * FROM person",
-                           "SELECT * FROM position",
-                           "SELECT * FROM needs",
-                           "SELECT * FROM activity",
-                           "SELECT * FROM crew",
-                           "SELECT * FROM passenger",
-                           "SELECT * FROM deck_atmosphere",
-                           "SELECT * FROM ship_system",
-                           "SELECT * FROM subsystem",
-                           "SELECT * FROM system_component",
-                           "SELECT * FROM infra_edge",
-                           "SELECT * FROM ship_resources",
-                           "SELECT * FROM conversation",
-                           "SELECT * FROM in_conversation",
-                           "SELECT * FROM relationship",
-                           "SELECT * FROM event",
-                           "SELECT * FROM movement",
-                           "SELECT * FROM maintenance_task",
-                           "SELECT * FROM connected_player"]);
+            conn.subscription_builder().subscribe([
+                "SELECT * FROM ship_config",
+                "SELECT * FROM room",
+                "SELECT * FROM door",
+                "SELECT * FROM corridor",
+                "SELECT * FROM vertical_shaft",
+                "SELECT * FROM graph_node",
+                "SELECT * FROM graph_edge",
+                "SELECT * FROM person",
+                "SELECT * FROM position",
+                "SELECT * FROM needs",
+                "SELECT * FROM activity",
+                "SELECT * FROM crew",
+                "SELECT * FROM passenger",
+                "SELECT * FROM deck_atmosphere",
+                "SELECT * FROM ship_system",
+                "SELECT * FROM subsystem",
+                "SELECT * FROM system_component",
+                "SELECT * FROM infra_edge",
+                "SELECT * FROM ship_resources",
+                "SELECT * FROM conversation",
+                "SELECT * FROM in_conversation",
+                "SELECT * FROM relationship",
+                "SELECT * FROM event",
+                "SELECT * FROM movement",
+                "SELECT * FROM maintenance_task",
+                "SELECT * FROM connected_player",
+            ]);
             *state = ConnectionState::Connected(conn);
         }
         Err(e) => {
@@ -312,19 +327,20 @@ fn process_messages(mut state: ResMut<ConnectionState>) {
 // AUTO-JOIN
 // ============================================================================
 
-fn auto_join_game(
-    state: Res<ConnectionState>,
-    mut player: ResMut<PlayerState>,
-) {
+fn auto_join_game(state: Res<ConnectionState>, mut player: ResMut<PlayerState>) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         _ => return,
     };
-    let Some(_config) = conn.db.ship_config().id().find(&0) else { return };
+    let Some(_config) = conn.db.ship_config().id().find(&0) else {
+        return;
+    };
 
     if !player.joined {
         info!("Subscription applied, joining game...");
-        let _ = conn.reducers().player_join("Player".into(), "One".into(), true);
+        let _ = conn
+            .reducers()
+            .player_join("Player".into(), "One".into(), true);
         player.joined = true;
     }
 
@@ -363,23 +379,46 @@ fn player_input(
     let speed = 15.0 * time.delta_secs();
     let mut dx = 0.0f32;
     let mut dy = 0.0f32;
-    if keyboard.pressed(KeyCode::KeyW) { dy -= speed; }
-    if keyboard.pressed(KeyCode::KeyS) { dy += speed; }
-    if keyboard.pressed(KeyCode::KeyA) { dx += speed; }
-    if keyboard.pressed(KeyCode::KeyD) { dx -= speed; }
+    if keyboard.pressed(KeyCode::KeyW) {
+        dy -= speed;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        dy += speed;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        dx += speed;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        dx -= speed;
+    }
 
     // Arrow keys for movement ONLY if not in a ladder shaft
-    let in_ladder_shaft = player.person_id.and_then(|pid| {
-        conn.db.position().person_id().find(&pid).and_then(|pos| {
-            conn.db.room().id().find(&pos.room_id).map(|r| r.room_type == 111)
+    let in_ladder_shaft = player
+        .person_id
+        .and_then(|pid| {
+            conn.db.position().person_id().find(&pid).and_then(|pos| {
+                conn.db
+                    .room()
+                    .id()
+                    .find(&pos.room_id)
+                    .map(|r| r.room_type == 111)
+            })
         })
-    }).unwrap_or(false);
+        .unwrap_or(false);
 
     if !in_ladder_shaft {
-        if keyboard.pressed(KeyCode::ArrowUp) { dy -= speed; }
-        if keyboard.pressed(KeyCode::ArrowDown) { dy += speed; }
-        if keyboard.pressed(KeyCode::ArrowLeft) { dx += speed; }
-        if keyboard.pressed(KeyCode::ArrowRight) { dx -= speed; }
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            dy -= speed;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            dy += speed;
+        }
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            dx += speed;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            dx -= speed;
+        }
     }
 
     player.pending_dx += dx;
@@ -388,7 +427,9 @@ fn player_input(
     // Send movement to server at ~20Hz (every 50ms) instead of every frame
     player.move_send_timer += time.delta_secs();
     if player.move_send_timer >= 0.05 && (player.pending_dx != 0.0 || player.pending_dy != 0.0) {
-        let _ = conn.reducers().player_move(player.pending_dx, player.pending_dy);
+        let _ = conn
+            .reducers()
+            .player_move(player.pending_dx, player.pending_dy);
         player.pending_dx = 0.0;
         player.pending_dy = 0.0;
         player.move_send_timer = 0.0;
@@ -400,8 +441,12 @@ fn player_input(
             if let Some(my_pos) = conn.db.position().person_id().find(&pid) {
                 let mut closest: Option<(u64, f32)> = None;
                 for pos in conn.db.position().iter() {
-                    if pos.person_id == pid { continue; }
-                    if pos.room_id != my_pos.room_id { continue; }
+                    if pos.person_id == pid {
+                        continue;
+                    }
+                    if pos.room_id != my_pos.room_id {
+                        continue;
+                    }
                     let dist = ((pos.x - my_pos.x).powi(2) + (pos.y - my_pos.y).powi(2)).sqrt();
                     if dist < 15.0 {
                         if closest.is_none() || dist < closest.unwrap().1 {
@@ -423,15 +468,22 @@ fn player_input(
             if let Some(pos) = conn.db.position().person_id().find(&pid) {
                 if let Some(room) = conn.db.room().id().find(&pos.room_id) {
                     let action = match room.room_type {
-                        9 | 10 => 2,   // Mess/Galley → eat
-                        5..=8 => {     // Quarters → sleep or hygiene
+                        9 | 10 => 2, // Mess/Galley → eat
+                        5..=8 => {
+                            // Quarters → sleep or hygiene
                             if let Some(needs) = conn.db.needs().person_id().find(&pid) {
-                                if needs.hygiene > needs.fatigue { 6 } else { 3 }
-                            } else { 3 }
+                                if needs.hygiene > needs.fatigue {
+                                    6
+                                } else {
+                                    3
+                                }
+                            } else {
+                                3
+                            }
                         }
                         2 | 3 | 4 | 21..=23 => 8, // Engineering rooms → repair
-                        12 | 13 => 12, // Recreation/Gym → exercise
-                        _ => 255,      // Invalid — server will reject
+                        12 | 13 => 12,            // Recreation/Gym → exercise
+                        _ => 255,                 // Invalid — server will reject
                     };
                     if action != 255 {
                         let _ = conn.reducers().player_action(action);
@@ -458,11 +510,15 @@ fn player_input(
     if let Some(pid) = player.person_id {
         if let Some(pos) = conn.db.position().person_id().find(&pid) {
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
-                if room.room_type == 110 { // ELEVATOR_SHAFT
+                if room.room_type == 110 {
+                    // ELEVATOR_SHAFT
                     for (key, deck) in [
-                        (KeyCode::Digit1, 0i32), (KeyCode::Digit2, 1),
-                        (KeyCode::Digit3, 2), (KeyCode::Digit4, 3),
-                        (KeyCode::Digit5, 4), (KeyCode::Digit6, 5),
+                        (KeyCode::Digit1, 0i32),
+                        (KeyCode::Digit2, 1),
+                        (KeyCode::Digit3, 2),
+                        (KeyCode::Digit4, 3),
+                        (KeyCode::Digit5, 4),
+                        (KeyCode::Digit6, 5),
                     ] {
                         if keyboard.just_pressed(key) && deck != room.deck {
                             let _ = conn.reducers().player_use_elevator(deck);
@@ -473,7 +529,8 @@ fn player_input(
                             });
                         }
                     }
-                } else if room.room_type == 111 { // LADDER_SHAFT
+                } else if room.room_type == 111 {
+                    // LADDER_SHAFT
                     if keyboard.just_pressed(KeyCode::ArrowUp) {
                         let _ = conn.reducers().player_use_ladder(-1);
                         ui.toasts.push(Toast {
@@ -509,8 +566,12 @@ fn player_input(
             if let Some(my_pos) = conn.db.position().person_id().find(&pid) {
                 let mut closest: Option<(u64, f32)> = None;
                 for pos in conn.db.position().iter() {
-                    if pos.person_id == pid { continue; }
-                    if pos.room_id != my_pos.room_id { continue; }
+                    if pos.person_id == pid {
+                        continue;
+                    }
+                    if pos.room_id != my_pos.room_id {
+                        continue;
+                    }
                     let dist = ((pos.x - my_pos.x).powi(2) + (pos.y - my_pos.y).powi(2)).sqrt();
                     if dist < 20.0 && (closest.is_none() || dist < closest.unwrap().1) {
                         closest = Some((pos.person_id, dist));
@@ -539,20 +600,35 @@ fn player_input(
 
     // Pause
     if keyboard.just_pressed(KeyCode::Space) {
-        let paused = conn.db.ship_config().id().find(&0)
-            .map(|c| c.paused).unwrap_or(false);
+        let paused = conn
+            .db
+            .ship_config()
+            .id()
+            .find(&0)
+            .map(|c| c.paused)
+            .unwrap_or(false);
         let _ = conn.reducers().set_paused(!paused);
     }
 
     // Time scale
     if keyboard.just_pressed(KeyCode::BracketRight) {
-        let scale = conn.db.ship_config().id().find(&0)
-            .map(|c| c.time_scale).unwrap_or(1.0);
+        let scale = conn
+            .db
+            .ship_config()
+            .id()
+            .find(&0)
+            .map(|c| c.time_scale)
+            .unwrap_or(1.0);
         let _ = conn.reducers().set_time_scale((scale * 2.0).min(100.0));
     }
     if keyboard.just_pressed(KeyCode::BracketLeft) {
-        let scale = conn.db.ship_config().id().find(&0)
-            .map(|c| c.time_scale).unwrap_or(1.0);
+        let scale = conn
+            .db
+            .ship_config()
+            .id()
+            .find(&0)
+            .map(|c| c.time_scale)
+            .unwrap_or(1.0);
         let _ = conn.reducers().set_time_scale((scale / 2.0).max(0.25));
     }
 
@@ -579,7 +655,10 @@ fn player_input(
 
     // Tick toast timers
     let dt = time.delta_secs();
-    ui.toasts.retain_mut(|t| { t.timer -= dt; t.timer > 0.0 });
+    ui.toasts.retain_mut(|t| {
+        t.timer -= dt;
+        t.timer > 0.0
+    });
 }
 
 // ============================================================================
@@ -596,9 +675,13 @@ fn camera_follow_player(
         ConnectionState::Connected(c) => c,
         _ => return,
     };
-    let Ok(mut cam_tf) = camera_q.get_single_mut() else { return };
+    let Ok(mut cam_tf) = camera_q.get_single_mut() else {
+        return;
+    };
     let Some(pid) = player.person_id else { return };
-    let Some(pos) = conn.db.position().person_id().find(&pid) else { return };
+    let Some(pos) = conn.db.position().person_id().find(&pid) else {
+        return;
+    };
 
     // Smooth camera follow — only move position, keep fixed top-down rotation
     let target = Vec3::new(pos.x, view.camera_height, -pos.y);
@@ -633,7 +716,9 @@ fn sync_rooms(
     let all_rooms: Vec<_> = conn.db.room().iter().collect();
 
     for room in conn.db.room().iter() {
-        if room.deck != view.current_deck { continue; }
+        if room.deck != view.current_deck {
+            continue;
+        }
 
         let color = room_color(room.room_type);
         let w = room.width;
@@ -649,7 +734,10 @@ fn sync_rooms(
                 ..default()
             })),
             Transform::from_xyz(room.x, 0.0, -room.y),
-            RoomEntity { room_id: room.id, deck: room.deck },
+            RoomEntity {
+                room_id: room.id,
+                deck: room.deck,
+            },
         ));
 
         let wall_color = color.with_luminance(0.3);
@@ -659,19 +747,23 @@ fn sync_rooms(
         // wall: NORTH=0, SOUTH=1, EAST=2, WEST=3
         let mut north_doors: Vec<(f32, f32)> = Vec::new(); // (world_x, door_width)
         let mut south_doors: Vec<(f32, f32)> = Vec::new();
-        let mut east_doors: Vec<(f32, f32)> = Vec::new();  // (world_y, door_width)
+        let mut east_doors: Vec<(f32, f32)> = Vec::new(); // (world_y, door_width)
         let mut west_doors: Vec<(f32, f32)> = Vec::new();
 
         for door in &doors {
             // Skip doors not connected to this room
             let is_a = door.room_a == room.id;
             let is_b = door.room_b == room.id;
-            if !is_a && !is_b { continue; }
+            if !is_a && !is_b {
+                continue;
+            }
 
             // Skip cross-deck doors (elevator/ladder connections)
             let other_id = if is_a { door.room_b } else { door.room_a };
             if let Some(other_room) = all_rooms.iter().find(|r| r.id == other_id) {
-                if other_room.deck != room.deck { continue; }
+                if other_room.deck != room.deck {
+                    continue;
+                }
             }
 
             // Which wall of THIS room is the door on?
@@ -683,12 +775,22 @@ fn sync_rooms(
 
             // Place the gap on THIS room's wall at the door's world position
             match wall {
-                0 | 1 => { // NORTH or SOUTH: door position is along X axis
-                    let list = if wall == 0 { &mut north_doors } else { &mut south_doors };
+                0 | 1 => {
+                    // NORTH or SOUTH: door position is along X axis
+                    let list = if wall == 0 {
+                        &mut north_doors
+                    } else {
+                        &mut south_doors
+                    };
                     list.push((door_world_x, door.width));
                 }
-                2 | 3 => { // EAST or WEST: door position is along Y axis
-                    let list = if wall == 2 { &mut east_doors } else { &mut west_doors };
+                2 | 3 => {
+                    // EAST or WEST: door position is along Y axis
+                    let list = if wall == 2 {
+                        &mut east_doors
+                    } else {
+                        &mut west_doors
+                    };
                     list.push((door_world_y, door.width));
                 }
                 _ => {}
@@ -698,85 +800,184 @@ fn sync_rooms(
         // North wall (NORTH = low Y = fore; in 3D: z = -(room.y - h/2) = less negative z)
         let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(&mut commands, &mut meshes, &mut materials, wall_color,
-            room.x, -(room.y - h / 2.0), w, wall_height, wall_thickness,
-            true, &north_pos, room.x, &north_widths, room.id, room.deck);
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            room.x,
+            -(room.y - h / 2.0),
+            w,
+            wall_height,
+            wall_thickness,
+            true,
+            &north_pos,
+            room.x,
+            &north_widths,
+            room.id,
+            room.deck,
+        );
         // South wall (SOUTH = high Y = aft; in 3D: z = -(room.y + h/2) = more negative z)
         let south_pos: Vec<f32> = south_doors.iter().map(|d| d.0).collect();
         let south_widths: Vec<f32> = south_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(&mut commands, &mut meshes, &mut materials, wall_color,
-            room.x, -(room.y + h / 2.0), w, wall_height, wall_thickness,
-            true, &south_pos, room.x, &south_widths, room.id, room.deck);
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            room.x,
+            -(room.y + h / 2.0),
+            w,
+            wall_height,
+            wall_thickness,
+            true,
+            &south_pos,
+            room.x,
+            &south_widths,
+            room.id,
+            room.deck,
+        );
         // East wall (vertical, at x = room.x + w/2)
         let east_pos: Vec<f32> = east_doors.iter().map(|d| d.0).collect();
         let east_widths: Vec<f32> = east_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(&mut commands, &mut meshes, &mut materials, wall_color,
-            room.x + w / 2.0, -room.y, h, wall_height, wall_thickness,
-            false, &east_pos, room.y, &east_widths, room.id, room.deck);
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            room.x + w / 2.0,
+            -room.y,
+            h,
+            wall_height,
+            wall_thickness,
+            false,
+            &east_pos,
+            room.y,
+            &east_widths,
+            room.id,
+            room.deck,
+        );
         // West wall (vertical, at x = room.x - w/2)
         let west_pos: Vec<f32> = west_doors.iter().map(|d| d.0).collect();
         let west_widths: Vec<f32> = west_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(&mut commands, &mut meshes, &mut materials, wall_color,
-            room.x - w / 2.0, -room.y, h, wall_height, wall_thickness,
-            false, &west_pos, room.y, &west_widths, room.id, room.deck);
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            room.x - w / 2.0,
+            -room.y,
+            h,
+            wall_height,
+            wall_thickness,
+            false,
+            &west_pos,
+            room.y,
+            &west_widths,
+            room.id,
+            room.deck,
+        );
 
         // Door frame markers (gold pillars at each side of door gaps)
         let door_color = Color::srgb(0.8, 0.7, 0.2);
-        let door_mat = materials.add(StandardMaterial { base_color: door_color, ..default() });
+        let door_mat = materials.add(StandardMaterial {
+            base_color: door_color,
+            ..default()
+        });
         let pillar_mesh = meshes.add(Cuboid::new(0.2, wall_height + 0.5, 0.2));
 
         // East/West doors: pillars along Z axis
         for &(dy, dw) in east_doors.iter() {
             let door_world_x = room.x + w / 2.0;
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
         }
         for &(dy, dw) in west_doors.iter() {
             let door_world_x = room.x - w / 2.0;
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
         }
         // North/South doors: pillars along X axis
         for &(dx, dw) in north_doors.iter() {
             let door_world_z = -(room.y - h / 2.0); // NORTH = low Y
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
         }
         for &(dx, dw) in south_doors.iter() {
             let door_world_z = -(room.y + h / 2.0); // SOUTH = high Y
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()), MeshMaterial3d(door_mat.clone()),
+                Mesh3d(pillar_mesh.clone()),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker, RoomEntity { room_id: room.id, deck: room.deck },
+                DoorMarker,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
             ));
         }
     }
@@ -787,9 +988,9 @@ fn sync_rooms(
     // Render vertical shafts (elevators/ladders)
     for shaft in conn.db.vertical_shaft().iter() {
         let color = if shaft.shaft_type == 0 {
-            Color::srgb(0.35, 0.35, 0.4)  // Elevator
+            Color::srgb(0.35, 0.35, 0.4) // Elevator
         } else {
-            Color::srgb(0.3, 0.3, 0.35)   // Ladder
+            Color::srgb(0.3, 0.3, 0.35) // Ladder
         };
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(shaft.width, 0.25, shaft.height))),
@@ -798,7 +999,10 @@ fn sync_rooms(
                 ..default()
             })),
             Transform::from_xyz(shaft.x, 0.0, -shaft.y),
-            RoomEntity { room_id: u32::MAX, deck: view.current_deck },
+            RoomEntity {
+                room_id: u32::MAX,
+                deck: view.current_deck,
+            },
         ));
     }
 }
@@ -809,15 +1013,22 @@ fn spawn_wall_with_gaps(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     color: Color,
-    wall_x: f32, wall_z: f32,  // 3D position of wall center
-    wall_length: f32, wall_height: f32, wall_thickness: f32,
-    horizontal: bool,           // true = runs along X, false = runs along Z
-    door_positions: &[f32],     // door world positions along the wall axis
-    room_center: f32,           // room center along the wall axis (for converting door pos)
-    door_widths: &[f32],        // per-door widths
-    room_id: u32, deck: i32,
+    wall_x: f32,
+    wall_z: f32, // 3D position of wall center
+    wall_length: f32,
+    wall_height: f32,
+    wall_thickness: f32,
+    horizontal: bool,       // true = runs along X, false = runs along Z
+    door_positions: &[f32], // door world positions along the wall axis
+    room_center: f32,       // room center along the wall axis (for converting door pos)
+    door_widths: &[f32],    // per-door widths
+    room_id: u32,
+    deck: i32,
 ) {
-    let mat = materials.add(StandardMaterial { base_color: color, ..default() });
+    let mat = materials.add(StandardMaterial {
+        base_color: color,
+        ..default()
+    });
 
     if door_positions.is_empty() {
         // No doors — solid wall
@@ -841,10 +1052,18 @@ fn spawn_wall_with_gaps(
 
     // Build wall segments around door gaps
     // Convert door positions to offsets along the wall
-    let mut gaps: Vec<(f32, f32)> = door_positions.iter().zip(door_widths.iter()).map(|(&dp, &dw)| {
-        let offset = if horizontal { dp - room_center } else { -(dp - room_center) };
-        (offset - dw / 2.0, offset + dw / 2.0)
-    }).collect();
+    let mut gaps: Vec<(f32, f32)> = door_positions
+        .iter()
+        .zip(door_widths.iter())
+        .map(|(&dp, &dw)| {
+            let offset = if horizontal {
+                dp - room_center
+            } else {
+                -(dp - room_center)
+            };
+            (offset - dw / 2.0, offset + dw / 2.0)
+        })
+        .collect();
     gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     let half_len = wall_length / 2.0;
@@ -953,22 +1172,32 @@ fn sync_people(
     let indicator_mesh = meshes.add(Sphere::new(0.2));
 
     for pos in conn.db.position().iter() {
-        let Some(room) = conn.db.room().id().find(&pos.room_id) else { continue };
-        if room.deck != view.current_deck { continue; }
+        let Some(room) = conn.db.room().id().find(&pos.room_id) else {
+            continue;
+        };
+        if room.deck != view.current_deck {
+            continue;
+        }
 
         let is_player = Some(pos.person_id) == player.person_id;
 
         // Skip spawning player if entity already exists (it persists across rebuilds)
-        if is_player && existing_player_entity.is_some() { continue; }
+        if is_player && existing_player_entity.is_some() {
+            continue;
+        }
 
         let person = conn.db.person().id().find(&pos.person_id);
         let is_crew = person.as_ref().map(|p| p.is_crew).unwrap_or(false);
         let is_selected = ui.selected_person == Some(pos.person_id);
 
         // Color: bright green for player, blue for crew, yellow for passengers
-        let base_color = if is_player { Color::srgb(0.0, 1.0, 0.2) }
-                    else if is_crew { Color::srgb(0.3, 0.5, 1.0) }
-                    else { Color::srgb(0.9, 0.8, 0.3) };
+        let base_color = if is_player {
+            Color::srgb(0.0, 1.0, 0.2)
+        } else if is_crew {
+            Color::srgb(0.3, 0.5, 1.0)
+        } else {
+            Color::srgb(0.9, 0.8, 0.3)
+        };
 
         // Health-based tinting
         let needs = conn.db.needs().person_id().find(&pos.person_id);
@@ -989,9 +1218,14 @@ fn sync_people(
                 base_color: final_color,
                 ..default()
             })),
-            Transform::from_xyz(pos.x, person_height, -pos.y)
-                .with_scale(Vec3::new(1.0, if is_player { 1.2 } else { 1.0 }, 1.0)),
-            PersonEntity { person_id: pos.person_id },
+            Transform::from_xyz(pos.x, person_height, -pos.y).with_scale(Vec3::new(
+                1.0,
+                if is_player { 1.2 } else { 1.0 },
+                1.0,
+            )),
+            PersonEntity {
+                person_id: pos.person_id,
+            },
         ));
 
         // Activity indicator (small sphere above head)
@@ -1005,12 +1239,20 @@ fn sync_people(
                     ..default()
                 })),
                 Transform::from_xyz(pos.x, person_height * 2.0 + 0.8, -pos.y),
-                PersonEntity { person_id: pos.person_id },
+                PersonEntity {
+                    person_id: pos.person_id,
+                },
             ));
         }
 
         // Conversation bubble (flat disc above the activity indicator)
-        if conn.db.in_conversation().person_id().find(&pos.person_id).is_some() {
+        if conn
+            .db
+            .in_conversation()
+            .person_id()
+            .find(&pos.person_id)
+            .is_some()
+        {
             commands.spawn((
                 Mesh3d(meshes.add(Sphere::new(0.3))),
                 MeshMaterial3d(materials.add(StandardMaterial {
@@ -1019,7 +1261,9 @@ fn sync_people(
                     ..default()
                 })),
                 Transform::from_xyz(pos.x + 0.5, person_height * 2.0 + 1.5, -pos.y),
-                PersonEntity { person_id: pos.person_id },
+                PersonEntity {
+                    person_id: pos.person_id,
+                },
             ));
         }
     }
@@ -1027,26 +1271,26 @@ fn sync_people(
 
 fn room_color(room_type: u8) -> Color {
     match room_type {
-        0 => Color::srgb(0.15, 0.2, 0.5),   // Bridge - dark blue
-        1 => Color::srgb(0.25, 0.25, 0.4),  // Conference
-        2 => Color::srgb(0.45, 0.25, 0.15), // Engineering - brown
-        3 => Color::srgb(0.5, 0.15, 0.1),   // Reactor - dark red
-        4 => Color::srgb(0.35, 0.3, 0.2),   // Maintenance - tan
-        5..=8 => Color::srgb(0.25, 0.35, 0.25), // Quarters - green
-        9 => Color::srgb(0.5, 0.4, 0.15),   // Mess - warm yellow
-        10 => Color::srgb(0.4, 0.35, 0.15), // Galley
-        11 => Color::srgb(0.6, 0.6, 0.7),   // Medical - light blue
-        12 => Color::srgb(0.25, 0.4, 0.35), // Recreation - teal
-        13 => Color::srgb(0.35, 0.4, 0.25), // Gym
+        0 => Color::srgb(0.15, 0.2, 0.5),         // Bridge - dark blue
+        1 => Color::srgb(0.25, 0.25, 0.4),        // Conference
+        2 => Color::srgb(0.45, 0.25, 0.15),       // Engineering - brown
+        3 => Color::srgb(0.5, 0.15, 0.1),         // Reactor - dark red
+        4 => Color::srgb(0.35, 0.3, 0.2),         // Maintenance - tan
+        5..=8 => Color::srgb(0.25, 0.35, 0.25),   // Quarters - green
+        9 => Color::srgb(0.5, 0.4, 0.15),         // Mess - warm yellow
+        10 => Color::srgb(0.4, 0.35, 0.15),       // Galley
+        11 => Color::srgb(0.6, 0.6, 0.7),         // Medical - light blue
+        12 => Color::srgb(0.25, 0.4, 0.35),       // Recreation - teal
+        13 => Color::srgb(0.35, 0.4, 0.25),       // Gym
         14..=15 => Color::srgb(0.25, 0.25, 0.25), // Cargo/Storage - gray
-        16 => Color::srgb(0.5, 0.1, 0.1),   // Airlock - red
-        17 => Color::srgb(0.2, 0.2, 0.25),  // Corridor - dark gray
-        18 => Color::srgb(0.35, 0.35, 0.4), // Elevator
-        19 => Color::srgb(0.25, 0.35, 0.5), // Laboratory - blue
-        20 => Color::srgb(0.15, 0.25, 0.4), // Observatory
-        21 => Color::srgb(0.25, 0.4, 0.5),  // Life Support - cyan
-        22 => Color::srgb(0.15, 0.5, 0.15), // Hydroponics - green
-        23 => Color::srgb(0.15, 0.3, 0.5),  // Water Recycling - blue
+        16 => Color::srgb(0.5, 0.1, 0.1),         // Airlock - red
+        17 => Color::srgb(0.2, 0.2, 0.25),        // Corridor - dark gray
+        18 => Color::srgb(0.35, 0.35, 0.4),       // Elevator
+        19 => Color::srgb(0.25, 0.35, 0.5),       // Laboratory - blue
+        20 => Color::srgb(0.15, 0.25, 0.4),       // Observatory
+        21 => Color::srgb(0.25, 0.4, 0.5),        // Life Support - cyan
+        22 => Color::srgb(0.15, 0.5, 0.15),       // Hydroponics - green
+        23 => Color::srgb(0.15, 0.3, 0.5),        // Water Recycling - blue
         _ => Color::srgb(0.25, 0.25, 0.25),
     }
 }
@@ -1059,8 +1303,24 @@ fn render_hud(
     state: Res<ConnectionState>,
     view: Res<ViewState>,
     player: Res<PlayerState>,
-    mut hud_q: Query<&mut Text, (With<HudText>, Without<NeedsBar>, Without<InfoPanel>, Without<ToastContainer>)>,
-    mut needs_q: Query<&mut Text, (With<NeedsBar>, Without<HudText>, Without<InfoPanel>, Without<ToastContainer>)>,
+    mut hud_q: Query<
+        &mut Text,
+        (
+            With<HudText>,
+            Without<NeedsBar>,
+            Without<InfoPanel>,
+            Without<ToastContainer>,
+        ),
+    >,
+    mut needs_q: Query<
+        &mut Text,
+        (
+            With<NeedsBar>,
+            Without<HudText>,
+            Without<InfoPanel>,
+            Without<ToastContainer>,
+        ),
+    >,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
@@ -1091,27 +1351,43 @@ fn render_hud(
         let pause_str = if paused { " [PAUSED]" } else { "" };
         let event_str = if !active_events.is_empty() {
             format!(" | {} EVENTS", active_events.len())
-        } else { String::new() };
+        } else {
+            String::new()
+        };
 
         // Get player's current room and context action
-        let (room_name, context_hint) = player.person_id
+        let (room_name, context_hint) = player
+            .person_id
             .and_then(|pid| conn.db.position().person_id().find(&pid))
             .and_then(|pos| conn.db.room().id().find(&pos.room_id))
             .map(|r| (r.name.clone(), context_action_hint(r.room_type)))
             .unwrap_or_default();
 
         // Get player activity
-        let activity_str = player.person_id
+        let activity_str = player
+            .person_id
             .and_then(|pid| conn.db.activity().person_id().find(&pid))
             .map(|a| format!(" ({})", activity_name(a.activity_type)))
             .unwrap_or_default();
 
         // Atmosphere info for current deck
-        let atmo_str = conn.db.deck_atmosphere().deck().find(&view.current_deck)
+        let atmo_str = conn
+            .db
+            .deck_atmosphere()
+            .deck()
+            .find(&view.current_deck)
             .map(|a| {
                 let o2_pct = a.oxygen * 100.0;
                 let temp = a.temperature;
-                let warn = if o2_pct < 19.0 { " LOW O2!" } else if temp > 30.0 { " HOT!" } else if temp < 15.0 { " COLD!" } else { "" };
+                let warn = if o2_pct < 19.0 {
+                    " LOW O2!"
+                } else if temp > 30.0 {
+                    " HOT!"
+                } else if temp < 15.0 {
+                    " COLD!"
+                } else {
+                    ""
+                };
                 format!("O2:{:.0}% {:.0}C{}", o2_pct, temp, warn)
             })
             .unwrap_or_default();
@@ -1121,9 +1397,19 @@ fn render_hud(
              Deck {} | {} | {} aboard | {}\n\
              {}{}\n\
              [WASD] Move [E] Talk [F]{} [Q] Inspect [Tab] Overview [Space] Pause",
-            ship_name, day, h, m, pause_str, time_scale, event_str,
-            view.current_deck + 1, room_name, person_count, atmo_str,
-            activity_str, if activity_str.is_empty() { "" } else { "" },
+            ship_name,
+            day,
+            h,
+            m,
+            pause_str,
+            time_scale,
+            event_str,
+            view.current_deck + 1,
+            room_name,
+            person_count,
+            atmo_str,
+            activity_str,
+            if activity_str.is_empty() { "" } else { "" },
             context_hint,
         );
     }
@@ -1137,14 +1423,30 @@ fn render_hud(
                     let filled = (display * 10.0) as usize;
                     let empty = 10 - filled.min(10);
                     let status = if invert {
-                        if val > 0.7 { "!!" } else if val > 0.4 { "!" } else { "" }
+                        if val > 0.7 {
+                            "!!"
+                        } else if val > 0.4 {
+                            "!"
+                        } else {
+                            ""
+                        }
                     } else {
-                        if val < 0.3 { "!!" } else if val < 0.6 { "!" } else { "" }
+                        if val < 0.3 {
+                            "!!"
+                        } else if val < 0.6 {
+                            "!"
+                        } else {
+                            ""
+                        }
                     };
-                    format!("{}: [{}{}] {:.0}%{}", label,
+                    format!(
+                        "{}: [{}{}] {:.0}%{}",
+                        label,
                         "#".repeat(filled.min(10)),
                         "-".repeat(empty),
-                        display * 100.0, status)
+                        display * 100.0,
+                        status
+                    )
                 };
 
                 **text = format!(
@@ -1173,13 +1475,23 @@ fn render_info_panel(
     view: Res<ViewState>,
     player: Res<PlayerState>,
     ui: Res<UiState>,
-    mut panel_q: Query<&mut Text, (With<InfoPanel>, Without<HudText>, Without<NeedsBar>, Without<ToastContainer>)>,
+    mut panel_q: Query<
+        &mut Text,
+        (
+            With<InfoPanel>,
+            Without<HudText>,
+            Without<NeedsBar>,
+            Without<ToastContainer>,
+        ),
+    >,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         _ => return,
     };
-    let Ok(mut text) = panel_q.get_single_mut() else { return };
+    let Ok(mut text) = panel_q.get_single_mut() else {
+        return;
+    };
 
     if ui.show_ship_overview {
         // Ship overview (Tab)
@@ -1202,18 +1514,29 @@ fn render_info_panel(
             overview += &format!("Water: {:.0}/{:.0}\n", res.water, res.water_cap);
             overview += &format!("O2:    {:.0}/{:.0}\n", res.oxygen, res.oxygen_cap);
             overview += &format!("Fuel:  {:.0}/{:.0}\n", res.fuel, res.fuel_cap);
-            overview += &format!("Parts: {:.0}/{:.0}\n\n", res.spare_parts, res.spare_parts_cap);
+            overview += &format!(
+                "Parts: {:.0}/{:.0}\n\n",
+                res.spare_parts, res.spare_parts_cap
+            );
         }
 
         // Systems
         let systems: Vec<_> = conn.db.ship_system().iter().collect();
         let degraded: Vec<_> = systems.iter().filter(|s| s.overall_health < 0.9).collect();
         if !degraded.is_empty() {
-            overview += &format!("--- Systems ({} issue{}) ---\n",
-                degraded.len(), if degraded.len() > 1 { "s" } else { "" });
+            overview += &format!(
+                "--- Systems ({} issue{}) ---\n",
+                degraded.len(),
+                if degraded.len() > 1 { "s" } else { "" }
+            );
             for sys in degraded.iter().take(5) {
                 let status = system_status_str(sys.overall_status);
-                overview += &format!("{}: {:.0}% [{}]\n", sys.name, sys.overall_health * 100.0, status);
+                overview += &format!(
+                    "{}: {:.0}% [{}]\n",
+                    sys.name,
+                    sys.overall_health * 100.0,
+                    status
+                );
             }
             overview += "\n";
         }
@@ -1223,9 +1546,19 @@ fn render_info_panel(
             overview += &format!("--- Events ({}) ---\n", active_events.len());
             for evt in active_events.iter().take(5) {
                 let etype = event_type_name(evt.event_type);
-                let room_name = conn.db.room().id().find(&evt.room_id)
-                    .map(|r| r.name.clone()).unwrap_or("?".into());
-                overview += &format!("{} in {} [{:.0}%]\n", etype, room_name, evt.severity * 100.0);
+                let room_name = conn
+                    .db
+                    .room()
+                    .id()
+                    .find(&evt.room_id)
+                    .map(|r| r.name.clone())
+                    .unwrap_or("?".into());
+                overview += &format!(
+                    "{} in {} [{:.0}%]\n",
+                    etype,
+                    room_name,
+                    evt.severity * 100.0
+                );
             }
             overview += "\n";
         }
@@ -1235,8 +1568,14 @@ fn render_info_panel(
         for deck_idx in 0..6 {
             if let Some(atmo) = conn.db.deck_atmosphere().deck().find(&deck_idx) {
                 let warn = if atmo.oxygen < 0.19 { " !" } else { "" };
-                overview += &format!("Dk{}: O2:{:.0}% {:.0}C {:.0}kPa{}\n",
-                    deck_idx + 1, atmo.oxygen * 100.0, atmo.temperature, atmo.pressure, warn);
+                overview += &format!(
+                    "Dk{}: O2:{:.0}% {:.0}C {:.0}kPa{}\n",
+                    deck_idx + 1,
+                    atmo.oxygen * 100.0,
+                    atmo.temperature,
+                    atmo.pressure,
+                    warn
+                );
             }
         }
 
@@ -1255,20 +1594,37 @@ fn render_info_panel(
         info += if person.is_crew { "Crew" } else { "Passenger" };
 
         if let Some(crew) = conn.db.crew().person_id().find(&selected_id) {
-            info += &format!("\n{} - {}\nShift: {}\n",
+            info += &format!(
+                "\n{} - {}\nShift: {}\n",
                 department_name(crew.department),
                 rank_name(crew.rank),
-                shift_name(crew.shift));
+                shift_name(crew.shift)
+            );
         }
         if let Some(passenger) = conn.db.passenger().person_id().find(&selected_id) {
-            info += &format!("\n{}\nDest: {}\n", passenger.profession, passenger.destination);
+            info += &format!(
+                "\n{}\nDest: {}\n",
+                passenger.profession, passenger.destination
+            );
         }
 
         if let Some(needs) = conn.db.needs().person_id().find(&selected_id) {
             info += &format!("\n--- Needs ---\n");
-            info += &format!("HP: {:.0}%  Morale: {:.0}%\n", needs.health * 100.0, needs.morale * 100.0);
-            info += &format!("Hunger: {:.0}%  Fatigue: {:.0}%\n", needs.hunger * 100.0, needs.fatigue * 100.0);
-            info += &format!("Social: {:.0}%  Hygiene: {:.0}%\n", needs.social * 100.0, needs.hygiene * 100.0);
+            info += &format!(
+                "HP: {:.0}%  Morale: {:.0}%\n",
+                needs.health * 100.0,
+                needs.morale * 100.0
+            );
+            info += &format!(
+                "Hunger: {:.0}%  Fatigue: {:.0}%\n",
+                needs.hunger * 100.0,
+                needs.fatigue * 100.0
+            );
+            info += &format!(
+                "Social: {:.0}%  Hygiene: {:.0}%\n",
+                needs.social * 100.0,
+                needs.hygiene * 100.0
+            );
         }
 
         if let Some(activity) = conn.db.activity().person_id().find(&selected_id) {
@@ -1284,11 +1640,23 @@ fn render_info_panel(
         // Conversation
         if let Some(in_conv) = conn.db.in_conversation().person_id().find(&selected_id) {
             if let Some(conv) = conn.db.conversation().id().find(&in_conv.conversation_id) {
-                let other_id = if conv.participant_a == selected_id { conv.participant_b } else { conv.participant_a };
-                let other_name = conn.db.person().id().find(&other_id)
+                let other_id = if conv.participant_a == selected_id {
+                    conv.participant_b
+                } else {
+                    conv.participant_a
+                };
+                let other_name = conn
+                    .db
+                    .person()
+                    .id()
+                    .find(&other_id)
                     .map(|p| format!("{} {}", p.given_name, p.family_name))
                     .unwrap_or("?".into());
-                info += &format!("\nTalking to: {}\nTopic: {}\n", other_name, topic_name(conv.topic));
+                info += &format!(
+                    "\nTalking to: {}\nTopic: {}\n",
+                    other_name,
+                    topic_name(conv.topic)
+                );
             }
         }
 
@@ -1297,26 +1665,53 @@ fn render_info_panel(
     }
 
     // Default: show current room info
-    let Some(pid) = player.person_id else { **text = "".into(); return };
-    let Some(pos) = conn.db.position().person_id().find(&pid) else { **text = "".into(); return };
-    let Some(room) = conn.db.room().id().find(&pos.room_id) else { **text = "".into(); return };
+    let Some(pid) = player.person_id else {
+        **text = "".into();
+        return;
+    };
+    let Some(pos) = conn.db.position().person_id().find(&pid) else {
+        **text = "".into();
+        return;
+    };
+    let Some(room) = conn.db.room().id().find(&pos.room_id) else {
+        **text = "".into();
+        return;
+    };
 
-    let mut info = format!("=== {} ===\n{}\n\n",
-        room.name, room_type_name(room.room_type));
+    let mut info = format!(
+        "=== {} ===\n{}\n\n",
+        room.name,
+        room_type_name(room.room_type)
+    );
 
     // People in room
-    let people_here: Vec<_> = conn.db.position().iter()
+    let people_here: Vec<_> = conn
+        .db
+        .position()
+        .iter()
         .filter(|p| p.room_id == room.id)
         .collect();
     info += &format!("Occupants: {}/{}\n", people_here.len(), room.capacity);
     for p in people_here.iter().take(8) {
         if let Some(person) = conn.db.person().id().find(&p.person_id) {
-            let role = if Some(p.person_id) == player.person_id { " (You)" }
-                else if person.is_crew { " [C]" } else { " [P]" };
-            let activity_str = conn.db.activity().person_id().find(&p.person_id)
+            let role = if Some(p.person_id) == player.person_id {
+                " (You)"
+            } else if person.is_crew {
+                " [C]"
+            } else {
+                " [P]"
+            };
+            let activity_str = conn
+                .db
+                .activity()
+                .person_id()
+                .find(&p.person_id)
                 .map(|a| format!(" - {}", activity_name(a.activity_type)))
                 .unwrap_or_default();
-            info += &format!("  {} {}{}{}\n", person.given_name, person.family_name, role, activity_str);
+            info += &format!(
+                "  {} {}{}{}\n",
+                person.given_name, person.family_name, role, activity_str
+            );
         }
     }
     if people_here.len() > 8 {
@@ -1324,7 +1719,10 @@ fn render_info_panel(
     }
 
     // Subsystems in room
-    let subsystems_here: Vec<_> = conn.db.subsystem().iter()
+    let subsystems_here: Vec<_> = conn
+        .db
+        .subsystem()
+        .iter()
         .filter(|s| s.node_id == room.node_id)
         .collect();
     if !subsystems_here.is_empty() {
@@ -1336,13 +1734,20 @@ fn render_info_panel(
     }
 
     // Active events in room
-    let events_here: Vec<_> = conn.db.event().iter()
+    let events_here: Vec<_> = conn
+        .db
+        .event()
+        .iter()
         .filter(|e| e.room_id == room.id && e.state != 2)
         .collect();
     if !events_here.is_empty() {
         info += "\n--- EVENTS ---\n";
         for evt in &events_here {
-            info += &format!("!! {} [{:.0}% severity]\n", event_type_name(evt.event_type), evt.severity * 100.0);
+            info += &format!(
+                "!! {} [{:.0}% severity]\n",
+                event_type_name(evt.event_type),
+                evt.severity * 100.0
+            );
         }
     }
 
@@ -1355,15 +1760,23 @@ fn render_info_panel(
 
 fn render_toasts(
     ui: Res<UiState>,
-    mut toast_q: Query<&mut Text, (With<ToastContainer>, Without<HudText>, Without<NeedsBar>, Without<InfoPanel>)>,
+    mut toast_q: Query<
+        &mut Text,
+        (
+            With<ToastContainer>,
+            Without<HudText>,
+            Without<NeedsBar>,
+            Without<InfoPanel>,
+        ),
+    >,
 ) {
-    let Ok(mut text) = toast_q.get_single_mut() else { return };
+    let Ok(mut text) = toast_q.get_single_mut() else {
+        return;
+    };
     if ui.toasts.is_empty() {
         **text = "".into();
     } else {
-        let toast_text: Vec<String> = ui.toasts.iter()
-            .map(|t| t.message.clone())
-            .collect();
+        let toast_text: Vec<String> = ui.toasts.iter().map(|t| t.message.clone()).collect();
         **text = toast_text.join("\n");
     }
 }
@@ -1393,18 +1806,18 @@ fn activity_name(activity_type: u8) -> &'static str {
 
 fn activity_indicator_color(activity_type: u8) -> Color {
     match activity_type {
-        0 => Color::srgb(0.4, 0.4, 0.4),    // Idle - gray
-        1 => Color::srgb(0.2, 0.5, 1.0),    // Working - blue
-        2 => Color::srgb(0.9, 0.7, 0.1),    // Eating - yellow
-        3 => Color::srgb(0.1, 0.1, 0.5),    // Sleeping - dark blue
-        4 => Color::srgb(0.9, 0.5, 0.9),    // Socializing - pink
-        5 => Color::srgb(0.3, 0.8, 0.3),    // Relaxing - green
-        6 => Color::srgb(0.5, 0.8, 1.0),    // Hygiene - light blue
-        7 => Color::srgb(1.0, 1.0, 1.0),    // Traveling - white
-        8 => Color::srgb(0.8, 0.5, 0.1),    // Maintenance - orange
-        9 => Color::srgb(0.1, 0.3, 0.8),    // On Duty - navy
-        11 => Color::srgb(1.0, 0.1, 0.1),   // Emergency - red
-        12 => Color::srgb(0.1, 0.9, 0.3),   // Exercising - bright green
+        0 => Color::srgb(0.4, 0.4, 0.4),  // Idle - gray
+        1 => Color::srgb(0.2, 0.5, 1.0),  // Working - blue
+        2 => Color::srgb(0.9, 0.7, 0.1),  // Eating - yellow
+        3 => Color::srgb(0.1, 0.1, 0.5),  // Sleeping - dark blue
+        4 => Color::srgb(0.9, 0.5, 0.9),  // Socializing - pink
+        5 => Color::srgb(0.3, 0.8, 0.3),  // Relaxing - green
+        6 => Color::srgb(0.5, 0.8, 1.0),  // Hygiene - light blue
+        7 => Color::srgb(1.0, 1.0, 1.0),  // Traveling - white
+        8 => Color::srgb(0.8, 0.5, 0.1),  // Maintenance - orange
+        9 => Color::srgb(0.1, 0.3, 0.8),  // On Duty - navy
+        11 => Color::srgb(1.0, 0.1, 0.1), // Emergency - red
+        12 => Color::srgb(0.1, 0.9, 0.3), // Exercising - bright green
         _ => Color::srgb(0.5, 0.5, 0.5),
     }
 }

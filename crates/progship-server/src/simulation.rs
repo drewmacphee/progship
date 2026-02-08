@@ -2,8 +2,8 @@
 //!
 //! Systems are called by the `tick` reducer at appropriate frequencies.
 
-use spacetimedb::{ReducerContext, Table};
 use crate::tables::*;
+use spacetimedb::{ReducerContext, Table};
 
 // ============================================================================
 // NEEDS SYSTEM
@@ -93,16 +93,17 @@ pub fn tick_needs(ctx: &ReducerContext, delta_hours: f32) {
 /// Returns (hunger, fatigue, social, comfort, hygiene) decay rates per hour
 fn activity_decay_rates(activity: Option<&Activity>) -> (f32, f32, f32, f32, f32) {
     match activity.map(|a| a.activity_type) {
-        Some(activity_types::SLEEPING) =>   (0.02, -0.15, 0.01, -0.02, 0.01),
-        Some(activity_types::EATING) =>     (-0.3,  0.01, -0.05, -0.02, 0.02),
-        Some(activity_types::EXERCISING) => (0.08,  0.1,  0.0,   0.03, 0.06),
-        Some(activity_types::SOCIALIZING) =>(0.03,  0.02, -0.15, -0.01, 0.02),
-        Some(activity_types::HYGIENE) =>    (0.02,  0.01, 0.0,   -0.03, -0.3),
-        Some(activity_types::RELAXING) =>   (0.02, -0.03, 0.01,  -0.05, 0.01),
-        Some(activity_types::WORKING) |
-        Some(activity_types::ON_DUTY) =>    (0.05,  0.06, 0.02,   0.03, 0.03),
-        Some(activity_types::MAINTENANCE) =>(0.06,  0.08, 0.01,   0.04, 0.05),
-        _ =>                                (0.04,  0.03, 0.02,   0.02, 0.02),
+        Some(activity_types::SLEEPING) => (0.02, -0.15, 0.01, -0.02, 0.01),
+        Some(activity_types::EATING) => (-0.3, 0.01, -0.05, -0.02, 0.02),
+        Some(activity_types::EXERCISING) => (0.08, 0.1, 0.0, 0.03, 0.06),
+        Some(activity_types::SOCIALIZING) => (0.03, 0.02, -0.15, -0.01, 0.02),
+        Some(activity_types::HYGIENE) => (0.02, 0.01, 0.0, -0.03, -0.3),
+        Some(activity_types::RELAXING) => (0.02, -0.03, 0.01, -0.05, 0.01),
+        Some(activity_types::WORKING) | Some(activity_types::ON_DUTY) => {
+            (0.05, 0.06, 0.02, 0.03, 0.03)
+        }
+        Some(activity_types::MAINTENANCE) => (0.06, 0.08, 0.01, 0.04, 0.05),
+        _ => (0.04, 0.03, 0.02, 0.02, 0.02),
     }
 }
 
@@ -115,7 +116,9 @@ pub fn tick_activities(ctx: &ReducerContext, sim_time: f64) {
     for activity in ctx.db.activity().iter() {
         // Skip player-controlled characters
         if let Some(person) = ctx.db.person().id().find(activity.person_id) {
-            if person.is_player { continue; }
+            if person.is_player {
+                continue;
+            }
         }
         let elapsed = sim_time - activity.started_at;
         if elapsed < activity.duration as f64 {
@@ -143,7 +146,9 @@ pub fn tick_activities(ctx: &ReducerContext, sim_time: f64) {
 
         // If activity requires a different room, start movement
         if let Some(target) = target_room {
-            let Some(pos) = ctx.db.position().person_id().find(person_id) else { continue };
+            let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+                continue;
+            };
             if pos.room_id != target {
                 start_movement_to(ctx, person_id, target);
             }
@@ -210,7 +215,7 @@ fn select_activity(
 fn should_be_on_duty(shift: u8, hour: f32) -> bool {
     match shift {
         shifts::ALPHA => hour >= 6.0 && hour < 14.0,
-        shifts::BETA  => hour >= 14.0 && hour < 22.0,
+        shifts::BETA => hour >= 14.0 && hour < 22.0,
         shifts::GAMMA => hour >= 22.0 || hour < 6.0,
         _ => false,
     }
@@ -219,22 +224,31 @@ fn should_be_on_duty(shift: u8, hour: f32) -> bool {
 fn is_meal_time(hour: f32) -> bool {
     (hour >= 7.0 && hour < 8.0) ||   // Breakfast
     (hour >= 12.0 && hour < 13.0) ||  // Lunch
-    (hour >= 18.0 && hour < 19.0)     // Dinner
+    (hour >= 18.0 && hour < 19.0) // Dinner
 }
 
 fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
-    if is_crew { false } // Crew sleeps based on shift
-    else { hour >= 22.0 || hour < 6.0 }
+    if is_crew {
+        false
+    }
+    // Crew sleeps based on shift
+    else {
+        hour >= 22.0 || hour < 6.0
+    }
 }
 
 fn find_room_of_type(ctx: &ReducerContext, room_type: u8) -> Option<u32> {
-    ctx.db.room().iter()
+    ctx.db
+        .room()
+        .iter()
         .find(|r| r.room_type == room_type)
         .map(|r| r.id)
 }
 
 fn find_room_of_type_pred(ctx: &ReducerContext, pred: fn(u8) -> bool) -> Option<u32> {
-    ctx.db.room().iter()
+    ctx.db
+        .room()
+        .iter()
         .find(|r| pred(r.room_type))
         .map(|r| r.id)
 }
@@ -345,15 +359,21 @@ fn find_path(ctx: &ReducerContext, from_room: u32, to_room: u32) -> Vec<(f32, f3
 
     // Build adjacency list from doors using absolute door coordinates
     let doors: Vec<Door> = ctx.db.door().iter().collect();
-    let mut adj: std::collections::HashMap<u32, Vec<(u32, f32, f32)>> = std::collections::HashMap::new();
+    let mut adj: std::collections::HashMap<u32, Vec<(u32, f32, f32)>> =
+        std::collections::HashMap::new();
     for door in &doors {
-        adj.entry(door.room_a).or_default().push((door.room_b, door.door_x, door.door_y));
-        adj.entry(door.room_b).or_default().push((door.room_a, door.door_x, door.door_y));
+        adj.entry(door.room_a)
+            .or_default()
+            .push((door.room_b, door.door_x, door.door_y));
+        adj.entry(door.room_b)
+            .or_default()
+            .push((door.room_a, door.door_x, door.door_y));
     }
 
     // BFS
     let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut queue: std::collections::VecDeque<(u32, Vec<(f32, f32, u32)>)> = std::collections::VecDeque::new();
+    let mut queue: std::collections::VecDeque<(u32, Vec<(f32, f32, u32)>)> =
+        std::collections::VecDeque::new();
     visited.insert(from_room);
     queue.push_back((from_room, vec![]));
 
@@ -384,19 +404,27 @@ fn start_movement_to(ctx: &ReducerContext, person_id: u64, target_room_id: u32) 
         return;
     }
 
-    let Some(pos) = ctx.db.position().person_id().find(person_id) else { return };
-    let Some(target_room) = ctx.db.room().id().find(target_room_id) else { return };
+    let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(target_room) = ctx.db.room().id().find(target_room_id) else {
+        return;
+    };
 
     // Find path through doors
     let waypoints = find_path(ctx, pos.room_id, target_room_id);
 
     // Build path string: each waypoint is "x,y,room_id" separated by ";"
     // Final waypoint is the target position inside the destination room
-    let mut path_parts: Vec<String> = waypoints.iter()
+    let mut path_parts: Vec<String> = waypoints
+        .iter()
         .map(|(dx, dy, rid)| format!("{},{},{}", dx, dy, rid))
         .collect();
     // Add final destination (center of target room)
-    path_parts.push(format!("{},{},{}", target_room.x, target_room.y, target_room_id));
+    path_parts.push(format!(
+        "{},{},{}",
+        target_room.x, target_room.y, target_room_id
+    ));
 
     let path = path_parts.join(";");
 
@@ -424,10 +452,18 @@ pub fn tick_wandering(ctx: &ReducerContext, sim_time: f64) {
         }
         // Skip player-controlled characters
         if let Some(person) = ctx.db.person().id().find(activity.person_id) {
-            if person.is_player { continue; }
+            if person.is_player {
+                continue;
+            }
         }
         // Only wander if not already moving
-        if ctx.db.movement().person_id().find(activity.person_id).is_some() {
+        if ctx
+            .db
+            .movement()
+            .person_id()
+            .find(activity.person_id)
+            .is_some()
+        {
             continue;
         }
 
@@ -441,13 +477,20 @@ pub fn tick_wandering(ctx: &ReducerContext, sim_time: f64) {
         // 30% chance to wander to an adjacent room
         if (seed * 13.0) % 10.0 < 3.0 {
             // Find a connected room to wander to
-            let doors: Vec<Door> = ctx.db.door().iter()
+            let doors: Vec<Door> = ctx
+                .db
+                .door()
+                .iter()
                 .filter(|d| d.room_a == pos.room_id || d.room_b == pos.room_id)
                 .collect();
             if !doors.is_empty() {
                 let idx = ((seed * 19.0) as usize) % doors.len();
                 let door = &doors[idx];
-                let target_room_id = if door.room_a == pos.room_id { door.room_b } else { door.room_a };
+                let target_room_id = if door.room_a == pos.room_id {
+                    door.room_b
+                } else {
+                    door.room_a
+                };
                 // Only move to rooms on same deck
                 if let Some(target_room) = ctx.db.room().id().find(target_room_id) {
                     if let Some(cur_room) = ctx.db.room().id().find(pos.room_id) {
@@ -461,7 +504,9 @@ pub fn tick_wandering(ctx: &ReducerContext, sim_time: f64) {
         }
 
         // Otherwise wander within current room
-        let Some(room) = ctx.db.room().id().find(pos.room_id) else { continue };
+        let Some(room) = ctx.db.room().id().find(pos.room_id) else {
+            continue;
+        };
         let half_w = (room.width / 2.0 - 1.0).max(0.5);
         let half_h = (room.height / 2.0 - 1.0).max(0.5);
         let offset_x = ((seed * 7.3) % (half_w as f64 * 2.0)) as f32 - half_w;
@@ -493,24 +538,35 @@ pub fn tick_social(ctx: &ReducerContext, sim_time: f64) {
             continue;
         }
         let elapsed = sim_time - conv.started_at;
-        if elapsed > 0.5 { // 30 min max conversation
+        if elapsed > 0.5 {
+            // 30 min max conversation
             end_conversation(ctx, conv.id, sim_time);
         }
     }
 
     // Find people in the same room who aren't in conversations
     let positions: Vec<Position> = ctx.db.position().iter().collect();
-    let mut room_occupants: std::collections::HashMap<u32, Vec<u64>> = std::collections::HashMap::new();
+    let mut room_occupants: std::collections::HashMap<u32, Vec<u64>> =
+        std::collections::HashMap::new();
 
     for pos in &positions {
         // Skip people already in conversations or moving
-        if ctx.db.in_conversation().person_id().find(pos.person_id).is_some() {
+        if ctx
+            .db
+            .in_conversation()
+            .person_id()
+            .find(pos.person_id)
+            .is_some()
+        {
             continue;
         }
         if ctx.db.movement().person_id().find(pos.person_id).is_some() {
             continue;
         }
-        room_occupants.entry(pos.room_id).or_default().push(pos.person_id);
+        room_occupants
+            .entry(pos.room_id)
+            .or_default()
+            .push(pos.person_id);
     }
 
     // Start conversations between pairs in the same room
@@ -544,17 +600,27 @@ fn start_conversation(ctx: &ReducerContext, person_a: u64, person_b: u64, sim_ti
     // Pick topic based on relationship, personality, and needs
     let topic = select_conversation_topic(ctx, person_a, person_b, sim_time);
 
-    let conv_id = ctx.db.conversation().insert(Conversation {
-        id: 0, // auto_inc
-        topic,
-        state: conversation_states::ACTIVE,
-        started_at: sim_time,
-        participant_a: person_a,
-        participant_b: person_b,
-    }).id;
+    let conv_id = ctx
+        .db
+        .conversation()
+        .insert(Conversation {
+            id: 0, // auto_inc
+            topic,
+            state: conversation_states::ACTIVE,
+            started_at: sim_time,
+            participant_a: person_a,
+            participant_b: person_b,
+        })
+        .id;
 
-    ctx.db.in_conversation().insert(InConversation { person_id: person_a, conversation_id: conv_id });
-    ctx.db.in_conversation().insert(InConversation { person_id: person_b, conversation_id: conv_id });
+    ctx.db.in_conversation().insert(InConversation {
+        person_id: person_a,
+        conversation_id: conv_id,
+    });
+    ctx.db.in_conversation().insert(InConversation {
+        person_id: person_b,
+        conversation_id: conv_id,
+    });
 
     // Update or create relationship
     update_relationship(ctx, person_a, person_b, sim_time, 0.02);
@@ -586,7 +652,9 @@ fn end_conversation(ctx: &ReducerContext, conv_id: u64, sim_time: f64) {
                 needs.social = (needs.social - social_recovery).max(0.0);
                 if conv.topic == conversation_topics::ARGUMENT {
                     needs.morale = (needs.morale - 0.03).max(0.0);
-                } else if conv.topic == conversation_topics::PERSONAL || conv.topic == conversation_topics::FLIRTATION {
+                } else if conv.topic == conversation_topics::PERSONAL
+                    || conv.topic == conversation_topics::FLIRTATION
+                {
                     needs.morale = (needs.morale + 0.02).min(1.0);
                 }
                 ctx.db.needs().person_id().update(needs);
@@ -613,25 +681,55 @@ fn end_conversation(ctx: &ReducerContext, conv_id: u64, sim_time: f64) {
 }
 
 /// Select conversation topic based on relationship, personality, and context
-fn select_conversation_topic(ctx: &ReducerContext, person_a: u64, person_b: u64, sim_time: f64) -> u8 {
+fn select_conversation_topic(
+    ctx: &ReducerContext,
+    person_a: u64,
+    person_b: u64,
+    sim_time: f64,
+) -> u8 {
     // Check existing relationship
-    let familiarity = ctx.db.relationship().iter()
-        .find(|r| (r.person_a == person_a && r.person_b == person_b) ||
-                   (r.person_a == person_b && r.person_b == person_a))
+    let familiarity = ctx
+        .db
+        .relationship()
+        .iter()
+        .find(|r| {
+            (r.person_a == person_a && r.person_b == person_b)
+                || (r.person_a == person_b && r.person_b == person_a)
+        })
         .map(|r| r.familiarity)
         .unwrap_or(0.0);
 
     // Check personality traits
-    let extraversion_a = ctx.db.personality().person_id().find(person_a)
-        .map(|p| p.extraversion).unwrap_or(0.5);
-    let agreeableness_b = ctx.db.personality().person_id().find(person_b)
-        .map(|p| p.agreeableness).unwrap_or(0.5);
-    let neuroticism_a = ctx.db.personality().person_id().find(person_a)
-        .map(|p| p.neuroticism).unwrap_or(0.3);
+    let extraversion_a = ctx
+        .db
+        .personality()
+        .person_id()
+        .find(person_a)
+        .map(|p| p.extraversion)
+        .unwrap_or(0.5);
+    let agreeableness_b = ctx
+        .db
+        .personality()
+        .person_id()
+        .find(person_b)
+        .map(|p| p.agreeableness)
+        .unwrap_or(0.5);
+    let neuroticism_a = ctx
+        .db
+        .personality()
+        .person_id()
+        .find(person_a)
+        .map(|p| p.neuroticism)
+        .unwrap_or(0.3);
 
     // Check morale
-    let morale_a = ctx.db.needs().person_id().find(person_a)
-        .map(|n| n.morale).unwrap_or(0.5);
+    let morale_a = ctx
+        .db
+        .needs()
+        .person_id()
+        .find(person_a)
+        .map(|n| n.morale)
+        .unwrap_or(0.5);
 
     // Deterministic seed for variety
     let seed = ((person_a as f64 * 7.3 + person_b as f64 * 11.1 + sim_time * 3.7) % 10.0) as f32;
@@ -658,8 +756,12 @@ fn select_conversation_topic(ctx: &ReducerContext, person_a: u64, person_b: u64,
 
     // High extraversion + high familiarity → personal or flirtation
     if extraversion_a > 0.7 && familiarity > 0.3 {
-        if seed < 2.0 { return conversation_topics::FLIRTATION; }
-        if seed < 5.0 { return conversation_topics::PERSONAL; }
+        if seed < 2.0 {
+            return conversation_topics::FLIRTATION;
+        }
+        if seed < 5.0 {
+            return conversation_topics::PERSONAL;
+        }
     }
 
     // Medium familiarity → gossip
@@ -668,15 +770,25 @@ fn select_conversation_topic(ctx: &ReducerContext, person_a: u64, person_b: u64,
     }
 
     // Default: greeting or general chat
-    if seed < 5.0 { conversation_topics::GREETING }
-    else { conversation_topics::PERSONAL }
+    if seed < 5.0 {
+        conversation_topics::GREETING
+    } else {
+        conversation_topics::PERSONAL
+    }
 }
 
-fn update_relationship(ctx: &ReducerContext, person_a: u64, person_b: u64, sim_time: f64, strength_delta: f32) {
+fn update_relationship(
+    ctx: &ReducerContext,
+    person_a: u64,
+    person_b: u64,
+    sim_time: f64,
+    strength_delta: f32,
+) {
     // Look for existing relationship
     for rel in ctx.db.relationship().iter() {
-        if (rel.person_a == person_a && rel.person_b == person_b) ||
-           (rel.person_a == person_b && rel.person_b == person_a) {
+        if (rel.person_a == person_a && rel.person_b == person_b)
+            || (rel.person_a == person_b && rel.person_b == person_a)
+        {
             let mut r = rel;
             r.strength = (r.strength + strength_delta).clamp(-1.0, 1.0);
             r.familiarity = (r.familiarity + 0.01).min(1.0);
@@ -701,12 +813,24 @@ fn update_relationship(ctx: &ReducerContext, person_a: u64, person_b: u64, sim_t
 }
 
 fn classify_relationship(strength: f32, familiarity: f32) -> u8 {
-    if familiarity < 0.1 { return relationship_types::STRANGER; }
-    if strength < -0.5 { return relationship_types::ENEMY; }
-    if strength < -0.2 { return relationship_types::RIVAL; }
-    if familiarity < 0.3 { return relationship_types::ACQUAINTANCE; }
-    if strength > 0.7 { return relationship_types::CLOSE_FRIEND; }
-    if strength > 0.3 { return relationship_types::FRIEND; }
+    if familiarity < 0.1 {
+        return relationship_types::STRANGER;
+    }
+    if strength < -0.5 {
+        return relationship_types::ENEMY;
+    }
+    if strength < -0.2 {
+        return relationship_types::RIVAL;
+    }
+    if familiarity < 0.3 {
+        return relationship_types::ACQUAINTANCE;
+    }
+    if strength > 0.7 {
+        return relationship_types::CLOSE_FRIEND;
+    }
+    if strength > 0.3 {
+        return relationship_types::FRIEND;
+    }
     relationship_types::COLLEAGUE
 }
 
@@ -734,7 +858,9 @@ pub fn tick_duty(ctx: &ReducerContext, sim_time: f64) {
 
 /// Update ship systems: resource production, consumption, degradation
 pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
-    let Some(mut resources) = ctx.db.ship_resources().id().find(0) else { return };
+    let Some(mut resources) = ctx.db.ship_resources().id().find(0) else {
+        return;
+    };
 
     let person_count = ctx.db.person().iter().count() as f32;
 
@@ -753,20 +879,29 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
         if sub.status == system_statuses::OFFLINE || sub.status == system_statuses::DESTROYED {
             continue;
         }
-        let efficiency = sub.health * if sub.status == system_statuses::DEGRADED { 0.5 } else { 1.0 };
+        let efficiency = sub.health
+            * if sub.status == system_statuses::DEGRADED {
+                0.5
+            } else {
+                1.0
+            };
 
         // Production based on subsystem type
         match sub.subsystem_type {
             subsystem_types::REACTOR_CORE => {
-                resources.power = (resources.power + 100.0 * efficiency * delta_hours).min(resources.power_cap);
+                resources.power =
+                    (resources.power + 100.0 * efficiency * delta_hours).min(resources.power_cap);
             }
             subsystem_types::EMERGENCY_GENERATOR => {
                 // Only produces if main reactor is down
-                let reactor_down = subsystems.iter()
-                    .any(|s| s.subsystem_type == subsystem_types::REACTOR_CORE
-                         && (s.status == system_statuses::OFFLINE || s.status == system_statuses::DESTROYED));
+                let reactor_down = subsystems.iter().any(|s| {
+                    s.subsystem_type == subsystem_types::REACTOR_CORE
+                        && (s.status == system_statuses::OFFLINE
+                            || s.status == system_statuses::DESTROYED)
+                });
                 if reactor_down {
-                    resources.power = (resources.power + 30.0 * efficiency * delta_hours).min(resources.power_cap);
+                    resources.power = (resources.power + 30.0 * efficiency * delta_hours)
+                        .min(resources.power_cap);
                 }
             }
             subsystem_types::O2_GENERATION => {
@@ -778,7 +913,8 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
                 resources.water = (resources.water + recycled).min(resources.water_cap);
             }
             subsystem_types::GROWTH_CHAMBER => {
-                resources.food = (resources.food + 5.0 * efficiency * delta_hours).min(resources.food_cap);
+                resources.food =
+                    (resources.food + 5.0 * efficiency * delta_hours).min(resources.food_cap);
             }
             _ => {}
         }
@@ -794,10 +930,15 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     for sub in subsystems_for_update {
         let mut s = sub;
         s.health = (s.health - 0.0001 * delta_hours).max(0.0);
-        s.status = if s.health > 0.7 { system_statuses::NOMINAL }
-                   else if s.health > 0.3 { system_statuses::DEGRADED }
-                   else if s.health > 0.0 { system_statuses::CRITICAL }
-                   else { system_statuses::OFFLINE };
+        s.status = if s.health > 0.7 {
+            system_statuses::NOMINAL
+        } else if s.health > 0.3 {
+            system_statuses::DEGRADED
+        } else if s.health > 0.0 {
+            system_statuses::CRITICAL
+        } else {
+            system_statuses::OFFLINE
+        };
         ctx.db.subsystem().id().update(s);
     }
 
@@ -806,10 +947,15 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     for comp in components {
         let mut c = comp;
         c.health = (c.health - 0.00005 * delta_hours).max(0.0);
-        c.status = if c.health > 0.7 { system_statuses::NOMINAL }
-                   else if c.health > 0.3 { system_statuses::DEGRADED }
-                   else if c.health > 0.0 { system_statuses::CRITICAL }
-                   else { system_statuses::OFFLINE };
+        c.status = if c.health > 0.7 {
+            system_statuses::NOMINAL
+        } else if c.health > 0.3 {
+            system_statuses::DEGRADED
+        } else if c.health > 0.0 {
+            system_statuses::CRITICAL
+        } else {
+            system_statuses::OFFLINE
+        };
         ctx.db.system_component().id().update(c);
     }
 
@@ -817,10 +963,13 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     let all_subsystems: Vec<Subsystem> = ctx.db.subsystem().iter().collect();
     let systems: Vec<ShipSystem> = ctx.db.ship_system().iter().collect();
     for sys in systems {
-        let children: Vec<&Subsystem> = all_subsystems.iter()
+        let children: Vec<&Subsystem> = all_subsystems
+            .iter()
             .filter(|s| s.system_id == sys.id)
             .collect();
-        if children.is_empty() { continue; }
+        if children.is_empty() {
+            continue;
+        }
         let avg_health = children.iter().map(|s| s.health).sum::<f32>() / children.len() as f32;
         let worst_status = children.iter().map(|s| s.status).max().unwrap_or(0);
         let mut s = sys;
@@ -842,14 +991,20 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     let graph_edges: Vec<GraphEdge> = ctx.db.graph_edge().iter().collect();
     for ge in graph_edges {
         // Skip crew paths — only infrastructure edges
-        if ge.edge_type == edge_types::CREW_PATH { continue; }
-        let infra_health = all_infra_edges.iter()
+        if ge.edge_type == edge_types::CREW_PATH {
+            continue;
+        }
+        let infra_health = all_infra_edges
+            .iter()
             .filter(|ie| ie.graph_edge_id == ge.id)
             .map(|ie| ie.health)
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(1.0);
         // Update flow on each infra_edge for this graph_edge
-        for ie in all_infra_edges.iter().filter(|ie| ie.graph_edge_id == ge.id) {
+        for ie in all_infra_edges
+            .iter()
+            .filter(|ie| ie.graph_edge_id == ge.id)
+        {
             let mut e = ie.clone();
             e.current_flow = e.capacity * infra_health;
             ctx.db.infra_edge().id().update(e);
@@ -883,20 +1038,35 @@ pub fn tick_atmosphere(ctx: &ReducerContext, delta_hours: f32) {
     }
 
     // Check life support efficiency from subsystems
-    let ls_subsystems: Vec<Subsystem> = ctx.db.subsystem().iter()
-        .filter(|s| s.subsystem_type == subsystem_types::O2_GENERATION
-                  || s.subsystem_type == subsystem_types::CO2_SCRUBBING
-                  || s.subsystem_type == subsystem_types::AIR_CIRCULATION)
+    let ls_subsystems: Vec<Subsystem> = ctx
+        .db
+        .subsystem()
+        .iter()
+        .filter(|s| {
+            s.subsystem_type == subsystem_types::O2_GENERATION
+                || s.subsystem_type == subsystem_types::CO2_SCRUBBING
+                || s.subsystem_type == subsystem_types::AIR_CIRCULATION
+        })
         .collect();
     let ls_efficiency = if ls_subsystems.is_empty() {
         0.0
     } else {
-        ls_subsystems.iter()
+        ls_subsystems
+            .iter()
             .map(|s| {
-                if s.status == system_statuses::OFFLINE { 0.0 }
-                else { s.health * if s.status == system_statuses::DEGRADED { 0.5 } else { 1.0 } }
+                if s.status == system_statuses::OFFLINE {
+                    0.0
+                } else {
+                    s.health
+                        * if s.status == system_statuses::DEGRADED {
+                            0.5
+                        } else {
+                            1.0
+                        }
+                }
             })
-            .sum::<f32>() / ls_subsystems.len() as f32
+            .sum::<f32>()
+            / ls_subsystems.len() as f32
     };
 
     for atmo in ctx.db.deck_atmosphere().iter() {
@@ -917,10 +1087,10 @@ pub fn tick_atmosphere(ctx: &ReducerContext, delta_hours: f32) {
         a.temperature += heat_add;
 
         // Life support counteraction
-        a.oxygen += o2_consumption * ls_efficiency;           // Regenerate O2
-        a.co2 -= co2_production * ls_efficiency * 0.95;       // Scrub CO2
-        a.humidity -= humidity_add * ls_efficiency * 0.8;      // Dehumidify
-        a.temperature -= heat_add * ls_efficiency * 0.9;       // Cool
+        a.oxygen += o2_consumption * ls_efficiency; // Regenerate O2
+        a.co2 -= co2_production * ls_efficiency * 0.95; // Scrub CO2
+        a.humidity -= humidity_add * ls_efficiency * 0.8; // Dehumidify
+        a.temperature -= heat_add * ls_efficiency * 0.9; // Cool
 
         // Clamp values
         a.oxygen = a.oxygen.clamp(0.0, 0.25);
@@ -973,17 +1143,22 @@ pub fn tick_events(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
 
     // Generate new events - use high-precision time bits for pseudo-randomness
     let time_bits = (sim_time * 100000.0) as u64;
-    let hash = time_bits.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let hash = time_bits
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     let event_chance = (hash >> 32) % 1000; // Use upper bits for better distribution
 
-    if event_chance < 5 { // ~0.5% chance per tick
+    if event_chance < 5 {
+        // ~0.5% chance per tick
         let hash2 = hash.wrapping_mul(2862933555777941757);
         let event_type = (hash2 % 8) as u8;
         let severity = 0.3 + ((hash2 / 8 % 50) as f32 * 0.01);
 
         // Pick a random room
         let rooms: Vec<Room> = ctx.db.room().iter().collect();
-        if rooms.is_empty() { return; }
+        if rooms.is_empty() {
+            return;
+        }
         let room_idx = (hash2 / 400) as usize % rooms.len();
 
         let responders_needed = match event_type {
@@ -1004,8 +1179,12 @@ pub fn tick_events(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
             severity,
         });
 
-        log::info!("Event spawned: type={} room={} severity={:.2}",
-                   event_type, rooms[room_idx].name, severity);
+        log::info!(
+            "Event spawned: type={} room={} severity={:.2}",
+            event_type,
+            rooms[room_idx].name,
+            severity
+        );
     }
 }
 
@@ -1057,7 +1236,8 @@ fn apply_event_effects(ctx: &ReducerContext, event: &Event, delta_hours: f32) {
                 for pos in ctx.db.position().iter() {
                     if let Some(r) = ctx.db.room().id().find(pos.room_id) {
                         if r.deck == room.deck {
-                            if let Some(mut needs) = ctx.db.needs().person_id().find(pos.person_id) {
+                            if let Some(mut needs) = ctx.db.needs().person_id().find(pos.person_id)
+                            {
                                 needs.health -= severity * 0.1 * damage_mult * delta_hours;
                                 needs.health = needs.health.max(0.0);
                                 ctx.db.needs().person_id().update(needs);
@@ -1073,7 +1253,9 @@ fn apply_event_effects(ctx: &ReducerContext, event: &Event, delta_hours: f32) {
             for pos in ctx.db.position().iter() {
                 if pos.room_id == event.room_id {
                     if let Some(mut needs) = ctx.db.needs().person_id().find(pos.person_id) {
-                        if needs.health < 0.9 { continue; } // already affected
+                        if needs.health < 0.9 {
+                            continue;
+                        } // already affected
                         needs.health -= severity * 0.15 * delta_hours;
                         needs.health = needs.health.max(0.0);
                         ctx.db.needs().person_id().update(needs);
@@ -1140,7 +1322,8 @@ fn apply_event_effects(ctx: &ReducerContext, event: &Event, delta_hours: f32) {
                 for pos in ctx.db.position().iter() {
                     if let Some(r) = ctx.db.room().id().find(pos.room_id) {
                         if r.deck == room.deck {
-                            if let Some(mut needs) = ctx.db.needs().person_id().find(pos.person_id) {
+                            if let Some(mut needs) = ctx.db.needs().person_id().find(pos.person_id)
+                            {
                                 needs.morale = (needs.morale + 0.05 * delta_hours).min(1.0);
                                 needs.social = (needs.social - 0.05 * delta_hours).max(0.0);
                                 ctx.db.needs().person_id().update(needs);
@@ -1162,34 +1345,49 @@ fn apply_escalation_effects(ctx: &ReducerContext, event: &Event) {
             // Find the node_id for the event's room
             let event_node_id = ctx.db.room().id().find(event.room_id).map(|r| r.node_id);
             if let Some(node_id) = event_node_id {
-                let subsystems: Vec<Subsystem> = ctx.db.subsystem().iter()
+                let subsystems: Vec<Subsystem> = ctx
+                    .db
+                    .subsystem()
+                    .iter()
                     .filter(|s| s.node_id == node_id)
                     .collect();
                 for sub in subsystems {
                     let mut s = sub;
                     s.health = (s.health - event.severity * 0.3).max(0.0);
-                    if s.health < 0.3 { s.status = system_statuses::OFFLINE; }
-                    else if s.health < 0.7 { s.status = system_statuses::DEGRADED; }
+                    if s.health < 0.3 {
+                        s.status = system_statuses::OFFLINE;
+                    } else if s.health < 0.7 {
+                        s.status = system_statuses::DEGRADED;
+                    }
                     ctx.db.subsystem().id().update(s);
                 }
             }
         }
         event_types::SYSTEM_FAILURE => {
             // Cascading: if reactor core is offline, degrade life support subsystems
-            let reactor_down = ctx.db.subsystem().iter()
-                .any(|s| s.subsystem_type == subsystem_types::REACTOR_CORE
-                     && s.status == system_statuses::OFFLINE);
+            let reactor_down = ctx.db.subsystem().iter().any(|s| {
+                s.subsystem_type == subsystem_types::REACTOR_CORE
+                    && s.status == system_statuses::OFFLINE
+            });
             if reactor_down {
-                let ls_subs: Vec<Subsystem> = ctx.db.subsystem().iter()
-                    .filter(|s| s.subsystem_type == subsystem_types::O2_GENERATION
-                             || s.subsystem_type == subsystem_types::CO2_SCRUBBING
-                             || s.subsystem_type == subsystem_types::AIR_CIRCULATION)
+                let ls_subs: Vec<Subsystem> = ctx
+                    .db
+                    .subsystem()
+                    .iter()
+                    .filter(|s| {
+                        s.subsystem_type == subsystem_types::O2_GENERATION
+                            || s.subsystem_type == subsystem_types::CO2_SCRUBBING
+                            || s.subsystem_type == subsystem_types::AIR_CIRCULATION
+                    })
                     .collect();
                 for sub in ls_subs {
                     let mut s = sub;
                     s.health = (s.health - 0.2).max(0.0);
-                    s.status = if s.health < 0.3 { system_statuses::OFFLINE }
-                              else { system_statuses::DEGRADED };
+                    s.status = if s.health < 0.3 {
+                        system_statuses::OFFLINE
+                    } else {
+                        system_statuses::DEGRADED
+                    };
                     ctx.db.subsystem().id().update(s);
                 }
             }
@@ -1207,12 +1405,21 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
     // Generate tasks for degraded subsystems
     for sub in ctx.db.subsystem().iter() {
         if sub.health < 0.7 {
-            let has_task = ctx.db.maintenance_task().iter()
+            let has_task = ctx
+                .db
+                .maintenance_task()
+                .iter()
                 .any(|t| t.subsystem_id == sub.id && t.progress < 1.0);
-            if has_task { continue; }
+            if has_task {
+                continue;
+            }
 
             // Find the parent system type to determine required skill
-            let skill = ctx.db.ship_system().id().find(sub.system_id)
+            let skill = ctx
+                .db
+                .ship_system()
+                .id()
+                .find(sub.system_id)
                 .map(|sys| match sys.system_type {
                     system_types::MEDICAL => skill_types::MEDICAL,
                     system_types::NAVIGATION => skill_types::PILOTING,
@@ -1221,7 +1428,10 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
                 .unwrap_or(skill_types::ENGINEERING);
 
             // Find a degraded component within this subsystem to target
-            let target_comp = ctx.db.system_component().iter()
+            let target_comp = ctx
+                .db
+                .system_component()
+                .iter()
                 .find(|c| c.subsystem_id == sub.id && c.health < 0.7);
             let comp_id = target_comp.map(|c| c.id).unwrap_or(0);
 
@@ -1240,12 +1450,18 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
     }
 
     // Assign unassigned tasks to available crew
-    let tasks: Vec<MaintenanceTask> = ctx.db.maintenance_task().iter()
+    let tasks: Vec<MaintenanceTask> = ctx
+        .db
+        .maintenance_task()
+        .iter()
         .filter(|t| t.assigned_crew_id.is_none() && t.progress < 1.0)
         .collect();
 
     for task in tasks {
-        let assigned = ctx.db.crew().iter()
+        let assigned = ctx
+            .db
+            .crew()
+            .iter()
             .find(|c| !c.on_duty)
             .map(|c| c.person_id);
 
@@ -1265,7 +1481,10 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
     }
 
     // Progress active repairs
-    let active_tasks: Vec<MaintenanceTask> = ctx.db.maintenance_task().iter()
+    let active_tasks: Vec<MaintenanceTask> = ctx
+        .db
+        .maintenance_task()
+        .iter()
         .filter(|t| t.assigned_crew_id.is_some() && t.progress < 1.0)
         .collect();
 
@@ -1278,17 +1497,28 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
             if t.component_id > 0 {
                 if let Some(mut comp) = ctx.db.system_component().id().find(t.component_id) {
                     comp.health = (comp.health + 0.3).min(1.0);
-                    comp.status = if comp.health > 0.7 { system_statuses::NOMINAL }
-                                 else { system_statuses::DEGRADED };
-                    comp.last_maintenance = ctx.db.ship_config().id().find(0)
-                        .map(|c| c.sim_time).unwrap_or(0.0);
+                    comp.status = if comp.health > 0.7 {
+                        system_statuses::NOMINAL
+                    } else {
+                        system_statuses::DEGRADED
+                    };
+                    comp.last_maintenance = ctx
+                        .db
+                        .ship_config()
+                        .id()
+                        .find(0)
+                        .map(|c| c.sim_time)
+                        .unwrap_or(0.0);
                     ctx.db.system_component().id().update(comp);
                 }
             }
             if let Some(mut sub) = ctx.db.subsystem().id().find(t.subsystem_id) {
                 sub.health = (sub.health + 0.3).min(1.0);
-                sub.status = if sub.health > 0.7 { system_statuses::NOMINAL }
-                            else { system_statuses::DEGRADED };
+                sub.status = if sub.health > 0.7 {
+                    system_statuses::NOMINAL
+                } else {
+                    system_statuses::DEGRADED
+                };
                 ctx.db.subsystem().id().update(sub);
             }
         }

@@ -19,7 +19,7 @@ pub struct ShipConfig {
     pub deck_count: u32,
     pub crew_count: u32,
     pub passenger_count: u32,
-    pub sim_time: f64,      // Simulation time in hours
+    pub sim_time: f64, // Simulation time in hours
     pub time_scale: f32,
     pub paused: bool,
 }
@@ -78,8 +78,8 @@ pub struct Needs {
     pub social: f32,
     pub comfort: f32,
     pub hygiene: f32,
-    pub health: f32,     // 1.0 = healthy, 0.0 = dead
-    pub morale: f32,     // 1.0 = happy, 0.0 = despairing
+    pub health: f32, // 1.0 = healthy, 0.0 = dead
+    pub morale: f32, // 1.0 = happy, 0.0 = despairing
 }
 
 /// Big Five personality traits (0.0-1.0 each)
@@ -113,9 +113,9 @@ pub struct Skills {
 pub struct Activity {
     #[primary_key]
     pub person_id: u64,
-    pub activity_type: u8,  // ActivityType as u8
+    pub activity_type: u8, // ActivityType as u8
     pub started_at: f64,
-    pub duration: f32,      // hours
+    pub duration: f32, // hours
     pub target_room_id: Option<u32>,
 }
 
@@ -124,9 +124,9 @@ pub struct Activity {
 pub struct Crew {
     #[primary_key]
     pub person_id: u64,
-    pub department: u8,     // Department as u8
-    pub rank: u8,           // Rank as u8
-    pub shift: u8,          // Shift as u8
+    pub department: u8, // Department as u8
+    pub rank: u8,       // Rank as u8
+    pub shift: u8,      // Shift as u8
     pub duty_station_id: u32,
     pub on_duty: bool,
 }
@@ -136,7 +136,7 @@ pub struct Crew {
 pub struct Passenger {
     #[primary_key]
     pub person_id: u64,
-    pub cabin_class: u8,    // CabinClass as u8
+    pub cabin_class: u8, // CabinClass as u8
     pub destination: String,
     pub profession: String,
 }
@@ -150,7 +150,7 @@ pub struct Passenger {
 pub struct Room {
     #[primary_key]
     pub id: u32,
-    pub node_id: u64,           // FK → GraphNode
+    pub node_id: u64, // FK → GraphNode
     pub name: String,
     pub room_type: u8,
     pub deck: i32,
@@ -168,13 +168,13 @@ pub struct GraphNode {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub node_type: u8,          // node_types::*
+    pub node_type: u8, // node_types::*
     pub name: String,
-    pub function: u8,           // room_types::* (what role this serves)
+    pub function: u8, // room_types::* (what role this serves)
     pub capacity: u32,
-    pub required_area: f32,     // computed from function + capacity + subsystem count
-    pub deck_preference: i32,   // -1 = no preference, 0-5 = soft preference
-    pub group: u8,              // groups::* (command, engineering, etc.)
+    pub required_area: f32, // computed from function + capacity + subsystem count
+    pub deck_preference: i32, // -1 = no preference, 0-5 = soft preference
+    pub group: u8,          // groups::* (command, engineering, etc.)
 }
 
 /// Logical graph edge — connection between two nodes
@@ -186,7 +186,7 @@ pub struct GraphEdge {
     pub id: u64,
     pub from_node: u64,
     pub to_node: u64,
-    pub edge_type: u8,          // edge_types::*
+    pub edge_type: u8, // edge_types::*
     pub weight: f32,
     pub bidirectional: bool,
 }
@@ -199,13 +199,13 @@ pub struct Door {
     pub id: u64,
     pub room_a: u32,
     pub room_b: u32,
-    pub wall_a: u8,             // wall_sides::* (which wall of room_a)
-    pub wall_b: u8,             // wall_sides::* (which wall of room_b)
+    pub wall_a: u8,               // wall_sides::* (which wall of room_a)
+    pub wall_b: u8,               // wall_sides::* (which wall of room_b)
     pub position_along_wall: f32, // DEPRECATED — use door_x/door_y instead
-    pub width: f32,             // door opening width (default 3.0)
-    pub access_level: u8,       // access_levels::*
-    pub door_x: f32,            // absolute world X position of door center
-    pub door_y: f32,            // absolute world Y position of door center
+    pub width: f32,               // door opening width (default 3.0)
+    pub access_level: u8,         // access_levels::*
+    pub door_x: f32,              // absolute world X position of door center
+    pub door_y: f32,              // absolute world Y position of door center
 }
 
 /// Generated corridor — first-class entity
@@ -215,13 +215,13 @@ pub struct Corridor {
     #[auto_inc]
     pub id: u64,
     pub deck: i32,
-    pub corridor_type: u8,      // corridor_types::*
+    pub corridor_type: u8, // corridor_types::*
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub length: f32,
-    pub orientation: u8,        // 0=horizontal, 1=vertical
-    pub carries: u8,            // bitmask: carries_flags::*
+    pub orientation: u8, // 0=horizontal, 1=vertical
+    pub carries: u8,     // bitmask: carries_flags::*
 }
 
 /// Elevator or ladder shaft spanning multiple decks
@@ -230,11 +230,11 @@ pub struct VerticalShaft {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub shaft_type: u8,         // shaft_types::*
+    pub shaft_type: u8, // shaft_types::*
     pub name: String,
     pub x: f32,
     pub y: f32,
-    pub decks_served: String,   // comma-separated: "0,1,2,3,4,5"
+    pub decks_served: String, // comma-separated: "0,1,2,3,4,5"
     pub width: f32,
     pub height: f32,
 }
@@ -244,11 +244,11 @@ pub struct VerticalShaft {
 pub struct DeckAtmosphere {
     #[primary_key]
     pub deck: i32,
-    pub oxygen: f32,        // 0.0-1.0 (nominal ~0.21)
-    pub co2: f32,           // 0.0-1.0 (danger > 0.04)
-    pub humidity: f32,      // 0.0-1.0 (comfort 0.4-0.6)
-    pub temperature: f32,   // Celsius (comfort 20-24)
-    pub pressure: f32,      // kPa (nominal ~101)
+    pub oxygen: f32,      // 0.0-1.0 (nominal ~0.21)
+    pub co2: f32,         // 0.0-1.0 (danger > 0.04)
+    pub humidity: f32,    // 0.0-1.0 (comfort 0.4-0.6)
+    pub temperature: f32, // Celsius (comfort 20-24)
+    pub pressure: f32,    // kPa (nominal ~101)
 }
 
 // ============================================================================
@@ -265,9 +265,9 @@ pub struct ShipSystem {
     pub id: u64,
     pub name: String,
     pub system_type: u8,
-    pub overall_health: f32,    // computed: avg of subsystem health
-    pub overall_status: u8,     // computed: worst subsystem status
-    pub priority: u8,           // power_priorities::*
+    pub overall_health: f32, // computed: avg of subsystem health
+    pub overall_status: u8,  // computed: worst subsystem status
+    pub priority: u8,        // power_priorities::*
 }
 
 /// Subsystem — functional unit within a system (e.g. O2 Generator within Life Support)
@@ -282,8 +282,8 @@ pub struct Subsystem {
     pub subsystem_type: u8,
     pub health: f32,
     pub status: u8,
-    pub node_id: u64,           // FK → GraphNode (which logical node this lives in)
-    pub power_draw: f32,// kW required
+    pub node_id: u64,    // FK → GraphNode (which logical node this lives in)
+    pub power_draw: f32, // kW required
     pub crew_required: u8,
 }
 
@@ -312,9 +312,9 @@ pub struct InfraEdge {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub graph_edge_id: u64,     // FK → GraphEdge
-    pub edge_type: u8,          // infra_types::*
-    pub corridor_id: u64,       // FK → Corridor (which corridor carries this)
+    pub graph_edge_id: u64, // FK → GraphEdge
+    pub edge_type: u8,      // infra_types::*
+    pub corridor_id: u64,   // FK → Corridor (which corridor carries this)
     pub capacity: f32,
     pub current_flow: f32,
     pub health: f32,
@@ -347,11 +347,11 @@ pub struct MaintenanceTask {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub component_id: u64,      // FK → SystemComponent
-    pub subsystem_id: u64,      // FK → Subsystem (denormalized for quick lookup)
+    pub component_id: u64, // FK → SystemComponent
+    pub subsystem_id: u64, // FK → Subsystem (denormalized for quick lookup)
     pub assigned_crew_id: Option<u64>,
     pub priority: f32,
-    pub progress: f32,          // 0.0-1.0
+    pub progress: f32, // 0.0-1.0
     pub created_at: f64,
     pub required_skill: u8,
     pub duration_hours: f32,
@@ -382,8 +382,8 @@ pub struct Conversation {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub topic: u8,             // ConversationTopic as u8
-    pub state: u8,             // ConversationState as u8
+    pub topic: u8, // ConversationTopic as u8
+    pub state: u8, // ConversationState as u8
     pub started_at: f64,
     pub participant_a: u64,
     pub participant_b: u64,
@@ -408,14 +408,14 @@ pub struct Event {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub event_type: u8,        // EventType as u8
+    pub event_type: u8, // EventType as u8
     pub room_id: u32,
     pub started_at: f64,
     pub duration: f32,
-    pub state: u8,             // EventState as u8
+    pub state: u8, // EventState as u8
     pub responders_needed: u8,
     pub responders_assigned: u8,
-    pub severity: f32,         // 0.0-1.0
+    pub severity: f32, // 0.0-1.0
 }
 
 // ============================================================================
@@ -601,8 +601,16 @@ pub mod room_types {
 
     /// Returns true if this room type is any kind of sleeping quarters
     pub fn is_quarters(rt: u8) -> bool {
-        matches!(rt, CABIN_SINGLE | CABIN_DOUBLE | FAMILY_SUITE | VIP_SUITE
-            | QUARTERS_CREW | QUARTERS_OFFICER | QUARTERS_PASSENGER)
+        matches!(
+            rt,
+            CABIN_SINGLE
+                | CABIN_DOUBLE
+                | FAMILY_SUITE
+                | VIP_SUITE
+                | QUARTERS_CREW
+                | QUARTERS_OFFICER
+                | QUARTERS_PASSENGER
+        )
     }
     /// Returns true if this room type is a dining/food area
     pub fn is_dining(rt: u8) -> bool {
@@ -610,9 +618,25 @@ pub mod room_types {
     }
     /// Returns true if this room type is recreation/social
     pub fn is_recreation(rt: u8) -> bool {
-        matches!(rt, GYM | THEATRE | LIBRARY | CHAPEL | GAME_ROOM | BAR
-            | ART_STUDIO | MUSIC_ROOM | HOLODECK | ARBORETUM
-            | OBSERVATION_LOUNGE | POOL | NURSERY | SCHOOL | RECREATION | LOUNGE | SHOPS)
+        matches!(
+            rt,
+            GYM | THEATRE
+                | LIBRARY
+                | CHAPEL
+                | GAME_ROOM
+                | BAR
+                | ART_STUDIO
+                | MUSIC_ROOM
+                | HOLODECK
+                | ARBORETUM
+                | OBSERVATION_LOUNGE
+                | POOL
+                | NURSERY
+                | SCHOOL
+                | RECREATION
+                | LOUNGE
+                | SHOPS
+        )
     }
     /// Returns true if this room type is a corridor/infrastructure
     pub fn is_corridor(rt: u8) -> bool {
@@ -642,9 +666,9 @@ pub mod ranks {
 }
 
 pub mod shifts {
-    pub const ALPHA: u8 = 0;  // 0600-1400
-    pub const BETA: u8 = 1;   // 1400-2200
-    pub const GAMMA: u8 = 2;  // 2200-0600
+    pub const ALPHA: u8 = 0; // 0600-1400
+    pub const BETA: u8 = 1; // 1400-2200
+    pub const GAMMA: u8 = 2; // 2200-0600
 }
 
 pub mod cabin_classes {
@@ -692,10 +716,10 @@ pub mod system_statuses {
 }
 
 pub mod power_priorities {
-    pub const CRITICAL: u8 = 0;     // Life support, navigation — last to lose power
-    pub const HIGH: u8 = 1;         // Medical, comms
-    pub const NORMAL: u8 = 2;       // Gravity, water recycling, food production
-    pub const LOW: u8 = 3;          // Recreation, non-essential
+    pub const CRITICAL: u8 = 0; // Life support, navigation — last to lose power
+    pub const HIGH: u8 = 1; // Medical, comms
+    pub const NORMAL: u8 = 2; // Gravity, water recycling, food production
+    pub const LOW: u8 = 3; // Recreation, non-essential
 }
 
 pub mod subsystem_types {
