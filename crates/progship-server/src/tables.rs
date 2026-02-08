@@ -251,7 +251,7 @@ pub struct GraphNode {
     pub capacity: u32,
     /// Required physical area in square meters.
     pub required_area: f32,
-    /// Preferred deck for placement (-1 = no preference, 0-20 = deck number).
+    /// Preferred deck for placement (-1 = no preference, 0+ = specific deck number).
     pub deck_preference: i32,
     /// Functional group classification (see groups module).
     pub group: u8,
