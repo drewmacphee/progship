@@ -14,10 +14,11 @@ use spacetimedb::{reducer, ReducerContext, Table};
 mod doors;
 mod facilities;
 mod graph;
-mod hull;
+pub(crate) mod hull;
 mod infrastructure;
 mod people;
 mod systems;
+pub mod traits;
 mod treemap;
 mod zones;
 
