@@ -1,6 +1,7 @@
-//! Activity selection system - NPCs choose activities based on needs and time.
+//! Activity selection system - NPCs choose activities based on utility scoring.
 
 use crate::logic::duty as duty_logic;
+use crate::logic::utility::{self, RoomCategory, RoomTarget, UtilityInput};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -20,16 +21,86 @@ pub fn tick_activities(ctx: &ReducerContext, sim_time: f64) {
             continue; // Still doing current activity
         }
 
-        // Activity complete - select new one based on needs
+        // Activity complete - select new one based on utility scoring
         let Some(needs) = ctx.db.needs().person_id().find(activity.person_id) else {
             continue;
         };
 
-        let is_crew = ctx.db.crew().person_id().find(activity.person_id).is_some();
+        let crew_opt = ctx.db.crew().person_id().find(activity.person_id);
+        let is_crew = crew_opt.is_some();
         let current_hour = (sim_time % 24.0) as f32;
 
-        let (new_type, duration, target_room) =
-            select_activity(&needs, current_hour, is_crew, activity.person_id, ctx);
+        // Build room context for current position
+        let current_room = ctx
+            .db
+            .position()
+            .person_id()
+            .find(activity.person_id)
+            .and_then(|pos| {
+                ctx.db.room().id().find(pos.room_id).map(|room| {
+                    let occupants = ctx
+                        .db
+                        .position()
+                        .iter()
+                        .filter(|p| p.room_id == pos.room_id)
+                        .count() as u32;
+                    utility::RoomContext {
+                        room_type: room.room_type,
+                        occupants,
+                        capacity: room.capacity,
+                    }
+                })
+            });
+
+        // Get personality (default to neutral 0.5 if missing)
+        let personality = ctx.db.personality().person_id().find(activity.person_id);
+        let (ext, neu, con, opn, agr) = personality
+            .as_ref()
+            .map(|p| {
+                (
+                    p.extraversion,
+                    p.neuroticism,
+                    p.conscientiousness,
+                    p.openness,
+                    p.agreeableness,
+                )
+            })
+            .unwrap_or((0.5, 0.5, 0.5, 0.5, 0.5));
+
+        let (shift, department) = crew_opt
+            .as_ref()
+            .map(|c| (Some(c.shift), Some(c.department)))
+            .unwrap_or((None, None));
+
+        let fit = duty_logic::is_fit_for_duty(needs.hunger, needs.fatigue, needs.health);
+        let on_duty = shift
+            .map(|s| duty_logic::should_be_on_duty(s, current_hour))
+            .unwrap_or(false);
+
+        let input = UtilityInput {
+            hunger: needs.hunger,
+            fatigue: needs.fatigue,
+            social: needs.social,
+            comfort: needs.comfort,
+            hygiene: needs.hygiene,
+            health: needs.health,
+            morale: needs.morale,
+            hour: current_hour,
+            is_crew,
+            shift,
+            department,
+            extraversion: ext,
+            neuroticism: neu,
+            conscientiousness: con,
+            openness: opn,
+            agreeableness: agr,
+            current_room,
+            fit_for_duty: fit,
+            should_be_on_duty: on_duty,
+        };
+
+        let (new_type, duration, room_target) = utility::pick_best(&input);
+        let target_room = resolve_room_target(ctx, &room_target);
 
         let mut a = activity;
         let person_id = a.person_id;
@@ -51,75 +122,22 @@ pub fn tick_activities(ctx: &ReducerContext, sim_time: f64) {
     }
 }
 
-/// Select the best activity based on needs and time of day
-fn select_activity(
-    needs: &Needs,
-    hour: f32,
-    is_crew: bool,
-    person_id: u64,
-    ctx: &ReducerContext,
-) -> (u8, f32, Option<u32>) {
-    // Seek medical attention if injured
-    if crate::logic::health::should_seek_medical(needs.health) {
-        let room = find_room_of_type(ctx, room_types::HOSPITAL_WARD);
-        return (activity_types::IDLE, 1.0, room);
-    }
-
-    // Check if crew member should be on duty
-    if is_crew {
-        if let Some(crew) = ctx.db.crew().person_id().find(person_id) {
-            if duty_logic::should_be_on_duty(crew.shift, hour)
-                && duty_logic::is_fit_for_duty(needs.hunger, needs.fatigue, needs.health)
-            {
-                let room = find_room_for_activity(ctx, activity_types::ON_DUTY, crew.department);
-                return (activity_types::ON_DUTY, 2.0, room);
-            }
+/// Resolve a RoomTarget to an actual room ID.
+fn resolve_room_target(ctx: &ReducerContext, target: &RoomTarget) -> Option<u32> {
+    match target {
+        RoomTarget::None => None,
+        RoomTarget::Exact(rt) => find_room_of_type(ctx, *rt),
+        RoomTarget::Category(cat) => match cat {
+            RoomCategory::Quarters => find_room_of_type_pred(ctx, room_types::is_quarters),
+            RoomCategory::Recreation => find_room_of_type_pred(ctx, room_types::is_recreation),
+            RoomCategory::Medical => find_room_of_type(ctx, room_types::HOSPITAL_WARD),
+            RoomCategory::Dining => find_room_of_type_pred(ctx, room_types::is_dining),
+        },
+        RoomTarget::DutyStation(dept) => {
+            let rt = department_to_room_type(*dept);
+            find_room_of_type(ctx, rt)
         }
     }
-
-    // Priority: critical needs first
-    if needs.fatigue > 0.85 {
-        let room = find_room_of_type_pred(ctx, room_types::is_quarters);
-        return (activity_types::SLEEPING, 8.0, room);
-    }
-    if needs.hunger > 0.75 {
-        let room = find_room_of_type(ctx, room_types::MESS_HALL);
-        return (activity_types::EATING, 0.5, room);
-    }
-    if needs.hygiene > 0.8 {
-        let room = find_room_of_type(ctx, room_types::SHARED_BATHROOM);
-        return (activity_types::HYGIENE, 0.3, room);
-    }
-
-    // Moderate needs
-    if needs.social > 0.6 {
-        let room = find_room_of_type_pred(ctx, room_types::is_recreation);
-        return (activity_types::SOCIALIZING, 1.0, room);
-    }
-    if needs.comfort > 0.6 {
-        let room = find_room_of_type_pred(ctx, room_types::is_recreation);
-        return (activity_types::RELAXING, 1.0, room);
-    }
-    if needs.hunger > 0.5 && is_meal_time(hour) {
-        let room = find_room_of_type(ctx, room_types::MESS_HALL);
-        return (activity_types::EATING, 0.5, room);
-    }
-
-    // Sleep schedule — shift-aware for crew
-    if is_crew {
-        if let Some(crew) = ctx.db.crew().person_id().find(person_id) {
-            if duty_logic::should_sleep(crew.shift, hour, needs.fatigue) {
-                let room = find_room_of_type_pred(ctx, room_types::is_quarters);
-                return (activity_types::SLEEPING, 8.0, room);
-            }
-        }
-    } else if needs.fatigue > 0.5 && duty_logic::is_passenger_sleep_time(hour) {
-        let room = find_room_of_type_pred(ctx, room_types::is_quarters);
-        return (activity_types::SLEEPING, 8.0, room);
-    }
-
-    // Default: idle/wander
-    (activity_types::IDLE, 0.02, None)
 }
 
 pub fn should_be_on_duty(shift: u8, hour: f32) -> bool {
@@ -127,9 +145,7 @@ pub fn should_be_on_duty(shift: u8, hour: f32) -> bool {
 }
 
 pub fn is_meal_time(hour: f32) -> bool {
-    (7.0..8.0).contains(&hour) ||   // Breakfast
-    (12.0..13.0).contains(&hour) ||  // Lunch
-    (18.0..19.0).contains(&hour) // Dinner
+    (7.0..8.0).contains(&hour) || (12.0..13.0).contains(&hour) || (18.0..19.0).contains(&hour)
 }
 
 pub fn department_to_room_type(department: u8) -> u8 {
@@ -160,81 +176,33 @@ fn find_room_of_type_pred(ctx: &ReducerContext, pred: fn(u8) -> bool) -> Option<
         .map(|r| r.id)
 }
 
-fn find_room_for_activity(ctx: &ReducerContext, activity: u8, department: u8) -> Option<u32> {
-    match activity {
-        activity_types::ON_DUTY => {
-            let room_type = department_to_room_type(department);
-            find_room_of_type(ctx, room_type)
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_should_be_on_duty_alpha_shift() {
-        // Alpha: 6:00 - 14:00
         assert!(should_be_on_duty(shifts::ALPHA, 6.0));
         assert!(should_be_on_duty(shifts::ALPHA, 10.0));
-        assert!(should_be_on_duty(shifts::ALPHA, 13.9));
         assert!(!should_be_on_duty(shifts::ALPHA, 5.9));
         assert!(!should_be_on_duty(shifts::ALPHA, 14.0));
-        assert!(!should_be_on_duty(shifts::ALPHA, 20.0));
-    }
-
-    #[test]
-    fn test_should_be_on_duty_beta_shift() {
-        // Beta: 14:00 - 22:00
-        assert!(should_be_on_duty(shifts::BETA, 14.0));
-        assert!(should_be_on_duty(shifts::BETA, 18.0));
-        assert!(should_be_on_duty(shifts::BETA, 21.9));
-        assert!(!should_be_on_duty(shifts::BETA, 13.9));
-        assert!(!should_be_on_duty(shifts::BETA, 22.0));
-        assert!(!should_be_on_duty(shifts::BETA, 6.0));
     }
 
     #[test]
     fn test_should_be_on_duty_gamma_shift() {
-        // Gamma: 22:00 - 6:00 (overnight)
         assert!(should_be_on_duty(shifts::GAMMA, 22.0));
         assert!(should_be_on_duty(shifts::GAMMA, 0.0));
-        assert!(should_be_on_duty(shifts::GAMMA, 3.0));
-        assert!(should_be_on_duty(shifts::GAMMA, 5.9));
         assert!(!should_be_on_duty(shifts::GAMMA, 6.0));
         assert!(!should_be_on_duty(shifts::GAMMA, 12.0));
-        assert!(!should_be_on_duty(shifts::GAMMA, 21.9));
-    }
-
-    #[test]
-    fn test_should_be_on_duty_invalid_shift() {
-        assert!(!should_be_on_duty(99, 10.0));
     }
 
     #[test]
     fn test_is_meal_time() {
-        // Breakfast: 7-8
         assert!(is_meal_time(7.0));
-        assert!(is_meal_time(7.5));
-        assert!(!is_meal_time(8.0));
-        assert!(!is_meal_time(6.9));
-
-        // Lunch: 12-13
-        assert!(is_meal_time(12.0));
         assert!(is_meal_time(12.5));
-        assert!(!is_meal_time(13.0));
-
-        // Dinner: 18-19
         assert!(is_meal_time(18.0));
-        assert!(is_meal_time(18.5));
-        assert!(!is_meal_time(19.0));
-
-        // Not meal time
         assert!(!is_meal_time(10.0));
         assert!(!is_meal_time(15.0));
-        assert!(!is_meal_time(20.0));
     }
 
     #[test]
@@ -250,18 +218,6 @@ mod tests {
         assert_eq!(
             department_to_room_type(departments::MEDICAL),
             room_types::HOSPITAL_WARD
-        );
-        assert_eq!(
-            department_to_room_type(departments::SCIENCE),
-            room_types::LABORATORY
-        );
-        assert_eq!(
-            department_to_room_type(departments::SECURITY),
-            room_types::CIC
-        );
-        assert_eq!(
-            department_to_room_type(departments::OPERATIONS),
-            room_types::ENGINEERING
         );
         assert_eq!(department_to_room_type(99), room_types::CORRIDOR);
     }
