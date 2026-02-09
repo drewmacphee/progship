@@ -522,15 +522,15 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 // Shaft overlaps cross-corridor if their Y ranges intersect
                 if sy < cr_end && sy + sh > cr.y_start {
                     // Connect via shaft's WEST edge to the cross-corridor.
-                    // Shaft is embedded inside the corridor — no corridor wall at this boundary.
-                    // wall_a=WEST creates gap in shaft wall; wall_b=255 skips corridor gap.
+                    // Shaft is embedded inside the corridor — treat both sides as WEST-facing walls.
+                    // wall_a=WEST creates gap in shaft wall; wall_b=WEST marks the corresponding corridor wall.
                     let boundary_x = sx as f32;
                     ctx.db.door().insert(Door {
                         id: 0,
                         room_a: rid,
                         room_b: cr.room_id,
                         wall_a: wall_sides::WEST,
-                        wall_b: 255,
+                        wall_b: wall_sides::WEST,
                         position_along_wall: 0.5,
                         width: sh.min(CROSS_CORRIDOR_WIDTH) as f32,
                         access_level: access,
