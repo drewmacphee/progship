@@ -3,9 +3,9 @@
 //! Creates GraphNode entries for all rooms and GraphEdge entries for crew paths,
 //! power distribution, water/HVAC/data networks.
 
+use super::facilities::get_facility_manifest;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
-use super::facilities::get_facility_manifest;
 
 pub(super) fn build_ship_graph(ctx: &ReducerContext, _deck_count: u32) {
     let facility_manifest = get_facility_manifest();

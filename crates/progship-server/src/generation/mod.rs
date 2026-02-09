@@ -11,20 +11,20 @@
 use crate::tables::*;
 use spacetimedb::{reducer, ReducerContext, Table};
 
-mod hull;
 mod doors;
-mod zones;
-mod treemap;
 mod facilities;
-mod people;
 mod graph;
+mod hull;
 mod infrastructure;
+mod people;
 mod systems;
+mod treemap;
+mod zones;
 
 use graph::build_ship_graph;
 use infrastructure::layout_ship;
-use systems::{generate_ship_systems, generate_atmospheres};
 use people::{generate_crew, generate_passengers};
+use systems::{generate_atmospheres, generate_ship_systems};
 
 #[allow(dead_code)]
 const CORRIDOR_WIDTH: f32 = 6.0;
