@@ -1,5 +1,6 @@
 //! Movement and pathfinding system - moves people through rooms via doors.
 
+use crate::logic::pathfinding::{DoorEdge, NavGraph};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -73,57 +74,20 @@ fn get_current_waypoint(mov: &Movement) -> (f32, f32, u32, bool) {
     }
 }
 
-/// Compute the world position of a door.
-/// Uses the stored absolute door_x/door_y coordinates.
-pub fn door_world_position(door: &Door, _rooms: &[Room]) -> (f32, f32) {
-    (door.door_x, door.door_y)
-}
-
-/// BFS pathfinding through doors, returns list of (door_x, door_y, next_room_id)
-fn find_path(ctx: &ReducerContext, from_room: u32, to_room: u32) -> Vec<(f32, f32, u32)> {
-    if from_room == to_room {
-        return vec![];
-    }
-
-    // Build adjacency list from doors using absolute door coordinates
-    let doors: Vec<Door> = ctx.db.door().iter().collect();
-    let mut adj: std::collections::HashMap<u32, Vec<(u32, f32, f32)>> =
-        std::collections::HashMap::new();
-    for door in &doors {
-        adj.entry(door.room_a)
-            .or_default()
-            .push((door.room_b, door.door_x, door.door_y));
-        adj.entry(door.room_b)
-            .or_default()
-            .push((door.room_a, door.door_x, door.door_y));
-    }
-
-    // BFS
-    let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut queue: std::collections::VecDeque<(u32, Vec<(f32, f32, u32)>)> =
-        std::collections::VecDeque::new();
-    visited.insert(from_room);
-    queue.push_back((from_room, vec![]));
-
-    while let Some((current, path)) = queue.pop_front() {
-        if let Some(neighbors) = adj.get(&current) {
-            for &(next_room, door_x, door_y) in neighbors {
-                if next_room == to_room {
-                    let mut result = path.clone();
-                    result.push((door_x, door_y, next_room));
-                    return result;
-                }
-                if visited.insert(next_room) {
-                    let mut new_path = path.clone();
-                    new_path.push((door_x, door_y, next_room));
-                    queue.push_back((next_room, new_path));
-                }
-            }
-        }
-    }
-
-    // No path found — direct move as fallback
-    vec![]
+/// Build a NavGraph from the current door table.
+fn build_nav_graph(ctx: &ReducerContext) -> NavGraph {
+    let edges: Vec<DoorEdge> = ctx
+        .db
+        .door()
+        .iter()
+        .map(|d| DoorEdge {
+            room_a: d.room_a,
+            room_b: d.room_b,
+            door_x: d.door_x,
+            door_y: d.door_y,
+        })
+        .collect();
+    NavGraph::from_doors(&edges)
 }
 
 /// Start movement for a person to a target room, using pathfinding
@@ -139,15 +103,18 @@ pub fn start_movement_to(ctx: &ReducerContext, person_id: u64, target_room_id: u
         return;
     };
 
-    // Find path through doors
-    let waypoints = find_path(ctx, pos.room_id, target_room_id);
+    // Find path through doors using pure NavGraph
+    let mut graph = build_nav_graph(ctx);
+    let waypoints = graph.find_path(pos.room_id, target_room_id);
 
-    // Build path string: each waypoint is "x,y,room_id" separated by ";"
-    // Final waypoint is the target position inside the destination room
-    let mut path_parts: Vec<String> = waypoints
-        .iter()
-        .map(|(dx, dy, rid)| format!("{},{},{}", dx, dy, rid))
-        .collect();
+    // Build path string from waypoints
+    let mut path_parts: Vec<String> = match &waypoints {
+        Some(wps) => wps
+            .iter()
+            .map(|wp| format!("{},{},{}", wp.door_x, wp.door_y, wp.room_id))
+            .collect(),
+        None => vec![], // unreachable destination — move directly
+    };
     // Add final destination (center of target room)
     path_parts.push(format!(
         "{},{},{}",
