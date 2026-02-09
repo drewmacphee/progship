@@ -10,6 +10,7 @@
 use progship_logic::constants::{activity_types, groups, room_types, shifts};
 use progship_logic::duty;
 use progship_logic::economy::{self, RationingLevel, ResourceLevels, ResourceValues};
+use progship_logic::geometry::{self, DoorInfo, RoomRect, Severity};
 use progship_logic::health::{self, InjurySeverity};
 use progship_logic::mission::{self, Destination, MissionConfig, PropulsionType};
 use progship_logic::pathfinding::{DoorEdge, NavGraph};
@@ -72,6 +73,9 @@ fn main() {
 
     // 8. System variant consistency
     results.extend(validate_system_variants(verbose));
+
+    // 9. Geometry validation (synthetic layout)
+    results.extend(validate_geometry(verbose));
 
     // ── Summary ──
     println!();
@@ -829,7 +833,356 @@ fn validate_utility_ai(verbose: bool) -> Vec<TestResult> {
     results
 }
 
-// ── 8. System Variants ──────────────────────────────────────────────────
+// ── 9. Geometry Validation ──────────────────────────────────────────────
+
+fn validate_geometry(verbose: bool) -> Vec<TestResult> {
+    println!("--- Geometry Validation ---");
+    let mut results = Vec::new();
+
+    // Build a synthetic 3-deck ship layout for validation
+    let hull_width = 65.0;
+    let hull_length = 400.0;
+
+    let rooms = vec![
+        // Deck 0: 4 command rooms
+        RoomRect {
+            id: 1,
+            deck: 0,
+            x: 0.0,
+            y: 0.0,
+            width: 15.0,
+            height: 10.0,
+            room_type: room_types::BRIDGE,
+            capacity: 20,
+        },
+        RoomRect {
+            id: 2,
+            deck: 0,
+            x: 15.0,
+            y: 0.0,
+            width: 15.0,
+            height: 10.0,
+            room_type: room_types::CONFERENCE,
+            capacity: 30,
+        },
+        RoomRect {
+            id: 3,
+            deck: 0,
+            x: 30.0,
+            y: 0.0,
+            width: 15.0,
+            height: 10.0,
+            room_type: room_types::CIC,
+            capacity: 15,
+        },
+        RoomRect {
+            id: 4,
+            deck: 0,
+            x: 45.0,
+            y: 0.0,
+            width: 15.0,
+            height: 10.0,
+            room_type: room_types::COMMS_ROOM,
+            capacity: 10,
+        },
+        // Deck 1: 3 service rooms
+        RoomRect {
+            id: 5,
+            deck: 1,
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 15.0,
+            room_type: room_types::MESS_HALL,
+            capacity: 100,
+        },
+        RoomRect {
+            id: 6,
+            deck: 1,
+            x: 20.0,
+            y: 0.0,
+            width: 20.0,
+            height: 15.0,
+            room_type: room_types::GALLEY,
+            capacity: 20,
+        },
+        RoomRect {
+            id: 7,
+            deck: 1,
+            x: 40.0,
+            y: 0.0,
+            width: 20.0,
+            height: 15.0,
+            room_type: room_types::GYM,
+            capacity: 40,
+        },
+        // Deck 2: 2 engineering rooms
+        RoomRect {
+            id: 8,
+            deck: 2,
+            x: 0.0,
+            y: 0.0,
+            width: 30.0,
+            height: 20.0,
+            room_type: room_types::REACTOR,
+            capacity: 10,
+        },
+        RoomRect {
+            id: 9,
+            deck: 2,
+            x: 30.0,
+            y: 0.0,
+            width: 30.0,
+            height: 20.0,
+            room_type: room_types::ENGINEERING,
+            capacity: 15,
+        },
+    ];
+
+    let doors = vec![
+        // Deck 0 doors
+        DoorInfo {
+            id: 1,
+            room_a: 1,
+            room_b: 2,
+            door_x: 15.0,
+            door_y: 5.0,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        DoorInfo {
+            id: 2,
+            room_a: 2,
+            room_b: 3,
+            door_x: 30.0,
+            door_y: 5.0,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        DoorInfo {
+            id: 3,
+            room_a: 3,
+            room_b: 4,
+            door_x: 45.0,
+            door_y: 5.0,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        // Deck 1 doors
+        DoorInfo {
+            id: 4,
+            room_a: 5,
+            room_b: 6,
+            door_x: 20.0,
+            door_y: 7.5,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        DoorInfo {
+            id: 5,
+            room_a: 6,
+            room_b: 7,
+            door_x: 40.0,
+            door_y: 7.5,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        // Deck 2 doors
+        DoorInfo {
+            id: 6,
+            room_a: 8,
+            room_b: 9,
+            door_x: 30.0,
+            door_y: 10.0,
+            wall_a: 1,
+            wall_b: 3,
+        },
+        // Inter-deck shafts
+        DoorInfo {
+            id: 7,
+            room_a: 2,
+            room_b: 5,
+            door_x: 15.0,
+            door_y: 0.0,
+            wall_a: 2,
+            wall_b: 0,
+        },
+        DoorInfo {
+            id: 8,
+            room_a: 6,
+            room_b: 8,
+            door_x: 30.0,
+            door_y: 0.0,
+            wall_a: 2,
+            wall_b: 0,
+        },
+    ];
+
+    // Run all geometry checks on the valid layout
+    let errs = geometry::validate_all(&rooms, &doors, hull_width, hull_length);
+    let error_count = errs
+        .iter()
+        .filter(|e| e.severity == Severity::Error)
+        .count();
+    let warn_count = errs
+        .iter()
+        .filter(|e| e.severity == Severity::Warning)
+        .count();
+
+    results.push(TestResult {
+        name: "geometry_valid_layout".into(),
+        passed: error_count == 0,
+        detail: format!(
+            "{} rooms, {} doors: {} errors, {} warnings",
+            rooms.len(),
+            doors.len(),
+            error_count,
+            warn_count
+        ),
+    });
+
+    if verbose || error_count > 0 {
+        for e in &errs {
+            let icon = if e.severity == Severity::Error {
+                "ERROR"
+            } else {
+                "WARN"
+            };
+            println!("  {}: {}", icon, e.message);
+        }
+    }
+
+    // Detect bad room (zero width)
+    let mut bad_rooms = rooms.clone();
+    bad_rooms.push(RoomRect {
+        id: 99,
+        deck: 0,
+        x: 0.0,
+        y: 20.0,
+        width: 0.0,
+        height: 10.0,
+        room_type: room_types::STORAGE,
+        capacity: 5,
+    });
+    let dim_errs = geometry::check_room_dimensions(&bad_rooms);
+    results.push(TestResult {
+        name: "geometry_catches_zero_dim".into(),
+        passed: dim_errs.len() == 1,
+        detail: "zero-width room detected".into(),
+    });
+
+    // Detect overlap
+    let overlap_rooms = vec![
+        RoomRect {
+            id: 10,
+            deck: 5,
+            x: 0.0,
+            y: 0.0,
+            width: 15.0,
+            height: 15.0,
+            room_type: room_types::MESS_HALL,
+            capacity: 50,
+        },
+        RoomRect {
+            id: 11,
+            deck: 5,
+            x: 10.0,
+            y: 10.0,
+            width: 15.0,
+            height: 15.0,
+            room_type: room_types::GYM,
+            capacity: 40,
+        },
+    ];
+    let overlap_errs = geometry::check_room_overlaps(&overlap_rooms);
+    results.push(TestResult {
+        name: "geometry_catches_overlap".into(),
+        passed: overlap_errs.len() == 1,
+        detail: "overlapping rooms detected".into(),
+    });
+
+    // Detect disconnected room
+    let island_rooms = vec![
+        RoomRect {
+            id: 20,
+            deck: 9,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            room_type: room_types::BRIDGE,
+            capacity: 20,
+        },
+        RoomRect {
+            id: 21,
+            deck: 9,
+            x: 10.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            room_type: room_types::CONFERENCE,
+            capacity: 30,
+        },
+        RoomRect {
+            id: 22,
+            deck: 9,
+            x: 50.0,
+            y: 50.0,
+            width: 10.0,
+            height: 10.0,
+            room_type: room_types::STORAGE,
+            capacity: 10,
+        },
+    ];
+    let island_doors = vec![DoorInfo {
+        id: 100,
+        room_a: 20,
+        room_b: 21,
+        door_x: 10.0,
+        door_y: 5.0,
+        wall_a: 1,
+        wall_b: 3,
+    }];
+    let conn_errs = geometry::check_deck_connectivity(&island_rooms, &island_doors);
+    results.push(TestResult {
+        name: "geometry_catches_island".into(),
+        passed: conn_errs.len() == 1,
+        detail: "disconnected room detected".into(),
+    });
+
+    // Detect missing inter-deck connection
+    let deck_rooms = vec![
+        RoomRect {
+            id: 30,
+            deck: 0,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            room_type: room_types::BRIDGE,
+            capacity: 20,
+        },
+        RoomRect {
+            id: 31,
+            deck: 1,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            room_type: room_types::MESS_HALL,
+            capacity: 50,
+        },
+    ];
+    let no_shaft_doors: Vec<DoorInfo> = vec![];
+    let deck_errs = geometry::check_inter_deck_connectivity(&deck_rooms, &no_shaft_doors);
+    results.push(TestResult {
+        name: "geometry_catches_deck_gap".into(),
+        passed: deck_errs.len() == 1,
+        detail: "missing inter-deck connection detected".into(),
+    });
+
+    results
+}
 
 fn validate_system_variants(_verbose: bool) -> Vec<TestResult> {
     println!("--- System Variants ---");
