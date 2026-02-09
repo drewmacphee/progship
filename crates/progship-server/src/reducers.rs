@@ -56,6 +56,7 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
             family_name,
             is_crew,
             is_player: true,
+            is_alive: true,
             owner_identity: Some(ctx.sender),
         })
         .id;
@@ -577,8 +578,9 @@ pub fn tick(ctx: &ReducerContext, delta_seconds: f32) {
     simulation::tick_activities(ctx, sim_time);
     simulation::tick_wandering(ctx, sim_time);
 
-    // T2: Slower systems (needs, social, duty)
+    // T2: Slower systems (needs, social, duty, death)
     simulation::tick_needs(ctx, delta_hours as f32);
+    simulation::tick_death(ctx, sim_time);
     simulation::tick_social(ctx, sim_time);
     simulation::tick_duty(ctx, sim_time);
 

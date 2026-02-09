@@ -1,5 +1,6 @@
 //! Need decay system - hunger, fatigue, social, comfort, hygiene.
 
+use crate::logic::health;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -11,6 +12,13 @@ pub fn tick_needs(ctx: &ReducerContext, delta_hours: f32) {
 
     for needs in ctx.db.needs().iter() {
         let mut n = needs;
+
+        // Skip dead people
+        if let Some(person) = ctx.db.person().id().find(n.person_id) {
+            if !person.is_alive {
+                continue;
+            }
+        }
 
         // Look up activity for modified decay rates
         let activity = ctx.db.activity().person_id().find(n.person_id);
@@ -27,8 +35,45 @@ pub fn tick_needs(ctx: &ReducerContext, delta_hours: f32) {
             rates,
         );
 
-        // Health changes
-        n.health = health_recovery(n.health, n.hunger, n.fatigue, delta_hours);
+        // Health recovery — sickbay-aware with injury severity
+        let (in_medical, medical_skill) =
+            if let Some(pos) = ctx.db.position().person_id().find(n.person_id) {
+                if let Some(room) = ctx.db.room().id().find(pos.room_id) {
+                    let is_med = health::is_healing_room(room.room_type);
+                    // Find highest medical skill in the room (simplified: check if any medical crew)
+                    let skill = if is_med {
+                        ctx.db
+                            .position()
+                            .iter()
+                            .filter(|p| p.room_id == pos.room_id && p.person_id != n.person_id)
+                            .filter_map(|p| {
+                                let crew = ctx.db.crew().person_id().find(p.person_id)?;
+                                if crew.department == departments::MEDICAL {
+                                    ctx.db.skills().person_id().find(p.person_id)
+                                } else {
+                                    None
+                                }
+                            })
+                            .map(|s| s.medical)
+                            .fold(0.0f32, f32::max)
+                    } else {
+                        0.0
+                    };
+                    (is_med, skill)
+                } else {
+                    (false, 0.0)
+                }
+            } else {
+                (false, 0.0)
+            };
+        n.health = health::compute_health_recovery(
+            n.health,
+            n.hunger,
+            n.fatigue,
+            in_medical,
+            medical_skill,
+            delta_hours,
+        );
         n.health = starvation_damage(n.health, n.hunger, delta_hours);
         n.health = exhaustion_damage(n.health, n.fatigue, delta_hours);
 
@@ -93,15 +138,6 @@ pub fn apply_need_decay(
         (comfort + delta_hours * rates.3).clamp(0.0, 1.0),
         (hygiene + delta_hours * rates.4).clamp(0.0, 1.0),
     )
-}
-
-/// Calculate health recovery rate (slow, requires low hunger and fatigue)
-pub fn health_recovery(health: f32, hunger: f32, fatigue: f32, delta_hours: f32) -> f32 {
-    if health < 1.0 && hunger < 0.5 && fatigue < 0.5 {
-        (health + 0.01 * delta_hours).min(1.0)
-    } else {
-        health
-    }
 }
 
 /// Calculate health damage from starvation
@@ -270,23 +306,19 @@ mod tests {
     }
 
     #[test]
-    fn test_health_recovery_requires_low_hunger_and_fatigue() {
-        // Should recover
-        let health = health_recovery(0.5, 0.3, 0.3, 1.0);
-        assert!(health > 0.5);
-        assert_eq!(health, 0.51); // 0.5 + 0.01 * 1.0
+    fn test_health_recovery_uses_logic_module() {
+        // Natural recovery with satisfied needs
+        let h = health::compute_health_recovery(0.5, 0.3, 0.3, false, 0.0, 1.0);
+        assert!(h > 0.5);
+        assert!((h - 0.51).abs() < 0.001);
 
-        // Should not recover - hunger too high
-        let health = health_recovery(0.5, 0.6, 0.3, 1.0);
-        assert_eq!(health, 0.5);
+        // No recovery when hungry
+        let h = health::compute_health_recovery(0.5, 0.6, 0.3, false, 0.0, 1.0);
+        assert!((h - 0.5).abs() < 0.001);
 
-        // Should not recover - fatigue too high
-        let health = health_recovery(0.5, 0.3, 0.6, 1.0);
-        assert_eq!(health, 0.5);
-
-        // Should not recover - already at max
-        let health = health_recovery(1.0, 0.3, 0.3, 1.0);
-        assert_eq!(health, 1.0);
+        // Already at max
+        let h = health::compute_health_recovery(1.0, 0.3, 0.3, false, 0.0, 1.0);
+        assert!((h - 1.0).abs() < 0.001);
     }
 
     #[test]

@@ -8,9 +8,9 @@ use super::movement::start_movement_to;
 /// Select new activities when current ones complete, and handle activity effects.
 pub fn tick_activities(ctx: &ReducerContext, sim_time: f64) {
     for activity in ctx.db.activity().iter() {
-        // Skip player-controlled characters
+        // Skip player-controlled and dead characters
         if let Some(person) = ctx.db.person().id().find(activity.person_id) {
-            if person.is_player {
+            if person.is_player || !person.is_alive {
                 continue;
             }
         }

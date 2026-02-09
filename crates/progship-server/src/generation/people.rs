@@ -149,6 +149,7 @@ pub(super) fn generate_crew(ctx: &ReducerContext, count: u32) {
                 family_name: FAMILY_NAMES[family_idx].to_string(),
                 is_crew: true,
                 is_player: false,
+                is_alive: true,
                 owner_identity: None,
             })
             .id;
@@ -294,6 +295,7 @@ pub(super) fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count:
                 family_name: FAMILY_NAMES[family_idx].to_string(),
                 is_crew: false,
                 is_player: false,
+                is_alive: true,
                 owner_identity: None,
             })
             .id;
