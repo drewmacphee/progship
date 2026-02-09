@@ -1,5 +1,6 @@
-//! Ship systems simulation - resource flow, subsystem degradation, power generation.
+//! Ship systems simulation - resource flow, subsystem degradation, economy loop.
 
+use crate::logic::economy;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -7,6 +8,23 @@ use spacetimedb::{ReducerContext, Table};
 const FOOD_RATE: f32 = 2.0 / 24.0;
 const WATER_RATE: f32 = 3.0 / 24.0;
 const OXYGEN_RATE: f32 = 0.84 / 24.0;
+
+fn resource_values(r: &ShipResources) -> economy::ResourceValues {
+    economy::ResourceValues {
+        food: r.food,
+        food_cap: r.food_cap,
+        water: r.water,
+        water_cap: r.water_cap,
+        oxygen: r.oxygen,
+        oxygen_cap: r.oxygen_cap,
+        power: r.power,
+        power_cap: r.power_cap,
+        fuel: r.fuel,
+        fuel_cap: r.fuel_cap,
+        spare_parts: r.spare_parts,
+        spare_parts_cap: r.spare_parts_cap,
+    }
+}
 
 /// Calculate resource consumption for a population
 pub fn calculate_resource_consumption(person_count: f32, delta_hours: f32) -> (f32, f32, f32) {
@@ -44,21 +62,26 @@ pub fn health_to_status(health: f32) -> u8 {
     }
 }
 
-/// Update ship systems: resource production, consumption, degradation.
+/// Update ship systems: resource production, consumption, degradation, economy.
 pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     let Some(mut resources) = ctx.db.ship_resources().id().find(0) else {
         return;
     };
 
-    let person_count = ctx.db.person().iter().count() as f32;
+    let alive_count = ctx.db.person().iter().filter(|p| p.is_alive).count() as f32;
 
-    // Base consumption rates
+    // Compute current rationing level
+    let levels = economy::compute_levels(&resource_values(&resources));
+    let rationing = economy::compute_rationing(&levels);
+    let consumption_factor = economy::rationing_consumption_factor(rationing);
+
+    // Base consumption adjusted by rationing
     let (food_consumed, water_consumed, oxygen_consumed) =
-        calculate_resource_consumption(person_count, delta_hours);
+        calculate_resource_consumption(alive_count, delta_hours);
 
-    resources.food = (resources.food - food_consumed).max(0.0);
-    resources.water = (resources.water - water_consumed).max(0.0);
-    resources.oxygen = (resources.oxygen - oxygen_consumed).max(0.0);
+    resources.food = (resources.food - food_consumed * consumption_factor).max(0.0);
+    resources.water = (resources.water - water_consumed * consumption_factor).max(0.0);
+    resources.oxygen = (resources.oxygen - oxygen_consumed).max(0.0); // O2 can't be rationed
 
     // Subsystem-level production/consumption and degradation
     let subsystems: Vec<Subsystem> = ctx.db.subsystem().iter().collect();
@@ -87,11 +110,11 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
                 }
             }
             subsystem_types::O2_GENERATION => {
-                let o2_produced = person_count * OXYGEN_RATE * efficiency * delta_hours;
+                let o2_produced = alive_count * OXYGEN_RATE * efficiency * delta_hours;
                 resources.oxygen = (resources.oxygen + o2_produced).min(resources.oxygen_cap);
             }
             subsystem_types::WATER_FILTRATION | subsystem_types::WATER_DISTILLATION => {
-                let recycled = person_count * WATER_RATE * 0.45 * efficiency * delta_hours;
+                let recycled = alive_count * WATER_RATE * 0.45 * efficiency * delta_hours;
                 resources.water = (resources.water + recycled).min(resources.water_cap);
             }
             subsystem_types::GROWTH_CHAMBER => {
@@ -178,6 +201,83 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
     }
 
     ctx.db.ship_resources().id().update(resources);
+
+    // --- Economy effects: scarcity, rationing, morale, health ---
+
+    // Recompute levels after production/consumption
+    let res = ctx.db.ship_resources().id().find(0).unwrap();
+    let updated_levels = economy::compute_levels(&resource_values(&res));
+    let new_rationing = economy::compute_rationing(&updated_levels);
+
+    // Update rationing level on ShipConfig
+    if let Some(config) = ctx.db.ship_config().id().find(0) {
+        let old_rationing = economy::u8_to_rationing(config.rationing_level);
+        if new_rationing != old_rationing {
+            let mut c = config;
+            c.rationing_level = economy::rationing_to_u8(new_rationing);
+            ctx.db.ship_config().id().update(c);
+        }
+    }
+
+    // Generate RESOURCE_SHORTAGE events for critical shortages
+    let shortages = economy::detect_shortages(&updated_levels);
+    let sim_time = ctx
+        .db
+        .ship_config()
+        .id()
+        .find(0)
+        .map(|c| c.sim_time)
+        .unwrap_or(0.0);
+    for (resource_name, level) in &shortages {
+        // Only create event if no active shortage event for this resource
+        let already_active = ctx.db.event().iter().any(|e| {
+            e.event_type == event_types::RESOURCE_SHORTAGE && e.state == event_states::ACTIVE
+        });
+        if !already_active {
+            let severity = if *level < 0.05 { 0.9 } else { 0.6 };
+            ctx.db.event().insert(Event {
+                id: 0,
+                event_type: event_types::RESOURCE_SHORTAGE,
+                room_id: 0, // Ship-wide
+                started_at: sim_time,
+                duration: 1.0,
+                state: event_states::ACTIVE,
+                responders_needed: 0,
+                responders_assigned: 0,
+                severity,
+            });
+            log::warn!(
+                "Resource shortage: {} at {:.0}%",
+                resource_name,
+                level * 100.0
+            );
+            break; // One event per tick is enough
+        }
+    }
+
+    // Morale and health effects from rationing/depletion
+    let morale_penalty = economy::rationing_morale_penalty(new_rationing) * delta_hours;
+    let health_damage = economy::resource_health_damage(&updated_levels) * delta_hours;
+
+    if morale_penalty > 0.0 || health_damage > 0.0 {
+        let needs_list: Vec<Needs> = ctx.db.needs().iter().collect();
+        for needs in needs_list {
+            // Skip dead
+            if let Some(person) = ctx.db.person().id().find(needs.person_id) {
+                if !person.is_alive {
+                    continue;
+                }
+            }
+            let mut n = needs;
+            if morale_penalty > 0.0 {
+                n.morale = (n.morale - morale_penalty).max(0.0);
+            }
+            if health_damage > 0.0 {
+                n.health = (n.health - health_damage).max(0.0);
+            }
+            ctx.db.needs().person_id().update(n);
+        }
+    }
 }
 
 #[cfg(test)]

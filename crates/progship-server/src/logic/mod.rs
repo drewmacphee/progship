@@ -5,6 +5,7 @@
 
 pub mod actions;
 pub mod duty;
+pub mod economy;
 pub mod health;
 pub mod movement;
 pub mod pathfinding;

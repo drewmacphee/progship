@@ -132,6 +132,7 @@ pub fn init_ship(
         time_scale: 1.0,
         paused: false,
         death_count: 0,
+        rationing_level: 0,
     });
 
     // Resources (singleton)
