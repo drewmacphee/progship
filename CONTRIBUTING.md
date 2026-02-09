@@ -118,8 +118,8 @@ After making changes to ship generation, verify door placement:
 Or manually:
 
 ```bash
-spacetime -s http://localhost:3000 sql progship "SELECT id, room_type, deck, x, y, width, height FROM room" > rooms_dump.txt
-spacetime -s http://localhost:3000 sql progship "SELECT id, room_a, room_b, wall_a, wall_b, door_x, door_y, width FROM door" > doors_dump.txt
+spacetime sql progship -s http://localhost:3000 "SELECT id, room_type, deck, x, y, width, height FROM room" > rooms_dump.txt
+spacetime sql progship -s http://localhost:3000 "SELECT id, room_a, room_b, wall_a, wall_b, door_x, door_y, width FROM door" > doors_dump.txt
 python verify_doors.py
 ```
 
