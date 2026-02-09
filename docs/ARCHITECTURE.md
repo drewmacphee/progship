@@ -219,8 +219,14 @@ Reducers are functions called by clients to mutate tables. Think of them as API 
 - `client_disconnected`: Removes player from ConnectedPlayer table
 - `player_join(given_name, family_name, is_crew)`: Creates Person + Position + Needs + Personality
 - `player_move(dx, dy)`: Updates player position, handles room transitions
-- `elevator_up()` / `elevator_down()`: Moves player between decks via vertical shafts
-- `ladder_up()` / `ladder_down()`: Same, but for ladder shafts
+- `player_use_elevator(target_deck)`: Moves player to a different deck via elevator shaft
+- `player_use_ladder(direction)`: Moves player up/down one deck via ladder shaft
+- `player_interact(target_person_id)`: Interact with another person
+- `player_action(action)`: Generic action handler
+
+#### Ship Configuration
+- `set_paused(paused)`: Pause/unpause the simulation
+- `set_time_scale(scale)`: Adjust simulation speed (time acceleration)
 
 #### Ship Initialization
 - `init_ship(name, deck_count, crew_count, passenger_count)`: Main entry point
@@ -229,69 +235,63 @@ Reducers are functions called by clients to mutate tables. Think of them as API 
   - Spawns NPCs with initial needs/positions
 
 #### Simulation Tickers
-- `tick_fast()`: Called at high frequency for movement interpolation (currently not used client-side)
-- `tick_slow()`: Called less frequently for needs decay, activities, social interactions
+- `tick(delta_seconds)`: Main simulation tick, advances all simulation systems
 
 ### Generation Pipeline
 
-The `generation.rs` module procedurally creates the ship layout when `init_ship` is called. It follows an **infrastructure-first** approach:
+The `generation.rs` module procedurally creates the ship layout when `init_ship` is called. It follows a **graph-first** approach:
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Hull Sizing                                                 │
-│    • Deck 0–1 (Command): 40m × 200m (narrow prow)              │
-│    • Deck 2 to N-3 (Habitation/Mid): 65m × 400m (full beam)    │
-│    • Last 2 decks (Engineering): 50m × 300m (tapered stern)    │
+│ 1. build_ship_graph()                                          │
+│    • Creates GraphNode entries (one per room concept)          │
+│    • Creates GraphEdge entries (connections between nodes)     │
+│    • Determines room types, counts, and logical relationships  │
 └──────────────────────┬─────────────────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────────────────┐
-│ 2. Grid Allocation                                             │
-│    • grid[x][y] where 1 cell = 1 meter                         │
-│    • Each cell is marked: Empty, Corridor, Shaft, Room         │
+│ 2. layout_ship()                                               │
+│    • Creates Room tables from graph nodes                      │
+│    • Positions rooms on decks with x/y coordinates             │
+│    • Creates Corridor tables (main spine, cross-corridors)     │
+│    • Creates VerticalShaft tables (elevators and ladders)      │
+│    • Creates Door tables connecting rooms and corridors        │
 └──────────────────────┬─────────────────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────────────────┐
-│ 3. Stamp Corridors                                             │
-│    • Main spine (fore-aft, 3m width)                           │
-│    • Cross-corridors (every 50m, port-starboard)               │
-│    • Service corridor (starboard edge, 2m width)               │
+│ 3. generate_ship_systems()                                     │
+│    • Creates ShipSystem entries (power, life support, engines) │
+│    • Creates Subsystem entries (generators, scrubbers, etc.)   │
+│    • Creates SystemComponent entries (physical instances)      │
+│    • Creates InfraEdge entries (power/air flow dependencies)   │
 └──────────────────────┬─────────────────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────────────────┐
-│ 4. Stamp Vertical Shafts                                       │
-│    • Elevators and ladders at FIXED (x, y) on every deck       │
-│    • Ensures perfect vertical alignment                        │
+│ 4. generate_atmospheres()                                      │
+│    • Creates DeckAtmosphere entries (per-deck O2/CO2 tracking) │
+│    • Initializes breathable atmosphere on all decks            │
 └──────────────────────┬─────────────────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────────────────┐
-│ 5. Zone Identification                                         │
-│    • Find empty rectangular regions between infrastructure     │
+│ 5. generate_crew()                                             │
+│    • Creates Person entries for crew members                   │
+│    • Assigns departments, shifts, duty stations               │
+│    • Creates Position, Needs, Personality, Skills, Crew tables │
 └──────────────────────┬─────────────────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────────────────┐
-│ 6. Treemap Packing                                             │
-│    • Squarified treemap algorithm fills zones with rooms       │
-│    • Rooms: quarters, mess halls, med bays, recreation, etc.   │
-└──────────────────────┬─────────────────────────────────────────┘
-                       │
-┌──────────────────────▼─────────────────────────────────────────┐
-│ 7. Door Placement                                              │
-│    • Scan for room↔corridor adjacencies                        │
-│    • Place doors at wall midpoints                             │
-│    • Room↔room logical doors (e.g., quarters to bathroom)      │
-└──────────────────────┬─────────────────────────────────────────┘
-                       │
-┌──────────────────────▼─────────────────────────────────────────┐
-│ 8. Force-Connect Orphans                                       │
-│    • BFS to find unconnected rooms                             │
-│    • Add emergency doors to ensure full connectivity           │
+│ 6. generate_passengers()                                       │
+│    • Creates Person entries for passengers                     │
+│    • Assigns cabin classes                                     │
+│    • Creates Position, Needs, Personality, Skills, Passenger   │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 **Current Status:**
 - Door verification: **0 errors, 0 warnings** across 1,744 doors
-- Infrastructure-first guarantees walkable corridors by construction
-- Known issue: Treemap packer inflates room sizes (14m² cabin → 450m²)
+- Graph-first approach ensures logical connectivity by design
+- Room-to-room doors for logical pairs (galley↔mess, surgery↔hospital)
+- Rooms connect primarily to corridors; corridors form circulation spine
 
 ### Simulation Systems
 
@@ -416,7 +416,7 @@ if player_state.move_send_timer >= 0.05 {  // 50ms = 20Hz
 
 Doors and elevators are triggered instantly (no batching):
 - `E` key: Check distance to nearest door, call door reducer if close
-- Arrow keys: Call `elevator_up/down` or `ladder_up/down`
+- Number keys / PageUp/PageDown: Call `player_use_elevator(target_deck)` or `player_use_ladder(direction)`
 
 ### UI Overlay
 
@@ -537,14 +537,21 @@ For remote multiplayer:
 1. **Define constant in `tables.rs`:**
    ```rust
    // In the room_types module
-   pub const HYDROPONICS: u32 = 88;  // Pick unused ID in Life Support range (80-89)
+   pub const HYDROPONICS: u8 = 88;  // Pick unused ID in Life Support range (80-89)
    ```
 
 2. **Add to generation logic in `generation.rs`:**
    ```rust
-   // In the room allocation function
-   let hydroponics_count = deck_population / 500;  // Example: 1 bay per 500 people
-   add_rooms_to_manifest(deck, HYDROPONICS, hydroponics_count, 80.0 /* m² target */);
+   // In the build_ship_graph or facility manifest
+   FacilitySpec {
+       name: "Hydroponics Bay",
+       room_type: HYDROPONICS,
+       target_area: 80.0,
+       capacity: 20,
+       count: 2,  // 2 bays per deck
+       deck_zone: 4,  // Life support zone
+       group: 0,
+   }
    ```
 
 3. **Update client rendering (optional):**
@@ -609,9 +616,9 @@ For remote multiplayer:
 4. **Call from tick reducer in `reducers.rs`:**
    ```rust
    #[reducer]
-   pub fn tick_slow(ctx: &ReducerContext) {
-       // ... existing systems
-       simulation::tick_radiation(ctx);
+   pub fn tick(ctx: &ReducerContext, delta_seconds: f32) {
+       // ... existing simulation systems
+       simulation::tick_radiation(ctx, delta_seconds);
    }
    ```
 
