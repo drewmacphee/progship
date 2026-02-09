@@ -3,14 +3,14 @@
 //! Implements the ship layout pipeline: stamps spine/cross/service corridors
 //! and vertical shafts onto a 2D grid, then packs functional rooms using treemap.
 
+use super::doors::should_have_room_door;
+use super::facilities::deck_range_for_zone;
+use super::hull::{hull_length, hull_width};
+use super::people::SimpleRng;
+use super::treemap::{squarified_treemap, PlacedRoom, RoomRequest};
+use super::zones::{find_empty_zones, GridZone};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
-use super::hull::{hull_width, hull_length};
-use super::zones::{find_empty_zones, GridZone};
-use super::treemap::{RoomRequest, squarified_treemap, PlacedRoom};
-use super::facilities::deck_range_for_zone;
-use super::doors::should_have_room_door;
-use super::people::SimpleRng;
 
 // Grid cell type markers
 const CELL_EMPTY: u8 = 0;
