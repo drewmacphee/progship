@@ -88,7 +88,10 @@ mod tests {
         assert_eq!(cabin.room_type, room_types::CABIN_SINGLE);
         assert_eq!(cabin.group, groups::PASSENGER);
 
-        let hydro = manifest.iter().find(|f| f.name == "Hydroponics Bay").unwrap();
+        let hydro = manifest
+            .iter()
+            .find(|f| f.name == "Hydroponics Bay")
+            .unwrap();
         assert_eq!(hydro.room_type, room_types::HYDROPONICS);
         assert_eq!(hydro.group, groups::LIFE_SUPPORT);
     }
