@@ -274,14 +274,12 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             carries: carries_flags::CREW_PATH | carries_flags::POWER | carries_flags::DATA,
         });
 
-        // Doors connecting adjacent spine segments (through cross-corridors)
-        // Each spine segment's SOUTH wall connects to the next segment's NORTH wall.
-        // The door is at the spine's center X and at the boundary Y between segments.
-        let spine_center_x = (spine_left + spine_right) as f32 / 2.0;
-        for _i in 0..spine_segments.len().saturating_sub(1) {
-            // Spine segments connect through cross-corridor rooms, not directly.
-            // seg_a SOUTH → cross-corridor NORTH, cross-corridor SOUTH → seg_b NORTH
-        }
+        // Doors connecting adjacent spine segments (through cross-corridors).
+        // Spine segments are not directly connected by doors here; instead:
+        //   seg_a SOUTH → cross-corridor NORTH
+        //   cross-corridor SOUTH → seg_b NORTH
+        // Door creation between spine and cross-corridor rooms is handled elsewhere
+        // in the generation pipeline; no direct spine-to-spine doors are added here.
 
         // FIX 2: Create Room entries for each cross-corridor
         // Width limited to svc_left (does not extend into service corridor zone)
