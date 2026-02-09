@@ -18,8 +18,8 @@ save.bin
 .spacetimedb/
 
 # Obsidian workspace (user-specific)
-.obsidian/workspace.json
-.obsidian/cache/
+**/.obsidian/workspace.json
+**/.obsidian/cache/
 archive/Hunyuan3D-2/
 
 # Large binary archives
