@@ -2,9 +2,9 @@
 //!
 //! Builds the logical ship graph from facility manifest before physical layout.
 
+use super::facilities::get_facility_manifest;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
-use super::facilities::get_facility_manifest;
 
 /// Descriptor for a graph node to be created during build_ship_graph.
 #[allow(dead_code)]

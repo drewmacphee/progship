@@ -1444,7 +1444,6 @@ pub fn generate_ship_systems(ctx: &ReducerContext) {
 // STEP 4: GENERATE ATMOSPHERES
 // ============================================================================
 
-
 pub fn generate_atmospheres(ctx: &ReducerContext, deck_count: u32) {
     for deck in 0..deck_count as i32 {
         ctx.db.deck_atmosphere().insert(DeckAtmosphere {

@@ -3,13 +3,13 @@
 //! Infrastructure-first layout: spine corridor, cross-corridors, service corridor,
 //! vertical shafts, then treemap-based room placement in empty zones.
 
-use crate::tables::*;
-use spacetimedb::{ReducerContext, Table};
-use super::hull::*;
-use super::zones::{find_empty_zones, CELL_EMPTY, GridZone};
-use super::treemap::squarified_treemap;
 use super::doors::should_have_room_door;
 use super::facilities::deck_range_for_zone;
+use super::hull::*;
+use super::treemap::squarified_treemap;
+use super::zones::{find_empty_zones, GridZone, CELL_EMPTY};
+use crate::tables::*;
+use spacetimedb::{ReducerContext, Table};
 
 /// Simple deterministic RNG for layout
 pub struct SimpleRng {
@@ -283,6 +283,9 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         //   cross-corridor SOUTH → seg_b NORTH
         // Door creation between spine and cross-corridor rooms is handled elsewhere
         // in the generation pipeline; no direct spine-to-spine doors are added here.
+
+        // Compute spine center X for door placement
+        let spine_center_x = (spine_left + spine_right) as f32 / 2.0;
 
         // FIX 2: Create Room entries for each cross-corridor
         // Width limited to svc_left (does not extend into service corridor zone)

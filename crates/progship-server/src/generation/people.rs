@@ -159,7 +159,12 @@ pub fn generate_crew(ctx: &ReducerContext, count: u32) {
             .map(|r| (r.x, r.y, r.width, r.height, r.id))
             .unwrap_or((0.0, 0.0, 6.0, 50.0, 0));
         let spread_x = (i % 2) as f32 * 2.0 - 1.0;
-        let spread_y = (i as f32 / 2.0).rem_euclid(sh - 2.0) - (sh / 2.0 - 1.0);
+        // Guard against NaN when sh <= 2.0 by ensuring divisor is positive
+        let spread_y = if sh > 2.0 {
+            (i as f32 / 2.0).rem_euclid(sh - 2.0) - (sh / 2.0 - 1.0)
+        } else {
+            0.0
+        };
         ctx.db.position().insert(Position {
             person_id,
             room_id: spawn_rid,
@@ -271,7 +276,12 @@ pub fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count: u32) {
             .map(|r| (r.x, r.y, r.width, r.height, r.id))
             .unwrap_or((0.0, 100.0, 30.0, 50.0, 0));
         let spread_x = ((i % 8) as f32 - 4.0) * 2.0;
-        let spread_y = ((i / 8) as f32).rem_euclid(sh - 2.0) - (sh / 2.0 - 1.0);
+        // Guard against NaN when sh <= 2.0 by ensuring divisor is positive
+        let spread_y = if sh > 2.0 {
+            ((i / 8) as f32).rem_euclid(sh - 2.0) - (sh / 2.0 - 1.0)
+        } else {
+            0.0
+        };
         ctx.db.position().insert(Position {
             person_id,
             room_id: spawn_rid,
