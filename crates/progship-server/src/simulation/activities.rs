@@ -1,5 +1,6 @@
 //! Activity selection system - NPCs choose activities based on needs and time.
 
+use crate::logic::duty as duty_logic;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -58,10 +59,18 @@ fn select_activity(
     person_id: u64,
     ctx: &ReducerContext,
 ) -> (u8, f32, Option<u32>) {
+    // Seek medical attention if injured
+    if crate::logic::health::should_seek_medical(needs.health) {
+        let room = find_room_of_type(ctx, room_types::HOSPITAL_WARD);
+        return (activity_types::IDLE, 1.0, room);
+    }
+
     // Check if crew member should be on duty
     if is_crew {
         if let Some(crew) = ctx.db.crew().person_id().find(person_id) {
-            if should_be_on_duty(crew.shift, hour) {
+            if duty_logic::should_be_on_duty(crew.shift, hour)
+                && duty_logic::is_fit_for_duty(needs.hunger, needs.fatigue, needs.health)
+            {
                 let room = find_room_for_activity(ctx, activity_types::ON_DUTY, crew.department);
                 return (activity_types::ON_DUTY, 2.0, room);
             }
@@ -96,8 +105,15 @@ fn select_activity(
         return (activity_types::EATING, 0.5, room);
     }
 
-    // Sleep schedule
-    if needs.fatigue > 0.5 && is_sleep_time(hour, is_crew) {
+    // Sleep schedule — shift-aware for crew
+    if is_crew {
+        if let Some(crew) = ctx.db.crew().person_id().find(person_id) {
+            if duty_logic::should_sleep(crew.shift, hour, needs.fatigue) {
+                let room = find_room_of_type_pred(ctx, room_types::is_quarters);
+                return (activity_types::SLEEPING, 8.0, room);
+            }
+        }
+    } else if needs.fatigue > 0.5 && duty_logic::is_passenger_sleep_time(hour) {
         let room = find_room_of_type_pred(ctx, room_types::is_quarters);
         return (activity_types::SLEEPING, 8.0, room);
     }
@@ -107,28 +123,13 @@ fn select_activity(
 }
 
 pub fn should_be_on_duty(shift: u8, hour: f32) -> bool {
-    match shift {
-        shifts::ALPHA => (6.0..14.0).contains(&hour),
-        shifts::BETA => (14.0..22.0).contains(&hour),
-        shifts::GAMMA => !(6.0..22.0).contains(&hour),
-        _ => false,
-    }
+    duty_logic::should_be_on_duty(shift, hour)
 }
 
 pub fn is_meal_time(hour: f32) -> bool {
     (7.0..8.0).contains(&hour) ||   // Breakfast
     (12.0..13.0).contains(&hour) ||  // Lunch
     (18.0..19.0).contains(&hour) // Dinner
-}
-
-pub fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
-    if !is_crew {
-        // Passengers sleep outside 6:00-22:00
-        !(6.0..22.0).contains(&hour)
-    } else {
-        // Crew sleeps based on shift (not general sleep time)
-        false
-    }
 }
 
 pub fn department_to_room_type(department: u8) -> u8 {
@@ -234,27 +235,6 @@ mod tests {
         assert!(!is_meal_time(10.0));
         assert!(!is_meal_time(15.0));
         assert!(!is_meal_time(20.0));
-    }
-
-    #[test]
-    fn test_is_sleep_time_crew() {
-        // Crew never sleeps during sleep time (they sleep based on shifts)
-        assert!(!is_sleep_time(23.0, true));
-        assert!(!is_sleep_time(3.0, true));
-        assert!(!is_sleep_time(12.0, true));
-    }
-
-    #[test]
-    fn test_is_sleep_time_passenger() {
-        // Passengers sleep outside 6:00-22:00
-        assert!(is_sleep_time(23.0, false));
-        assert!(is_sleep_time(0.0, false));
-        assert!(is_sleep_time(3.0, false));
-        assert!(is_sleep_time(5.9, false));
-        assert!(!is_sleep_time(6.0, false));
-        assert!(!is_sleep_time(12.0, false));
-        assert!(!is_sleep_time(21.9, false));
-        assert!(is_sleep_time(22.0, false));
     }
 
     #[test]
