@@ -359,20 +359,21 @@ fn on_connect_callback(conn: &DbConnection) {
 The server uses a 2D grid (x=east/west, y=fore/aft). The client renders in 3D:
 
 ```rust
-// Server coordinates (grid)
-let game_x = position.x;  // East (+) / West (-)
-let game_y = position.y;  // Fore (low) / Aft (high)
+// Example coordinate transformation
+// Server coordinates (from Position table)
+let server_x = position.x;  // East (+) / West (-)
+let server_y = position.y;  // Fore (low) / Aft (high)
 
-// Bevy 3D coordinates
-let world_x = game_x;          // Same as server
-let world_y = 0.0;             // Height (always 0 for now)
-let world_z = -game_y;         // INVERTED: Bevy Z opposes server Y
+// Transform to Bevy 3D world coordinates
+let client_x = server_x;           // Same as server X
+let client_y = 0.0;                // Height (vertical axis)
+let client_z = -server_y;          // INVERTED: Bevy Z opposes server Y
 
-// Cardinal directions
-// NORTH = 0 = low Y (fore)    → Bevy -Z
-// SOUTH = 1 = high Y (aft)    → Bevy +Z
-// EAST  = 2 = high X (starboard) → Bevy +X
-// WEST  = 3 = low X (port)    → Bevy -X
+// Cardinal directions in both coordinate systems:
+// NORTH = 0 = low server Y (fore)    → Bevy -Z direction
+// SOUTH = 1 = high server Y (aft)    → Bevy +Z direction
+// EAST  = 2 = high server X (starboard) → Bevy +X direction
+// WEST  = 3 = low server X (port)    → Bevy -X direction
 ```
 
 ### Camera System
@@ -594,19 +595,20 @@ For remote multiplayer:
 
 3. **Implement system logic in `simulation.rs`:**
    ```rust
-   pub fn tick_radiation(ctx: &ReducerContext) {
+   pub fn tick_radiation(ctx: &ReducerContext, delta_seconds: f32) {
        for person in ctx.db.person().iter() {
-           let position = ctx.db.position().person_id().find(person.id).unwrap();
-           let room = ctx.db.room().id().find(position.room_id).unwrap();
-           
-           // Check if room has shielding
-           let shielded = room.room_type == room_types::QUARTERS || /* ... */;
-           
-           // Update exposure
-           if let Some(mut exposure) = ctx.db.radiation_exposure().person_id().find(person.id) {
-               if !shielded {
-                   exposure.accumulated_rads += 0.01;  // Example increment
-                   ctx.db.radiation_exposure().person_id().update(exposure);
+           if let Some(position) = ctx.db.position().person_id().find(person.id) {
+               if let Some(room) = ctx.db.room().id().find(position.room_id) {
+                   // Check if room has shielding
+                   let shielded = room.room_type == room_types::QUARTERS || /* ... */;
+                   
+                   // Update exposure
+                   if let Some(mut exposure) = ctx.db.radiation_exposure().person_id().find(person.id) {
+                       if !shielded {
+                           exposure.accumulated_rads += 0.01 * delta_seconds;
+                           ctx.db.radiation_exposure().person_id().update(exposure);
+                       }
+                   }
                }
            }
        }
@@ -728,13 +730,15 @@ The server runs in a WebAssembly environment with strict limitations:
 
 | Metric | Target | Current Status |
 |--------|--------|----------------|
-| Agents simulated | 5,000–10,000 | ~150 |
+| Agents simulated | 5,000–10,000 | ~150 (early development) |
 | Movement tick | 60 Hz | ✅ (client-side) |
 | Needs tick | 0.1 Hz | ✅ |
 | Client render | 60 fps | ✅ |
 | Client input batch | 20 Hz | ✅ |
 | People sync (NPC rebuild) | 5 Hz | ✅ |
 | Door verification | 0 errors | ✅ |
+
+**Note:** The simulation is currently optimized for ~150 agents during early development. Scaling to 5,000+ agents will require implementing LOD (level of detail) systems, spatial partitioning, and optimized tick frequencies for distant agents.
 
 ---
 
