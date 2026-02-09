@@ -1613,7 +1613,7 @@ pub fn calculate_temperature_discomfort(
     temperature: f32,
     delta_hours: f32,
 ) -> f32 {
-    if temperature < 15.0 || temperature > 30.0 {
+    if !(15.0..=30.0).contains(&temperature) {
         (current_comfort + 0.1 * delta_hours).min(1.0)
     } else {
         current_comfort
@@ -1626,7 +1626,7 @@ pub fn calculate_temperature_damage(
     temperature: f32,
     delta_hours: f32,
 ) -> f32 {
-    if temperature < 5.0 || temperature > 40.0 {
+    if !(5.0..=40.0).contains(&temperature) {
         current_health - 0.05 * delta_hours
     } else {
         current_health
