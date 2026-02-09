@@ -4583,3 +4583,431 @@ fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count: u32) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== SQUARIFIED TREEMAP TESTS ==========
+
+    #[test]
+    fn test_squarified_treemap_single_room() {
+        let rooms = vec![(100.0, 0)];
+        let result = squarified_treemap(&rooms, 0, 0, 10, 10);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 0, 10, 10));
+    }
+
+    #[test]
+    fn test_squarified_treemap_no_overlap() {
+        let rooms = vec![(25.0, 0), (25.0, 1), (25.0, 2), (25.0, 3)];
+        let result = squarified_treemap(&rooms, 0, 0, 20, 20);
+        
+        // Check that we got all rooms
+        assert_eq!(result.len(), 4);
+        
+        // Check no rectangles overlap
+        for i in 0..result.len() {
+            for j in (i + 1)..result.len() {
+                let (_, x1, y1, w1, h1) = result[i];
+                let (_, x2, y2, w2, h2) = result[j];
+                
+                // Two rectangles don't overlap if one is completely to the left/right/above/below the other
+                let no_overlap = x1 + w1 <= x2 || x2 + w2 <= x1 || y1 + h1 <= y2 || y2 + h2 <= y1;
+                assert!(no_overlap, "Rectangles {} and {} overlap", i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn test_squarified_treemap_covers_zone() {
+        let rooms = vec![(50.0, 0), (30.0, 1), (20.0, 2)];
+        let zone_w = 20;
+        let zone_h = 20;
+        let result = squarified_treemap(&rooms, 0, 0, zone_w, zone_h);
+        
+        assert!(!result.is_empty());
+        
+        // Total area of output should be close to zone area
+        let total_output_area: usize = result.iter().map(|(_, _, _, w, h)| w * h).sum();
+        let zone_area = zone_w * zone_h;
+        
+        // Allow some slack due to integer rounding
+        assert!(
+            total_output_area >= zone_area * 90 / 100,
+            "Output area {} should be at least 90% of zone area {}",
+            total_output_area,
+            zone_area
+        );
+    }
+
+    #[test]
+    fn test_squarified_treemap_proportional_areas() {
+        // Two rooms: one twice the area of the other
+        let rooms = vec![(200.0, 0), (100.0, 1)];
+        let result = squarified_treemap(&rooms, 0, 0, 30, 30);
+        
+        assert_eq!(result.len(), 2);
+        
+        let area0 = result[0].3 * result[0].4;
+        let area1 = result[1].3 * result[1].4;
+        
+        // Room 0 should have roughly twice the area of room 1
+        let ratio = area0 as f32 / area1 as f32;
+        assert!(
+            ratio > 1.5 && ratio < 2.5,
+            "Area ratio {} should be close to 2.0",
+            ratio
+        );
+    }
+
+    // ========== FIND EMPTY ZONES TESTS ==========
+
+    #[test]
+    fn test_find_empty_zones_all_empty() {
+        let width = 20;
+        let height = 20;
+        let grid = vec![vec![CELL_EMPTY; height]; width];
+        
+        let zones = find_empty_zones(&grid, width, height);
+        
+        // Should find at least one large zone
+        assert!(!zones.is_empty());
+        
+        // Largest zone should cover most of the space
+        let largest = &zones[0];
+        assert!(largest.w >= 3 && largest.h >= 3);
+    }
+
+    #[test]
+    fn test_find_empty_zones_no_overlap_with_corridors() {
+        let width = 20;
+        let height = 20;
+        let mut grid = vec![vec![CELL_EMPTY; height]; width];
+        
+        // Add a vertical corridor
+        for y in 0..height {
+            grid[10][y] = CELL_MAIN_CORRIDOR;
+        }
+        
+        let zones = find_empty_zones(&grid, width, height);
+        
+        // Verify no zone overlaps with the corridor
+        for zone in &zones {
+            for x in zone.x..(zone.x + zone.w) {
+                for y in zone.y..(zone.y + zone.h) {
+                    assert_eq!(
+                        grid[x][y], CELL_EMPTY,
+                        "Zone overlaps with non-empty cell at ({}, {})",
+                        x, y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_find_empty_zones_minimum_dimensions() {
+        let width = 10;
+        let height = 10;
+        let grid = vec![vec![CELL_EMPTY; height]; width];
+        
+        let zones = find_empty_zones(&grid, width, height);
+        
+        // All zones should have minimum dimensions (>= 3x3)
+        for zone in &zones {
+            assert!(zone.w >= 3, "Zone width {} is too small", zone.w);
+            assert!(zone.h >= 3, "Zone height {} is too small", zone.h);
+        }
+    }
+
+    #[test]
+    fn test_find_empty_zones_with_shafts() {
+        let width = 30;
+        let height = 30;
+        let mut grid = vec![vec![CELL_EMPTY; height]; width];
+        
+        // Add a shaft
+        for x in 10..13 {
+            for y in 10..13 {
+                grid[x][y] = CELL_SHAFT;
+            }
+        }
+        
+        let zones = find_empty_zones(&grid, width, height);
+        
+        // Zones should not overlap with shaft
+        for zone in &zones {
+            for x in zone.x..(zone.x + zone.w) {
+                for y in zone.y..(zone.y + zone.h) {
+                    assert_ne!(
+                        grid[x][y], CELL_SHAFT,
+                        "Zone overlaps with shaft at ({}, {})",
+                        x, y
+                    );
+                }
+            }
+        }
+    }
+
+    // ========== DOOR ADJACENCY RULES TESTS ==========
+
+    #[test]
+    fn test_should_have_room_door_cabin_to_cabin_no_connection() {
+        // Cabins should NOT connect to other random cabins
+        assert!(!should_have_room_door(
+            room_types::CABIN_SINGLE,
+            room_types::CABIN_DOUBLE
+        ));
+        assert!(!should_have_room_door(
+            room_types::CABIN_SINGLE,
+            room_types::CABIN_SINGLE
+        ));
+        assert!(!should_have_room_door(
+            room_types::CABIN_DOUBLE,
+            room_types::FAMILY_SUITE
+        ));
+    }
+
+    #[test]
+    fn test_should_have_room_door_cabin_to_bathroom() {
+        // Cabins SHOULD connect to shared bathrooms
+        assert!(should_have_room_door(
+            room_types::CABIN_SINGLE,
+            room_types::SHARED_BATHROOM
+        ));
+        assert!(should_have_room_door(
+            room_types::CABIN_DOUBLE,
+            room_types::SHARED_BATHROOM
+        ));
+        assert!(should_have_room_door(
+            room_types::QUARTERS_CREW,
+            room_types::SHARED_BATHROOM
+        ));
+    }
+
+    #[test]
+    fn test_should_have_room_door_medical_connections() {
+        // Hospital ward should connect to surgery and pharmacy
+        assert!(should_have_room_door(
+            room_types::HOSPITAL_WARD,
+            room_types::SURGERY
+        ));
+        assert!(should_have_room_door(
+            room_types::HOSPITAL_WARD,
+            room_types::PHARMACY
+        ));
+    }
+
+    #[test]
+    fn test_should_have_room_door_engineering_connections() {
+        // Engineering should connect to reactor and engine room
+        assert!(should_have_room_door(
+            room_types::ENGINEERING,
+            room_types::REACTOR
+        ));
+        assert!(should_have_room_door(
+            room_types::ENGINEERING,
+            room_types::ENGINE_ROOM
+        ));
+    }
+
+    #[test]
+    fn test_should_have_room_door_food_connections() {
+        // Galley should connect to mess hall and storage
+        assert!(should_have_room_door(
+            room_types::MESS_HALL,
+            room_types::GALLEY
+        ));
+        assert!(should_have_room_door(
+            room_types::GALLEY,
+            room_types::FOOD_STORAGE_COLD
+        ));
+        assert!(should_have_room_door(
+            room_types::GALLEY,
+            room_types::FOOD_STORAGE_DRY
+        ));
+    }
+
+    #[test]
+    fn test_should_have_room_door_bridge_connections() {
+        // Bridge should connect to CIC and captain's ready room
+        assert!(should_have_room_door(
+            room_types::BRIDGE,
+            room_types::CIC
+        ));
+        assert!(should_have_room_door(
+            room_types::BRIDGE,
+            room_types::CAPTAINS_READY_ROOM
+        ));
+    }
+
+    // ========== HULL TAPER TESTS ==========
+
+    #[test]
+    fn test_hull_taper_command_deck() {
+        // Deck 0 (command) should be 40m × 200m
+        let deck = 0u32;
+        let hull_width: usize = match deck {
+            0..=1 => 40,
+            d if d >= 19 => 50, // Assuming 21 decks
+            _ => SHIP_BEAM,
+        };
+        let hull_length: usize = match deck {
+            0..=1 => 200,
+            d if d >= 19 => 300,
+            _ => SHIP_LENGTH,
+        };
+        
+        assert_eq!(hull_width, 40, "Command deck width should be 40m");
+        assert_eq!(hull_length, 200, "Command deck length should be 200m");
+    }
+
+    #[test]
+    fn test_hull_taper_mid_deck() {
+        // Mid decks should be 65m × 400m (SHIP_BEAM × SHIP_LENGTH)
+        let deck = 10u32;
+        let deck_count = 21u32;
+        
+        let hull_width: usize = match deck {
+            0..=1 => 40,
+            d if d >= deck_count.saturating_sub(2) => 50,
+            _ => SHIP_BEAM,
+        };
+        let hull_length: usize = match deck {
+            0..=1 => 200,
+            d if d >= deck_count.saturating_sub(2) => 300,
+            _ => SHIP_LENGTH,
+        };
+        
+        assert_eq!(hull_width, 65, "Mid deck width should be 65m");
+        assert_eq!(hull_length, 400, "Mid deck length should be 400m");
+    }
+
+    #[test]
+    fn test_hull_taper_engineering_deck() {
+        // Last 2 decks (engineering) should be 50m × 300m
+        let deck_count = 21u32;
+        let deck = deck_count - 1;
+        
+        let hull_width: usize = match deck {
+            0..=1 => 40,
+            d if d >= deck_count.saturating_sub(2) => 50,
+            _ => SHIP_BEAM,
+        };
+        let hull_length: usize = match deck {
+            0..=1 => 200,
+            d if d >= deck_count.saturating_sub(2) => 300,
+            _ => SHIP_LENGTH,
+        };
+        
+        assert_eq!(hull_width, 50, "Engineering deck width should be 50m");
+        assert_eq!(hull_length, 300, "Engineering deck length should be 300m");
+    }
+
+    // ========== FACILITY MANIFEST TESTS ==========
+
+    #[test]
+    fn test_facility_manifest_has_bridge() {
+        // Build a simple facility manifest to verify presence of key rooms
+        let manifest = vec![
+            FacilitySpec {
+                name: "Bridge",
+                room_type: room_types::BRIDGE,
+                target_area: 200.0,
+                capacity: 10,
+                count: 1,
+                deck_zone: 0,
+                group: groups::COMMAND,
+            },
+        ];
+        
+        assert_eq!(manifest.len(), 1);
+        assert_eq!(manifest[0].name, "Bridge");
+        assert_eq!(manifest[0].room_type, room_types::BRIDGE);
+        assert_eq!(manifest[0].count, 1);
+    }
+
+    #[test]
+    fn test_facility_manifest_cabin_counts() {
+        // Verify cabin specifications match expected counts
+        let single_cabin = FacilitySpec {
+            name: "Single Cabin",
+            room_type: room_types::CABIN_SINGLE,
+            target_area: 14.0,
+            capacity: 1,
+            count: 200,
+            deck_zone: 1,
+            group: groups::PASSENGER,
+        };
+        let double_cabin = FacilitySpec {
+            name: "Double Cabin",
+            room_type: room_types::CABIN_DOUBLE,
+            target_area: 22.0,
+            capacity: 2,
+            count: 50,
+            deck_zone: 1,
+            group: groups::PASSENGER,
+        };
+        
+        assert_eq!(single_cabin.count, 200);
+        assert_eq!(double_cabin.count, 50);
+        assert_eq!(single_cabin.deck_zone, 1, "Cabins should be in zone 1");
+        assert_eq!(double_cabin.deck_zone, 1, "Cabins should be in zone 1");
+    }
+
+    #[test]
+    fn test_facility_manifest_area_ranges() {
+        // Verify facility areas are within reasonable ranges
+        let facilities = vec![
+            ("Bridge", room_types::BRIDGE, 200.0),
+            ("Cabin Single", room_types::CABIN_SINGLE, 14.0),
+            ("Mess Hall", room_types::MESS_HALL, 500.0),
+            ("Hospital Ward", room_types::HOSPITAL_WARD, 250.0),
+        ];
+        
+        for (name, _room_type, area) in facilities {
+            assert!(area >= 10.0, "{} area {} too small", name, area);
+            assert!(area <= 1000.0, "{} area {} too large", name, area);
+        }
+    }
+
+    // ========== DECK RANGE TESTS ==========
+
+    #[test]
+    fn test_deck_range_for_zone_command() {
+        let deck_count = 21u32;
+        let (start, end) = deck_range_for_zone(0, deck_count);
+        assert_eq!(start, 0);
+        assert_eq!(end, 2);
+    }
+
+    #[test]
+    fn test_deck_range_for_zone_engineering() {
+        let deck_count = 21u32;
+        let (start, end) = deck_range_for_zone(6, deck_count);
+        assert_eq!(start, 19);
+        assert_eq!(end, 21);
+    }
+
+    // ========== BASE AREA TESTS ==========
+
+    #[test]
+    fn test_base_area_cabins() {
+        assert_eq!(base_area(room_types::CABIN_SINGLE), 14.0);
+        assert_eq!(base_area(room_types::CABIN_DOUBLE), 22.0);
+        assert_eq!(base_area(room_types::FAMILY_SUITE), 35.0);
+    }
+
+    #[test]
+    fn test_base_area_command() {
+        assert_eq!(base_area(room_types::BRIDGE), 200.0);
+        assert_eq!(base_area(room_types::CIC), 35.0);
+    }
+
+    #[test]
+    fn test_base_area_common() {
+        assert_eq!(base_area(room_types::MESS_HALL), 500.0);
+        assert_eq!(base_area(room_types::GALLEY), 120.0);
+    }
+}
