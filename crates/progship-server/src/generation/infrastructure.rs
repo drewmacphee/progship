@@ -7,7 +7,7 @@ use super::doors::should_have_room_door;
 use super::facilities::deck_range_for_zone;
 use super::hull::{hull_length, hull_width};
 use super::people::SimpleRng;
-use super::treemap::{squarified_treemap, PlacedRoom, RoomRequest};
+use super::treemap::{cap_room_dimensions, squarified_treemap, PlacedRoom, RoomRequest};
 use super::zones::{find_empty_zones, GridZone};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
@@ -700,6 +700,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     continue;
                 }
                 let rr = &deck_room_requests[orig_idx];
+
+                // Cap room size to 1.5× target area to prevent treemap inflation.
+                let (rw, rh) = cap_room_dimensions(rw, rh, rr.target_area, 1.5, 2);
 
                 let cell_val = CELL_ROOM_BASE + (placed_rooms.len() % 246) as u8;
                 for xx in rx..(rx + rw).min(hull_width) {

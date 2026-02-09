@@ -25,6 +25,28 @@ pub(super) struct PlacedRoom {
     pub room_type: u8,
 }
 
+/// Cap room dimensions so area doesn't exceed `max_area`.
+/// Scales both dimensions proportionally, preserving aspect ratio.
+/// Returns (capped_w, capped_h), each at least `min_dim`.
+pub(super) fn cap_room_dimensions(
+    w: usize,
+    h: usize,
+    target_area: f32,
+    cap_factor: f32,
+    min_dim: usize,
+) -> (usize, usize) {
+    let max_area = (target_area * cap_factor) as usize;
+    let actual_area = w * h;
+    if actual_area > max_area && max_area > 0 {
+        let scale = (max_area as f32 / actual_area as f32).sqrt();
+        let capped_w = (w as f32 * scale).round() as usize;
+        let capped_h = (h as f32 * scale).round() as usize;
+        (capped_w.max(min_dim), capped_h.max(min_dim))
+    } else {
+        (w, h)
+    }
+}
+
 /// Squarified treemap: packs weighted rectangles into a zone.
 /// Returns (original_index, x, y, w, h) for each room.
 pub(super) fn squarified_treemap(
@@ -296,5 +318,62 @@ mod tests {
 
         let result2 = squarified_treemap(&rooms, 0, 0, 10, 0);
         assert!(result2.is_empty(), "Zero height should return empty result");
+    }
+
+    #[test]
+    fn test_cap_no_change_when_under_limit() {
+        // 10×10 = 100, target 100 × 1.5 = 150 → no change
+        let (w, h) = cap_room_dimensions(10, 10, 100.0, 1.5, 2);
+        assert_eq!((w, h), (10, 10));
+    }
+
+    #[test]
+    fn test_cap_exactly_at_limit() {
+        // 15×10 = 150, target 100 × 1.5 = 150 → no change
+        let (w, h) = cap_room_dimensions(15, 10, 100.0, 1.5, 2);
+        assert_eq!((w, h), (15, 10));
+    }
+
+    #[test]
+    fn test_cap_reduces_inflated_room() {
+        // 30×15 = 450, target 14 × 1.5 = 21 → must shrink dramatically
+        let (w, h) = cap_room_dimensions(30, 15, 14.0, 1.5, 2);
+        let area = w * h;
+        assert!(
+            area <= 21 + 2, // small rounding tolerance
+            "Capped area {} should be near target 21",
+            area
+        );
+        assert!(w >= 2, "Width should be at least min_dim");
+        assert!(h >= 2, "Height should be at least min_dim");
+    }
+
+    #[test]
+    fn test_cap_preserves_aspect_ratio() {
+        // 40×20 = 800, target 100 × 1.5 = 150
+        let (w, h) = cap_room_dimensions(40, 20, 100.0, 1.5, 2);
+        let original_ratio = 40.0 / 20.0; // 2:1
+        let capped_ratio = w as f32 / h as f32;
+        assert!(
+            (capped_ratio - original_ratio).abs() < 0.5,
+            "Aspect ratio {} should be close to original {}",
+            capped_ratio,
+            original_ratio
+        );
+    }
+
+    #[test]
+    fn test_cap_respects_min_dim() {
+        // 3×3 = 9, target 1 × 1.5 = 1.5 → would shrink to ~1×1 but min_dim=2
+        let (w, h) = cap_room_dimensions(3, 3, 1.0, 1.5, 2);
+        assert!(w >= 2, "Width {} should be at least min_dim 2", w);
+        assert!(h >= 2, "Height {} should be at least min_dim 2", h);
+    }
+
+    #[test]
+    fn test_cap_zero_target_area() {
+        // target_area=0 → max_area=0 → no change (avoid division by zero)
+        let (w, h) = cap_room_dimensions(10, 10, 0.0, 1.5, 2);
+        assert_eq!((w, h), (10, 10));
     }
 }
