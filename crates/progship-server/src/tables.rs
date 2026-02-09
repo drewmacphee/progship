@@ -30,6 +30,8 @@ pub struct ShipConfig {
     pub time_scale: f32,
     /// Whether the simulation is currently paused.
     pub paused: bool,
+    /// Total number of deaths since mission start.
+    pub death_count: u32,
 }
 
 // ============================================================================
@@ -51,6 +53,8 @@ pub struct Person {
     pub is_crew: bool,
     /// Whether this person is a player-controlled character.
     pub is_player: bool,
+    /// Whether this person is alive.
+    pub is_alive: bool,
     /// SpacetimeDB identity of the player controlling this person, if any.
     pub owner_identity: Option<Identity>,
 }
@@ -845,6 +849,13 @@ pub mod room_types {
     pub fn is_corridor(rt: u8) -> bool {
         rt >= 100
     }
+    /// Returns true if this room type is a medical facility
+    pub fn is_medical(rt: u8) -> bool {
+        matches!(
+            rt,
+            HOSPITAL_WARD | SURGERY | DENTAL_CLINIC | PHARMACY | QUARANTINE
+        )
+    }
 }
 
 pub mod departments {
@@ -1047,6 +1058,7 @@ pub mod event_types {
     pub const CELEBRATION: u8 = 5;
     pub const ALTERCATION: u8 = 6;
     pub const RESOURCE_SHORTAGE: u8 = 7;
+    pub const DEATH: u8 = 8;
 }
 
 pub mod event_states {

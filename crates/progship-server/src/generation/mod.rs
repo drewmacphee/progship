@@ -131,6 +131,7 @@ pub fn init_ship(
         sim_time: 0.0,
         time_scale: 1.0,
         paused: false,
+        death_count: 0,
     });
 
     // Resources (singleton)

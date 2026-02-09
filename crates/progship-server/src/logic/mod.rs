@@ -4,5 +4,6 @@
 //! access, making them unit-testable without SpacetimeDB.
 
 pub mod actions;
+pub mod health;
 pub mod movement;
 pub mod pathfinding;

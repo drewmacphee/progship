@@ -11,9 +11,9 @@ pub fn tick_wandering(ctx: &ReducerContext, sim_time: f64) {
         if activity.activity_type != activity_types::IDLE {
             continue;
         }
-        // Skip player-controlled characters
+        // Skip player-controlled and dead characters
         if let Some(person) = ctx.db.person().id().find(activity.person_id) {
-            if person.is_player {
+            if person.is_player || !person.is_alive {
                 continue;
             }
         }

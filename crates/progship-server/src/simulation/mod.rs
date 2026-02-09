@@ -4,6 +4,7 @@
 
 mod activities;
 mod atmosphere;
+mod death;
 mod duty;
 mod events;
 mod maintenance;
@@ -16,6 +17,7 @@ mod wandering;
 // Re-export all public tick functions
 pub use activities::tick_activities;
 pub use atmosphere::tick_atmosphere;
+pub use death::tick_death;
 pub use duty::tick_duty;
 pub use events::tick_events;
 pub use maintenance::tick_maintenance;
