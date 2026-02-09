@@ -32,6 +32,8 @@ pub struct ShipConfig {
     pub paused: bool,
     /// Total number of deaths since mission start.
     pub death_count: u32,
+    /// Current rationing level (0=normal, 1=light, 2=heavy, 3=emergency).
+    pub rationing_level: u8,
 }
 
 // ============================================================================
