@@ -1816,7 +1816,7 @@ mod tests {
     #[test]
     fn low_oxygen_causes_damage() {
         let result = calculate_oxygen_damage(1.0, 0.10, 1.0);
-        assert_eq!(result, 0.97); // (0.16 - 0.10) * 0.5 = 0.03 damage
+        assert_eq!(result, 0.97); // 1.0 - (0.16 - 0.10) * 0.5 = 1.0 - 0.03 = 0.97
     }
 
     #[test]
@@ -1840,7 +1840,7 @@ mod tests {
     #[test]
     fn very_high_co2_causes_damage() {
         let result = calculate_co2_damage(1.0, 0.10, 1.0);
-        assert_eq!(result, 0.988); // (0.10 - 0.06) * 0.3 = 0.012 damage
+        assert_eq!(result, 0.988); // 1.0 - (0.10 - 0.06) * 0.3 = 1.0 - 0.012 = 0.988
     }
 
     #[test]
@@ -1888,7 +1888,7 @@ mod tests {
     #[test]
     fn low_pressure_causes_damage() {
         let result = calculate_pressure_damage(1.0, 70.0, 1.0);
-        assert_eq!(result, 0.9); // (80.0 - 70.0) * 0.01 = 0.1 damage
+        assert_eq!(result, 0.9); // 1.0 - (80.0 - 70.0) * 0.01 = 1.0 - 0.1 = 0.9
     }
 
     #[test]
