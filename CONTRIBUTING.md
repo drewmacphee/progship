@@ -53,9 +53,7 @@ Follow these steps to set up your development environment:
 
 5. **Initialize the ship**
    ```bash
-   spacetime call progship init_ship "Test Ship" 21 100 50
-   ```
-   Parameters: ship name, number of decks, length, radius
+   spacetime call progship init_ship "Test Ship" 21 3000 2000
 
 6. **Generate the client SDK** (if needed)
    ```bash
