@@ -3,15 +3,17 @@
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
+// Resource consumption rates (per person per hour)
+const FOOD_RATE: f32 = 2.0 / 24.0;
+const WATER_RATE: f32 = 3.0 / 24.0;
+const OXYGEN_RATE: f32 = 0.84 / 24.0;
+
 /// Calculate resource consumption for a population
 pub fn calculate_resource_consumption(person_count: f32, delta_hours: f32) -> (f32, f32, f32) {
-    let food_rate = 2.0 / 24.0;
-    let water_rate = 3.0 / 24.0;
-    let oxygen_rate = 0.84 / 24.0;
     (
-        person_count * food_rate * delta_hours,
-        person_count * water_rate * delta_hours,
-        person_count * oxygen_rate * delta_hours,
+        person_count * FOOD_RATE * delta_hours,
+        person_count * WATER_RATE * delta_hours,
+        person_count * OXYGEN_RATE * delta_hours,
     )
 }
 
@@ -85,13 +87,11 @@ pub fn tick_ship_systems(ctx: &ReducerContext, delta_hours: f32) {
                 }
             }
             subsystem_types::O2_GENERATION => {
-                let oxygen_rate = 0.84 / 24.0;
-                let o2_produced = person_count * oxygen_rate * efficiency * delta_hours;
+                let o2_produced = person_count * OXYGEN_RATE * efficiency * delta_hours;
                 resources.oxygen = (resources.oxygen + o2_produced).min(resources.oxygen_cap);
             }
             subsystem_types::WATER_FILTRATION | subsystem_types::WATER_DISTILLATION => {
-                let water_rate = 3.0 / 24.0;
-                let recycled = person_count * water_rate * 0.45 * efficiency * delta_hours;
+                let recycled = person_count * WATER_RATE * 0.45 * efficiency * delta_hours;
                 resources.water = (resources.water + recycled).min(resources.water_cap);
             }
             subsystem_types::GROWTH_CHAMBER => {

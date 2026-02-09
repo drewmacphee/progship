@@ -122,12 +122,12 @@ pub fn is_meal_time(hour: f32) -> bool {
 }
 
 pub fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
-    if is_crew {
-        false
-    }
-    // Crew sleeps based on shift
-    else {
+    if !is_crew {
+        // Passengers sleep outside 6:00-22:00
         !(6.0..22.0).contains(&hour)
+    } else {
+        // Crew sleeps based on shift (not general sleep time)
+        false
     }
 }
 
