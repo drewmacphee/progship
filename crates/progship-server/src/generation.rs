@@ -1582,7 +1582,11 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         // Main spine: SPINE_WIDTH cells wide, centered, full length
         let spine_left = hull_width / 2 - SPINE_WIDTH / 2;
         let spine_right = spine_left + SPINE_WIDTH;
-        for grid_column in grid.iter_mut().take(spine_right.min(hull_width)).skip(spine_left) {
+        for grid_column in grid
+            .iter_mut()
+            .take(spine_right.min(hull_width))
+            .skip(spine_left)
+        {
             for cell in grid_column.iter_mut().take(hull_length) {
                 *cell = CELL_MAIN_CORRIDOR;
             }
@@ -2086,7 +2090,11 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 let extra = total_rooms % zone_deck_count as usize;
                 let start = deck_offset as usize * per_deck + (deck_offset as usize).min(extra);
                 let count = per_deck + if (deck_offset as usize) < extra { 1 } else { 0 };
-                for rr in zone_reqs.iter().take((start + count).min(total_rooms)).skip(start) {
+                for rr in zone_reqs
+                    .iter()
+                    .take((start + count).min(total_rooms))
+                    .skip(start)
+                {
                     deck_room_requests.push(RoomRequest {
                         node_id: rr.node_id,
                         name: rr.name.clone(),
@@ -2169,7 +2177,11 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
                 let cell_val = CELL_ROOM_BASE + (placed_rooms.len() % 246) as u8;
                 for grid_column in grid.iter_mut().take((rx + rw).min(hull_width)).skip(rx) {
-                    for cell in grid_column.iter_mut().take((ry + rh).min(hull_length)).skip(ry) {
+                    for cell in grid_column
+                        .iter_mut()
+                        .take((ry + rh).min(hull_length))
+                        .skip(ry)
+                    {
                         if *cell == CELL_EMPTY {
                             *cell = cell_val;
                         }

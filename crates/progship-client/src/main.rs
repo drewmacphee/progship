@@ -1087,14 +1087,22 @@ fn spawn_wall_with_gaps(
         // No doors — solid wall
         if params.horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(params.wall_length, params.wall_height, params.wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(
+                    params.wall_length,
+                    params.wall_height,
+                    params.wall_thickness,
+                ))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z),
                 RoomEntity { _room_id, _deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, params.wall_length))),
+                Mesh3d(meshes.add(Cuboid::new(
+                    params.wall_thickness,
+                    params.wall_height,
+                    params.wall_length,
+                ))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z),
                 RoomEntity { _room_id, _deck },
@@ -1105,7 +1113,8 @@ fn spawn_wall_with_gaps(
 
     // Build wall segments around door gaps
     // Convert door positions to offsets along the wall
-    let mut gaps: Vec<(f32, f32)> = params.door_positions
+    let mut gaps: Vec<(f32, f32)> = params
+        .door_positions
         .iter()
         .zip(params.door_widths.iter())
         .map(|(&dp, &dw)| {
@@ -1128,16 +1137,32 @@ fn spawn_wall_with_gaps(
             let seg_center = cursor + seg_len / 2.0;
             if params.horizontal {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(seg_len, params.wall_height, params.wall_thickness))),
+                    Mesh3d(meshes.add(Cuboid::new(
+                        seg_len,
+                        params.wall_height,
+                        params.wall_thickness,
+                    ))),
                     MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(params.wall_x + seg_center, params.wall_height / 2.0, params.wall_z),
+                    Transform::from_xyz(
+                        params.wall_x + seg_center,
+                        params.wall_height / 2.0,
+                        params.wall_z,
+                    ),
                     RoomEntity { _room_id, _deck },
                 ));
             } else {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, seg_len))),
+                    Mesh3d(meshes.add(Cuboid::new(
+                        params.wall_thickness,
+                        params.wall_height,
+                        seg_len,
+                    ))),
                     MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z + seg_center),
+                    Transform::from_xyz(
+                        params.wall_x,
+                        params.wall_height / 2.0,
+                        params.wall_z + seg_center,
+                    ),
                     RoomEntity { _room_id, _deck },
                 ));
             }
@@ -1151,16 +1176,32 @@ fn spawn_wall_with_gaps(
         let seg_center = cursor + seg_len / 2.0;
         if params.horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(seg_len, params.wall_height, params.wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(
+                    seg_len,
+                    params.wall_height,
+                    params.wall_thickness,
+                ))),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(params.wall_x + seg_center, params.wall_height / 2.0, params.wall_z),
+                Transform::from_xyz(
+                    params.wall_x + seg_center,
+                    params.wall_height / 2.0,
+                    params.wall_z,
+                ),
                 RoomEntity { _room_id, _deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, seg_len))),
+                Mesh3d(meshes.add(Cuboid::new(
+                    params.wall_thickness,
+                    params.wall_height,
+                    seg_len,
+                ))),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z + seg_center),
+                Transform::from_xyz(
+                    params.wall_x,
+                    params.wall_height / 2.0,
+                    params.wall_z + seg_center,
+                ),
                 RoomEntity { _room_id, _deck },
             ));
         }
@@ -1448,7 +1489,7 @@ fn render_hud(
             person_count,
             atmo_str,
             activity_str,
-            "",  // Placeholder for future activity details
+            "", // Placeholder for future activity details
             context_hint,
         );
     }
@@ -1787,10 +1828,7 @@ fn render_info_panel(
 // TOAST NOTIFICATIONS (top-center)
 // ============================================================================
 
-fn render_toasts(
-    ui: Res<UiState>,
-    mut toast_q: ToastQuery,
-) {
+fn render_toasts(ui: Res<UiState>, mut toast_q: ToastQuery) {
     let Ok(mut text) = toast_q.get_single_mut() else {
         return;
     };
