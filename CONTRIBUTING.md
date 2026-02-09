@@ -196,9 +196,9 @@ cargo clippy --all-targets -- -D warnings
 
 ### Code Conventions
 
-- Use `#[derive(Debug, Clone, Serialize, Deserialize)]` on all components/tables
-- IDs are `u32` for performance
-- Components/tables are pure data — logic lives in systems/reducers
+- New components/tables should prefer `#[derive(Debug, Clone, Serialize, Deserialize)]`
+- For new IDs, prefer `u32` where it fits; some existing tables use `u64` primary keys — follow the established type for that table
+- Components/tables should remain pure data — logic lives in systems/reducers
 - Prefer composition over inheritance
 - Return early with descriptive error messages
 
