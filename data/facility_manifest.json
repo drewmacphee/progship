@@ -60,7 +60,7 @@
     "capacity": 6,
     "count": 2,
     "deck_zone": 0,
-    "group": 0
+    "group": 1
   },
   {
     "name": "Admin Office",
@@ -78,7 +78,7 @@
     "capacity": 4,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 1
   },
   {
     "name": "Officer Quarters",
@@ -87,7 +87,7 @@
     "capacity": 1,
     "count": 20,
     "deck_zone": 0,
-    "group": 0
+    "group": 2
   },
   {
     "name": "Single Cabin",
@@ -96,7 +96,7 @@
     "capacity": 1,
     "count": 200,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Double Cabin",
@@ -105,7 +105,7 @@
     "capacity": 2,
     "count": 50,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Family Suite",
@@ -114,7 +114,7 @@
     "capacity": 4,
     "count": 30,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Shared Bathroom",
@@ -123,7 +123,7 @@
     "capacity": 4,
     "count": 50,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Shared Laundry",
@@ -132,7 +132,7 @@
     "capacity": 3,
     "count": 10,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Cafe",
@@ -150,7 +150,7 @@
     "capacity": 1,
     "count": 60,
     "deck_zone": 1,
-    "group": 4
+    "group": 2
   },
   {
     "name": "Crew Lounge",
@@ -159,7 +159,7 @@
     "capacity": 20,
     "count": 4,
     "deck_zone": 1,
-    "group": 4
+    "group": 2
   },
   {
     "name": "VIP Suite",
@@ -168,7 +168,7 @@
     "capacity": 2,
     "count": 6,
     "deck_zone": 1,
-    "group": 5
+    "group": 2
   },
   {
     "name": "Mess Hall",
@@ -195,7 +195,7 @@
     "capacity": 20,
     "count": 1,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Surgery",
@@ -204,7 +204,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Dental Clinic",
@@ -213,7 +213,7 @@
     "capacity": 4,
     "count": 1,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Pharmacy",
@@ -222,7 +222,7 @@
     "capacity": 3,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Mental Health",
@@ -231,7 +231,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Quarantine",
@@ -240,7 +240,7 @@
     "capacity": 10,
     "count": 1,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Morgue",
@@ -249,7 +249,7 @@
     "capacity": 2,
     "count": 1,
     "deck_zone": 2,
-    "group": 3
+    "group": 4
   },
   {
     "name": "Food Storage Cold",
@@ -285,7 +285,7 @@
     "capacity": 3,
     "count": 1,
     "deck_zone": 2,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Wardroom",
@@ -294,7 +294,7 @@
     "capacity": 20,
     "count": 2,
     "deck_zone": 2,
-    "group": 0
+    "group": 3
   },
   {
     "name": "Gym",
@@ -303,7 +303,7 @@
     "capacity": 30,
     "count": 4,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Theatre",
@@ -312,7 +312,7 @@
     "capacity": 200,
     "count": 1,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Library",
@@ -321,7 +321,7 @@
     "capacity": 30,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Bar",
@@ -330,7 +330,7 @@
     "capacity": 25,
     "count": 4,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Chapel",
@@ -339,7 +339,7 @@
     "capacity": 15,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Game Room",
@@ -348,7 +348,7 @@
     "capacity": 15,
     "count": 3,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Art Studio",
@@ -357,7 +357,7 @@
     "capacity": 10,
     "count": 1,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Music Room",
@@ -366,7 +366,7 @@
     "capacity": 8,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Pool",
@@ -375,7 +375,7 @@
     "capacity": 30,
     "count": 1,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Arboretum",
@@ -384,7 +384,7 @@
     "capacity": 50,
     "count": 1,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Observation Lounge",
@@ -393,7 +393,7 @@
     "capacity": 20,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Nursery",
@@ -402,7 +402,7 @@
     "capacity": 15,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "School",
@@ -411,7 +411,7 @@
     "capacity": 25,
     "count": 4,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Shops",
@@ -420,7 +420,7 @@
     "capacity": 15,
     "count": 4,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Recreation Center",
@@ -429,7 +429,7 @@
     "capacity": 40,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Holodeck",
@@ -438,7 +438,7 @@
     "capacity": 6,
     "count": 2,
     "deck_zone": 3,
-    "group": 3
+    "group": 5
   },
   {
     "name": "Hydroponics Bay",
@@ -447,7 +447,7 @@
     "capacity": 8,
     "count": 4,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Atmosphere Processing",
@@ -456,7 +456,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Water Recycling",
@@ -465,7 +465,7 @@
     "capacity": 6,
     "count": 2,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Waste Processing",
@@ -474,7 +474,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Env Monitoring",
@@ -483,7 +483,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Life Support Center",
@@ -492,7 +492,7 @@
     "capacity": 8,
     "count": 1,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "HVAC Control",
@@ -501,7 +501,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Laboratory",
@@ -510,7 +510,7 @@
     "capacity": 10,
     "count": 4,
     "deck_zone": 4,
-    "group": 2
+    "group": 9
   },
   {
     "name": "Cargo Bay",
@@ -519,7 +519,7 @@
     "capacity": 10,
     "count": 2,
     "deck_zone": 5,
-    "group": 1
+    "group": 10
   },
   {
     "name": "Storage",
@@ -528,7 +528,7 @@
     "capacity": 4,
     "count": 4,
     "deck_zone": 5,
-    "group": 1
+    "group": 10
   },
   {
     "name": "Armory",
@@ -546,7 +546,7 @@
     "capacity": 10,
     "count": 1,
     "deck_zone": 5,
-    "group": 1
+    "group": 10
   },
   {
     "name": "Airlock",
@@ -555,7 +555,7 @@
     "capacity": 4,
     "count": 4,
     "deck_zone": 5,
-    "group": 1
+    "group": 10
   },
   {
     "name": "Reactor",
@@ -564,7 +564,7 @@
     "capacity": 5,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 8
   },
   {
     "name": "Backup Reactor",
@@ -573,7 +573,7 @@
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 8
   },
   {
     "name": "Engine Room",
@@ -582,7 +582,7 @@
     "capacity": 15,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 8
   },
   {
     "name": "Main Engineering",
@@ -591,7 +591,7 @@
     "capacity": 15,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 6
   },
   {
     "name": "Power Distribution",
@@ -600,7 +600,7 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 6,
-    "group": 1
+    "group": 6
   },
   {
     "name": "Cooling Plant",
@@ -609,7 +609,7 @@
     "capacity": 6,
     "count": 2,
     "deck_zone": 6,
-    "group": 1
+    "group": 6
   },
   {
     "name": "Maintenance Bay",
@@ -618,7 +618,7 @@
     "capacity": 10,
     "count": 2,
     "deck_zone": 6,
-    "group": 1
+    "group": 7
   },
   {
     "name": "Machine Shop",
@@ -627,7 +627,7 @@
     "capacity": 6,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 7
   },
   {
     "name": "Electronics Lab",
@@ -636,7 +636,7 @@
     "capacity": 6,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 6
   },
   {
     "name": "Parts Storage",
@@ -645,7 +645,7 @@
     "capacity": 5,
     "count": 2,
     "deck_zone": 6,
-    "group": 1
+    "group": 10
   },
   {
     "name": "Fuel Storage",
@@ -654,7 +654,7 @@
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 8
   },
   {
     "name": "Robotics Bay",
@@ -663,6 +663,6 @@
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 1
+    "group": 7
   }
 ]
