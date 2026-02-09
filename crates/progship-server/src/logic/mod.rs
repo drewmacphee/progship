@@ -10,4 +10,5 @@ pub mod health;
 pub mod mission;
 pub mod movement;
 pub mod pathfinding;
+pub mod systems;
 pub mod utility;
