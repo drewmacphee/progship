@@ -57,8 +57,7 @@ Follow these steps to set up your development environment:
 
 6. **Generate the client SDK** (if needed)
    ```bash
-   spacetime generate --out-dir crates/progship-client-sdk --lang rust progship
-   ```
+   spacetime generate --project-path crates/progship-server --out-dir crates/progship-client-sdk/src --lang rust progship
    **Note:** The SDK is auto-generated. Do not modify files in `crates/progship-client-sdk/` manually.
 
 7. **Build the client**
