@@ -9,6 +9,7 @@ pub mod actions;
 pub mod constants;
 pub mod duty;
 pub mod economy;
+pub mod geometry;
 pub mod health;
 pub mod mission;
 pub mod movement;
