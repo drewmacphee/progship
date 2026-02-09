@@ -135,8 +135,8 @@ python verify_doors.py
 ### Test Coverage
 
 ```bash
-# Run all tests (client tests only)
-cargo test --all
+# Run client tests (matches CI)
+cargo test --package progship-client
 ```
 
 **Important Notes:**
