@@ -345,12 +345,6 @@ fn get_current_waypoint(mov: &Movement) -> (f32, f32, u32, bool) {
     }
 }
 
-/// Compute the world position of a door.
-/// Uses the stored absolute door_x/door_y coordinates.
-pub fn door_world_position(door: &Door, _rooms: &[Room]) -> (f32, f32) {
-    (door.door_x, door.door_y)
-}
-
 /// BFS pathfinding through doors, returns list of (door_x, door_y, next_room_id)
 fn find_path(ctx: &ReducerContext, from_room: u32, to_room: u32) -> Vec<(f32, f32, u32)> {
     if from_room == to_room {
@@ -371,8 +365,9 @@ fn find_path(ctx: &ReducerContext, from_room: u32, to_room: u32) -> Vec<(f32, f3
     }
 
     // BFS
+    type PathStep = (f32, f32, u32); // (door_x, door_y, next_room_id)
     let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut queue: std::collections::VecDeque<(u32, Vec<(f32, f32, u32)>)> =
+    let mut queue: std::collections::VecDeque<(u32, Vec<PathStep>)> =
         std::collections::VecDeque::new();
     visited.insert(from_room);
     queue.push_back((from_room, vec![]));

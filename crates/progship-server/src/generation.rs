@@ -99,16 +99,9 @@ const FAMILY_NAMES: &[&str] = &[
     "Goto",
     "Hasegawa",
 ];
-#[allow(dead_code)]
-const CORRIDOR_WIDTH: f32 = 6.0;
-#[allow(dead_code)]
-const CORRIDOR_HALF: f32 = CORRIDOR_WIDTH / 2.0;
-#[allow(dead_code)]
-const SERVICE_CORRIDOR_WIDTH: f32 = 3.0;
-#[allow(dead_code)]
-const SERVICE_X: f32 = -(CORRIDOR_HALF + SERVICE_CORRIDOR_WIDTH / 2.0);
 
 /// Descriptor for a graph node to be created during build_ship_graph.
+// Used by future WS5 generation traits
 #[allow(dead_code)]
 struct NodeSpec {
     name: &'static str,
@@ -118,6 +111,7 @@ struct NodeSpec {
     deck_preference: i32,
 }
 
+// Used by future WS5 generation traits - area calculation for graph nodes
 #[allow(dead_code)]
 fn base_area(function: u8) -> f32 {
     match function {
@@ -171,6 +165,7 @@ fn base_area(function: u8) -> f32 {
     }
 }
 
+// Used by future WS5 generation traits - room dimension calculation
 #[allow(dead_code)]
 fn compute_room_dims(required_area: f32) -> (f32, f32) {
     // Aspect ratio between 1:1 and 2:1
@@ -1247,10 +1242,12 @@ impl SimpleRng {
             .wrapping_add(1442695040888963407);
         ((self.state >> 33) as f32) / (u32::MAX as f32)
     }
+    // Used by future WS5 generation traits - random range generation
     #[allow(dead_code)]
     fn next_range(&mut self, min: f32, max: f32) -> f32 {
         min + self.next_f32() * (max - min)
     }
+    // Used by future WS5 generation traits - random integer range generation
     #[allow(dead_code)]
     fn next_usize(&mut self, min: usize, max: usize) -> usize {
         if max <= min {
@@ -1274,10 +1271,9 @@ struct RoomRequest {
 }
 
 /// Placed room result from treemap.
-#[allow(dead_code)]
 struct PlacedRoom {
     room_id: u32,
-    node_id: u64,
+    _node_id: u64, // Preserved for future graph-based room tracking
     x: usize,
     y: usize,
     w: usize,
@@ -1464,9 +1460,9 @@ fn find_empty_zones(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<GridZo
             } // too short
 
             // Claim these cells
-            for xx in x..(x + run_w) {
-                for yy in y..(y + run_h) {
-                    claimed[xx][yy] = true;
+            for claimed_row in claimed.iter_mut().take(x + run_w).skip(x) {
+                for claimed_cell in claimed_row.iter_mut().take(y + run_h).skip(y) {
+                    *claimed_cell = true;
                 }
             }
 
@@ -1586,9 +1582,9 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         // Main spine: SPINE_WIDTH cells wide, centered, full length
         let spine_left = hull_width / 2 - SPINE_WIDTH / 2;
         let spine_right = spine_left + SPINE_WIDTH;
-        for x in spine_left..spine_right.min(hull_width) {
-            for y in 0..hull_length {
-                grid[x][y] = CELL_MAIN_CORRIDOR;
+        for grid_column in grid.iter_mut().take(spine_right.min(hull_width)).skip(spine_left) {
+            for cell in grid_column.iter_mut().take(hull_length) {
+                *cell = CELL_MAIN_CORRIDOR;
             }
         }
 
@@ -1600,13 +1596,13 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         let mut cross_corridor_ys: Vec<usize> = Vec::new();
         let mut cy = CROSS_CORRIDOR_SPACING;
         while cy + CROSS_CORRIDOR_WIDTH <= hull_length {
-            for x in 0..svc_left {
+            for grid_column in grid.iter_mut().take(svc_left) {
                 for dy in 0..CROSS_CORRIDOR_WIDTH {
                     let yy = cy + dy;
                     if yy < hull_length {
                         // Don't overwrite shaft cells (will be stamped later, but we
                         // pre-check to keep cross-corridor Room bounds accurate)
-                        grid[x][yy] = CELL_MAIN_CORRIDOR;
+                        grid_column[yy] = CELL_MAIN_CORRIDOR;
                     }
                 }
             }
@@ -1770,9 +1766,9 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
         // Service corridor: SVC_CORRIDOR_WIDTH cells wide, along starboard (right) edge
         // (svc_left already computed above before cross-corridors)
-        for x in svc_left..hull_width {
-            for y in 0..hull_length {
-                grid[x][y] = CELL_SERVICE_CORRIDOR;
+        for grid_column in grid.iter_mut().take(hull_width).skip(svc_left) {
+            for cell in grid_column.iter_mut().take(hull_length) {
+                *cell = CELL_SERVICE_CORRIDOR;
             }
         }
         let svc_rid = next_id();
@@ -1835,7 +1831,9 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         };
 
         // ---- Step 2: Stamp vertical shaft anchors ----
-        let all_shafts: Vec<(usize, usize, usize, usize, u8, u8, &str, bool)> = {
+        // ShaftSpec: (x, y, width, height, shaft_type, room_type, name, is_main)
+        type ShaftSpec = (usize, usize, usize, usize, u8, u8, &'static str, bool);
+        let all_shafts: Vec<ShaftSpec> = {
             let mut v = Vec::new();
             v.push((
                 fore_elev_deck.0,
@@ -1892,9 +1890,9 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 continue;
             }
 
-            for xx in sx..(sx + sw) {
-                for yy in sy..(sy + sh) {
-                    grid[xx][yy] = CELL_SHAFT;
+            for grid_column in grid.iter_mut().take(sx + sw).skip(sx) {
+                for cell in grid_column.iter_mut().take(sy + sh).skip(sy) {
+                    *cell = CELL_SHAFT;
                 }
             }
 
@@ -2069,6 +2067,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             }
 
             // Shaft is either connected via cross-corridor overlap, edge adjacency, or remains isolated
+            let _ = connected; // Tracked for potential future diagnostics
         }
 
         // ---- Step 3: Find empty rectangular zones ----
@@ -2087,8 +2086,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 let extra = total_rooms % zone_deck_count as usize;
                 let start = deck_offset as usize * per_deck + (deck_offset as usize).min(extra);
                 let count = per_deck + if (deck_offset as usize) < extra { 1 } else { 0 };
-                for i in start..(start + count).min(total_rooms) {
-                    let rr = &zone_reqs[i];
+                for rr in zone_reqs.iter().take((start + count).min(total_rooms)).skip(start) {
                     deck_room_requests.push(RoomRequest {
                         node_id: rr.node_id,
                         name: rr.name.clone(),
@@ -2148,10 +2146,13 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             }
 
             let end = (request_cursor + count).min(deck_room_requests.len());
-            let mut batch: Vec<(f32, usize)> = Vec::new();
-            for i in request_cursor..end {
-                batch.push((deck_room_requests[i].target_area, i));
-            }
+            let batch: Vec<(f32, usize)> = deck_room_requests
+                .iter()
+                .enumerate()
+                .skip(request_cursor)
+                .take(end - request_cursor)
+                .map(|(i, req)| (req.target_area, i))
+                .collect();
             request_cursor = end;
 
             if batch.is_empty() {
@@ -2167,10 +2168,10 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 let rr = &deck_room_requests[orig_idx];
 
                 let cell_val = CELL_ROOM_BASE + (placed_rooms.len() % 246) as u8;
-                for xx in rx..(rx + rw).min(hull_width) {
-                    for yy in ry..(ry + rh).min(hull_length) {
-                        if grid[xx][yy] == CELL_EMPTY {
-                            grid[xx][yy] = cell_val;
+                for grid_column in grid.iter_mut().take((rx + rw).min(hull_width)).skip(rx) {
+                    for cell in grid_column.iter_mut().take((ry + rh).min(hull_length)).skip(ry) {
+                        if *cell == CELL_EMPTY {
+                            *cell = cell_val;
                         }
                     }
                 }
@@ -2191,7 +2192,7 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
                 placed_rooms.push(PlacedRoom {
                     room_id: rid,
-                    node_id: rr.node_id,
+                    _node_id: rr.node_id,
                     x: rx,
                     y: ry,
                     w: rw,
@@ -2711,8 +2712,8 @@ fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             );
             let max_rows = hull_length.min(60);
             for y in 0..max_rows {
-                for x in 0..hull_width {
-                    let ch = match grid[x][y] {
+                for grid_column in grid.iter().take(hull_width) {
+                    let ch = match grid_column[y] {
                         CELL_EMPTY => '.',
                         CELL_MAIN_CORRIDOR => '=',
                         CELL_SERVICE_CORRIDOR => '-',
