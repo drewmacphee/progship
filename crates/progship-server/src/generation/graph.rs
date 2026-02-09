@@ -4,8 +4,7 @@
 
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
-use super::facilities::{FacilitySpec, get_facility_manifest, deck_range_for_zone};
-use super::doors::should_have_room_door;
+use super::facilities::get_facility_manifest;
 
 /// Descriptor for a graph node to be created during build_ship_graph.
 #[allow(dead_code)]
