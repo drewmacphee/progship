@@ -145,7 +145,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 2,
             count: 150,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "Officer Quarters",
@@ -154,7 +154,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 1,
             count: 30,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "Passenger Quarters",
@@ -163,7 +163,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 2,
             count: 200,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "VIP Suite",
@@ -172,7 +172,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 1,
             count: 5,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "Family Suite",
@@ -181,7 +181,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 4,
             count: 20,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "Shared Bathroom",
@@ -190,7 +190,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 4,
             count: 40,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         FacilitySpec {
             name: "Shared Laundry",
@@ -199,7 +199,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 8,
             count: 15,
             deck_zone: 1,
-            group: groups::HABITATION,
+            group: groups::PASSENGER,
         },
         // === FOOD & DINING (zone 2) ===
         FacilitySpec {
@@ -209,7 +209,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 150,
             count: 2,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Galley",
@@ -218,7 +218,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 10,
             count: 2,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Cafe",
@@ -227,7 +227,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 20,
             count: 4,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Bar",
@@ -236,7 +236,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 30,
             count: 3,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Food Storage (Cold)",
@@ -245,7 +245,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 0,
             count: 3,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Food Storage (Dry)",
@@ -254,7 +254,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 0,
             count: 3,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Bakery",
@@ -263,7 +263,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 5,
             count: 1,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Hydroponics",
@@ -272,7 +272,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 15,
             count: 2,
             deck_zone: 2,
-            group: groups::FOOD,
+            group: groups::COMMONS,
         },
         // === MEDICAL (zone 2) ===
         FacilitySpec {
@@ -282,7 +282,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 40,
             count: 2,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Surgery",
@@ -291,7 +291,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 4,
             count: 2,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Pharmacy",
@@ -300,7 +300,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 4,
             count: 2,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Dental Clinic",
@@ -309,7 +309,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 3,
             count: 1,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Mental Health",
@@ -318,7 +318,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 3,
             count: 2,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Medbay",
@@ -327,7 +327,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 8,
             count: 4,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Quarantine",
@@ -336,7 +336,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 20,
             count: 1,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Morgue",
@@ -345,7 +345,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 0,
             count: 1,
             deck_zone: 2,
-            group: groups::MEDICAL,
+            group: groups::COMMONS,
         },
         // === RECREATION (zone 3) ===
         FacilitySpec {
@@ -355,7 +355,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 100,
             count: 1,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Gym",
@@ -364,7 +364,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 40,
             count: 3,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Pool",
@@ -373,7 +373,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 30,
             count: 1,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Library",
@@ -382,7 +382,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 20,
             count: 2,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Theatre",
@@ -391,7 +391,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 100,
             count: 1,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Game Room",
@@ -400,7 +400,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 20,
             count: 5,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Observation Lounge",
@@ -409,7 +409,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 40,
             count: 3,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Art Studio",
@@ -418,7 +418,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 12,
             count: 2,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Music Room",
@@ -427,7 +427,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 12,
             count: 2,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Chapel",
@@ -436,7 +436,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 30,
             count: 1,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Holodeck",
@@ -445,7 +445,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 10,
             count: 4,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Nursery",
@@ -454,7 +454,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 20,
             count: 2,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "School",
@@ -463,7 +463,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 30,
             count: 3,
             deck_zone: 3,
-            group: groups::RECREATION,
+            group: groups::COMMONS,
         },
         // === LIFE SUPPORT & INFRASTRUCTURE (zone 4) ===
         FacilitySpec {
@@ -537,7 +537,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 10,
             count: 4,
             deck_zone: 5,
-            group: groups::CARGO,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Storage",
@@ -546,7 +546,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 0,
             count: 10,
             deck_zone: 5,
-            group: groups::CARGO,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Parts Storage",
@@ -555,7 +555,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 0,
             count: 5,
             deck_zone: 5,
-            group: groups::CARGO,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Shuttle Bay",
@@ -564,7 +564,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 6,
             count: 2,
             deck_zone: 5,
-            group: groups::CARGO,
+            group: groups::COMMONS,
         },
         FacilitySpec {
             name: "Airlock",
@@ -573,7 +573,7 @@ pub fn get_facility_manifest() -> Vec<FacilitySpec> {
             capacity: 8,
             count: 6,
             deck_zone: 5,
-            group: groups::CARGO,
+            group: groups::COMMONS,
         },
         // === ENGINEERING (zone 6) ===
         FacilitySpec {
