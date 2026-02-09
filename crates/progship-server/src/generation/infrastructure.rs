@@ -1145,7 +1145,11 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
         // Force-connect orphan rooms: only if room actually borders a corridor cell
         for pr in &placed_rooms {
-            let has_door = door_set.iter().any(|&(a, _, _)| a == pr.room_id);
+            let has_door = ctx
+                .db
+                .door()
+                .iter()
+                .any(|d| d.room_a == pr.room_id || d.room_b == pr.room_id);
             if has_door {
                 continue;
             }
