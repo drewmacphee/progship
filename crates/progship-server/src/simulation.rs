@@ -1537,7 +1537,12 @@ pub fn calculate_need_change(current: f32, rate: f32, delta_hours: f32) -> f32 {
 }
 
 /// Calculate health recovery based on needs satisfaction
-pub fn calculate_health_recovery(current_health: f32, hunger: f32, fatigue: f32, delta_hours: f32) -> f32 {
+pub fn calculate_health_recovery(
+    current_health: f32,
+    hunger: f32,
+    fatigue: f32,
+    delta_hours: f32,
+) -> f32 {
     if current_health < 1.0 && hunger < 0.5 && fatigue < 0.5 {
         (current_health + 0.01 * delta_hours).min(1.0)
     } else {
@@ -1603,7 +1608,11 @@ pub fn calculate_co2_damage(current_health: f32, co2: f32, delta_hours: f32) -> 
 }
 
 /// Calculate comfort impact from temperature extremes
-pub fn calculate_temperature_discomfort(current_comfort: f32, temperature: f32, delta_hours: f32) -> f32 {
+pub fn calculate_temperature_discomfort(
+    current_comfort: f32,
+    temperature: f32,
+    delta_hours: f32,
+) -> f32 {
     if temperature < 15.0 || temperature > 30.0 {
         (current_comfort + 0.1 * delta_hours).min(1.0)
     } else {
@@ -1612,7 +1621,11 @@ pub fn calculate_temperature_discomfort(current_comfort: f32, temperature: f32, 
 }
 
 /// Calculate health damage from extreme temperatures
-pub fn calculate_temperature_damage(current_health: f32, temperature: f32, delta_hours: f32) -> f32 {
+pub fn calculate_temperature_damage(
+    current_health: f32,
+    temperature: f32,
+    delta_hours: f32,
+) -> f32 {
     if temperature < 5.0 || temperature > 40.0 {
         current_health - 0.05 * delta_hours
     } else {
@@ -1646,13 +1659,15 @@ pub fn calculate_life_support_efficiency(subsystem_healths: &[(f32, bool)]) -> f
     }
     let sum: f32 = subsystem_healths
         .iter()
-        .map(|(health, degraded)| {
-            if *degraded {
-                health * 0.5
-            } else {
-                *health
-            }
-        })
+        .map(
+            |(health, degraded)| {
+                if *degraded {
+                    health * 0.5
+                } else {
+                    *health
+                }
+            },
+        )
         .sum();
     sum / subsystem_healths.len() as f32
 }
@@ -1686,7 +1701,11 @@ pub fn calculate_maintenance_duration(subsystem_health: f32) -> f32 {
 }
 
 /// Calculate maintenance progress increment
-pub fn calculate_maintenance_progress(current_progress: f32, delta_hours: f32, duration_hours: f32) -> f32 {
+pub fn calculate_maintenance_progress(
+    current_progress: f32,
+    delta_hours: f32,
+    duration_hours: f32,
+) -> f32 {
     (current_progress + delta_hours / duration_hours).min(1.0)
 }
 
