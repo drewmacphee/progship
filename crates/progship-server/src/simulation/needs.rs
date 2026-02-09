@@ -134,6 +134,7 @@ pub fn morale_change(morale: f32, avg_needs: f32, delta_hours: f32) -> f32 {
 }
 
 /// Calculate atmosphere effects on health, fatigue, and comfort
+#[allow(clippy::too_many_arguments)]
 pub fn atmosphere_effects(
     health: f32,
     fatigue: f32,
@@ -164,12 +165,12 @@ pub fn atmosphere_effects(
     }
 
     // Temperature extremes → comfort
-    if temperature < 15.0 || temperature > 30.0 {
+    if !(15.0..=30.0).contains(&temperature) {
         c = (c + 0.1 * delta_hours).min(1.0);
     }
 
     // Extreme temperature → health damage
-    if temperature < 5.0 || temperature > 40.0 {
+    if !(5.0..=40.0).contains(&temperature) {
         h -= 0.05 * delta_hours;
     }
 
