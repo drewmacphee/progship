@@ -192,10 +192,12 @@ diff run1.txt run2.txt  # Should be identical
 
 ## Priority Order
 
-1. **Unit tests** (now) — extract pure functions, test with `cargo test`
-2. **Door verification in CI** (soon) — already have `verify_doors.py`
-3. **Walkthrough bot** (next) — highest value for catching movement bugs
-4. **Headless rendering** (later) — visual regression, most complex to set up
+1. **Unit tests** (now) — extract pure functions, test with `cargo test` ✅ WS1-1/WS1-2 done
+2. **Geometry validation suite** (Wave 2) — WS1-7: AABB overlaps, door-on-wall checks, connectivity BFS, hull boundary enforcement, property-based multi-seed validation. Pure Rust, no SpacetimeDB. Runs in `progship-simtest` and as `cargo test`.
+3. **Headless simulation harness** (Wave 2) — WS1-6: Generate ship + fast-forward N ticks at max speed, collect metrics, assert invariants (nobody starves, O2 stays breathable). CLI tool in `crates/progship-simtest/`.
+4. **Walkthrough bot** (Wave 2, part of WS1-7 check E) — automated door traversal testing via extracted movement logic. For each door: pathfind → step through → verify no teleportation.
+5. **Door verification in CI** (soon) — port `archive/verify_doors.py` checks into Rust geometry suite
+6. **Headless rendering** (later) — visual regression, most complex to set up
 
 ---
 
