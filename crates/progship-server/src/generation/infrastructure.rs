@@ -196,7 +196,9 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     if yy < hull_length {
                         // Don't overwrite shaft cells (will be stamped later, but we
                         // pre-check to keep cross-corridor Room bounds accurate)
-                        grid[x][yy] = CELL_MAIN_CORRIDOR;
+                        if grid[x][yy] == CELL_EMPTY {
+                            grid[x][yy] = CELL_MAIN_CORRIDOR;
+                        }
                     }
                 }
             }
