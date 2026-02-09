@@ -179,9 +179,9 @@ pub fn build_ship_graph(ctx: &ReducerContext, _deck_count: u32) {
 
     // WATER: Water Recycling -> habitable rooms (sample to keep edge count sane)
     if let Some(water) = water_node {
-        for &nid in &node_ids {
+        for (i, &nid) in node_ids.iter().enumerate() {
             if nid != water {
-                let func = node_functions[node_ids.iter().position(|&x| x == nid).unwrap_or(0)];
+                let func = node_functions[i];
                 if room_types::is_quarters(func)
                     || room_types::is_dining(func)
                     || func == room_types::HYDROPONICS
