@@ -721,3 +721,125 @@ pub(super) fn get_facility_manifest() -> Vec<FacilitySpec> {
         },
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_facility_manifest_not_empty() {
+        let manifest = get_facility_manifest();
+        assert!(
+            !manifest.is_empty(),
+            "Facility manifest should not be empty"
+        );
+        assert!(manifest.len() > 20, "Ship should have many facility types");
+    }
+
+    #[test]
+    fn test_all_facilities_have_valid_specs() {
+        let manifest = get_facility_manifest();
+
+        for (i, spec) in manifest.iter().enumerate() {
+            assert!(!spec.name.is_empty(), "Facility {} should have a name", i);
+            assert!(
+                spec.target_area > 0.0,
+                "Facility {} '{}' should have positive area",
+                i,
+                spec.name
+            );
+            assert!(
+                spec.count > 0,
+                "Facility {} '{}' should have count > 0",
+                i,
+                spec.name
+            );
+            assert!(
+                spec.deck_zone < 10,
+                "Facility {} '{}' should have valid deck zone",
+                i,
+                spec.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_facility_room_counts() {
+        let manifest = get_facility_manifest();
+
+        // Count total rooms
+        let total_rooms: u32 = manifest.iter().map(|f| f.count).sum();
+        assert!(
+            total_rooms >= 50,
+            "Ship should have at least 50 rooms total"
+        );
+
+        // Check for key facilities
+        let bridge_count = manifest.iter().filter(|f| f.name == "Bridge").count();
+        assert_eq!(bridge_count, 1, "Should have exactly one Bridge definition");
+
+        let mess_halls: u32 = manifest
+            .iter()
+            .filter(|f| f.name == "Mess Hall")
+            .map(|f| f.count)
+            .sum();
+        assert!(mess_halls > 0, "Should have at least one mess hall");
+    }
+
+    #[test]
+    fn test_deck_zone_ranges_valid() {
+        let deck_count = 20;
+
+        for zone in 0..7 {
+            let (start, end) = deck_range_for_zone(zone, deck_count);
+            assert!(
+                start < deck_count,
+                "Zone {} start deck {} should be less than deck count",
+                zone,
+                start
+            );
+            assert!(
+                end <= deck_count,
+                "Zone {} end deck {} should be <= deck count",
+                zone,
+                end
+            );
+            assert!(start < end, "Zone {} should have start < end", zone);
+        }
+    }
+
+    #[test]
+    fn test_deck_zone_command_at_top() {
+        let deck_count = 20;
+        let (start, end) = deck_range_for_zone(0, deck_count); // Command zone
+
+        assert_eq!(start, 0, "Command zone should start at deck 0");
+        assert!(end <= 3, "Command zone should be in upper decks");
+    }
+
+    #[test]
+    fn test_deck_zone_engineering_at_bottom() {
+        let deck_count = 20;
+        let (start, end) = deck_range_for_zone(6, deck_count); // Engineering zone
+
+        assert!(start >= 19, "Engineering zone should be in lower decks");
+        assert_eq!(end, deck_count, "Engineering zone should extend to bottom");
+    }
+
+    #[test]
+    fn test_facility_zones_match_manifest() {
+        let manifest = get_facility_manifest();
+
+        // Verify all deck_zone values are used
+        let mut zones_used = vec![false; 7];
+        for spec in &manifest {
+            if spec.deck_zone < 7 {
+                zones_used[spec.deck_zone as usize] = true;
+            }
+        }
+
+        for (i, used) in zones_used.iter().enumerate() {
+            assert!(*used, "Deck zone {} should have at least one facility", i);
+        }
+    }
+}

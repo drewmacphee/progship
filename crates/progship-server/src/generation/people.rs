@@ -370,3 +370,139 @@ pub(super) fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count:
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name_pools_not_empty() {
+        assert!(
+            !GIVEN_NAMES.is_empty(),
+            "Given names pool should not be empty"
+        );
+        assert!(
+            !FAMILY_NAMES.is_empty(),
+            "Family names pool should not be empty"
+        );
+        assert!(GIVEN_NAMES.len() >= 20, "Should have diverse given names");
+        assert!(FAMILY_NAMES.len() >= 20, "Should have diverse family names");
+    }
+
+    #[test]
+    fn test_names_are_valid() {
+        for name in GIVEN_NAMES {
+            assert!(!name.is_empty(), "Given names should not be empty");
+            assert!(
+                name.len() >= 2,
+                "Given name '{}' should be at least 2 characters",
+                name
+            );
+        }
+
+        for name in FAMILY_NAMES {
+            assert!(!name.is_empty(), "Family names should not be empty");
+            assert!(
+                name.len() >= 2,
+                "Family name '{}' should be at least 2 characters",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_rng_deterministic() {
+        let mut rng1 = SimpleRng::from_name("TestPerson");
+        let mut rng2 = SimpleRng::from_name("TestPerson");
+
+        // Same seed should produce same sequence
+        assert_eq!(rng1.next_f32(), rng2.next_f32());
+        assert_eq!(rng1.next_f32(), rng2.next_f32());
+        assert_eq!(rng1.next_f32(), rng2.next_f32());
+    }
+
+    #[test]
+    fn test_simple_rng_different_seeds() {
+        let mut rng1 = SimpleRng::from_name("Alice");
+        let mut rng2 = SimpleRng::from_name("Bob");
+
+        // Different seeds should produce different values
+        let val1 = rng1.next_f32();
+        let val2 = rng2.next_f32();
+        assert_ne!(
+            val1, val2,
+            "Different seeds should produce different values"
+        );
+    }
+
+    #[test]
+    fn test_simple_rng_range() {
+        let mut rng = SimpleRng::from_name("Test");
+
+        for _ in 0..50 {
+            let val = rng.next_f32();
+            assert!(
+                val >= 0.0 && val <= 1.0,
+                "RNG value {} should be in [0, 1]",
+                val
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_rng_next_range() {
+        let mut rng = SimpleRng::from_name("RangeTest");
+
+        for _ in 0..50 {
+            let val = rng.next_range(10.0, 20.0);
+            assert!(
+                val >= 10.0 && val <= 20.0,
+                "Value {} should be in [10, 20]",
+                val
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_rng_next_usize() {
+        let mut rng = SimpleRng::from_name("UsizeTest");
+
+        for _ in 0..50 {
+            let val = rng.next_usize(5, 15);
+            assert!(val >= 5 && val < 15, "Value {} should be in [5, 15)", val);
+        }
+    }
+
+    #[test]
+    fn test_simple_rng_next_usize_edge_cases() {
+        let mut rng = SimpleRng::from_name("EdgeTest");
+
+        // When min == max, should return min
+        let val = rng.next_usize(10, 10);
+        assert_eq!(val, 10);
+
+        // When max < min, should return min
+        let val = rng.next_usize(10, 5);
+        assert_eq!(val, 10);
+    }
+
+    #[test]
+    fn test_name_generation_uniqueness() {
+        // Generate several names and check for some diversity
+        let mut names = std::collections::HashSet::new();
+
+        for i in 0..100 {
+            let given_idx = i % GIVEN_NAMES.len();
+            let family_idx = (i / GIVEN_NAMES.len() + i * 7) % FAMILY_NAMES.len();
+            let full_name = format!("{} {}", GIVEN_NAMES[given_idx], FAMILY_NAMES[family_idx]);
+            names.insert(full_name);
+        }
+
+        // Should have good variety (at least 80% unique in first 100)
+        assert!(
+            names.len() >= 80,
+            "Should generate diverse names, got {} unique out of 100",
+            names.len()
+        );
+    }
+}

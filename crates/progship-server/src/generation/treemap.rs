@@ -155,3 +155,146 @@ pub(super) fn squarified_treemap(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_treemap_returns_correct_count() {
+        let rooms = vec![(100.0, 0), (100.0, 1), (100.0, 2)];
+        let result = squarified_treemap(&rooms, 0, 0, 20, 20);
+        assert_eq!(result.len(), 3, "Should return 3 rectangles");
+    }
+
+    #[test]
+    fn test_treemap_total_area_matches_zone() {
+        let rooms = vec![(100.0, 0), (150.0, 1), (250.0, 2)];
+        let zone_w = 30;
+        let zone_h = 20;
+        let zone_area = zone_w * zone_h;
+
+        let result = squarified_treemap(&rooms, 0, 0, zone_w, zone_h);
+
+        let total_area: usize = result.iter().map(|(_, _, _, w, h)| w * h).sum();
+
+        // Allow small rounding differences due to integer discretization
+        let diff = (total_area as i32 - zone_area as i32).abs();
+        assert!(
+            diff <= 10,
+            "Total area {} should be close to zone area {}",
+            total_area,
+            zone_area
+        );
+    }
+
+    #[test]
+    fn test_treemap_no_overlapping_rectangles() {
+        let rooms = vec![(100.0, 0), (150.0, 1), (100.0, 2), (50.0, 3)];
+        let result = squarified_treemap(&rooms, 0, 0, 20, 20);
+
+        // Check every pair of rectangles for overlap
+        for i in 0..result.len() {
+            for j in (i + 1)..result.len() {
+                let (_, x1, y1, w1, h1) = result[i];
+                let (_, x2, y2, w2, h2) = result[j];
+
+                // Check if rectangles overlap
+                let no_overlap = x1 + w1 <= x2 || x2 + w2 <= x1 || y1 + h1 <= y2 || y2 + h2 <= y1;
+                assert!(no_overlap, "Rectangles {} and {} overlap", i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn test_treemap_all_within_bounds() {
+        let rooms = vec![(100.0, 0), (200.0, 1), (150.0, 2)];
+        let zone_x = 5;
+        let zone_y = 10;
+        let zone_w = 25;
+        let zone_h = 20;
+
+        let result = squarified_treemap(&rooms, zone_x, zone_y, zone_w, zone_h);
+
+        for (idx, x, y, w, h) in &result {
+            assert!(
+                *x >= zone_x,
+                "Room {} x={} is less than zone_x={}",
+                idx,
+                x,
+                zone_x
+            );
+            assert!(
+                *y >= zone_y,
+                "Room {} y={} is less than zone_y={}",
+                idx,
+                y,
+                zone_y
+            );
+            assert!(
+                *x + *w <= zone_x + zone_w,
+                "Room {} exceeds zone width",
+                idx
+            );
+            assert!(
+                *y + *h <= zone_y + zone_h,
+                "Room {} exceeds zone height",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_treemap_reasonable_aspect_ratios() {
+        let rooms = vec![(100.0, 0), (100.0, 1), (100.0, 2), (100.0, 3)];
+        let result = squarified_treemap(&rooms, 0, 0, 20, 20);
+
+        // Check that aspect ratios are reasonable (not too extreme)
+        for (idx, _, _, w, h) in &result {
+            if *w > 0 && *h > 0 {
+                let aspect_ratio = if w > h {
+                    *w as f32 / *h as f32
+                } else {
+                    *h as f32 / *w as f32
+                };
+                assert!(
+                    aspect_ratio <= 10.0,
+                    "Room {} has extreme aspect ratio {}",
+                    idx,
+                    aspect_ratio
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_treemap_single_room() {
+        let rooms = vec![(100.0, 0)];
+        let result = squarified_treemap(&rooms, 5, 10, 20, 15);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            (0, 5, 10, 20, 15),
+            "Single room should fill entire zone"
+        );
+    }
+
+    #[test]
+    fn test_treemap_empty_input() {
+        let rooms: Vec<(f32, usize)> = vec![];
+        let result = squarified_treemap(&rooms, 0, 0, 10, 10);
+        assert!(result.is_empty(), "Empty input should return empty result");
+    }
+
+    #[test]
+    fn test_treemap_zero_zone_dimensions() {
+        let rooms = vec![(100.0, 0)];
+
+        let result1 = squarified_treemap(&rooms, 0, 0, 0, 10);
+        assert!(result1.is_empty(), "Zero width should return empty result");
+
+        let result2 = squarified_treemap(&rooms, 0, 0, 10, 0);
+        assert!(result2.is_empty(), "Zero height should return empty result");
+    }
+}
