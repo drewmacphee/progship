@@ -1526,3 +1526,624 @@ pub fn tick_maintenance(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
         ctx.db.maintenance_task().id().update(t);
     }
 }
+
+// ============================================================================
+// PURE HELPER FUNCTIONS (extracted for testing)
+// ============================================================================
+
+/// Calculate need decay with clamping (0.0 - 1.0 range)
+pub fn calculate_need_change(current: f32, rate: f32, delta_hours: f32) -> f32 {
+    (current + rate * delta_hours).clamp(0.0, 1.0)
+}
+
+/// Calculate health recovery based on needs satisfaction
+pub fn calculate_health_recovery(current_health: f32, hunger: f32, fatigue: f32, delta_hours: f32) -> f32 {
+    if current_health < 1.0 && hunger < 0.5 && fatigue < 0.5 {
+        (current_health + 0.01 * delta_hours).min(1.0)
+    } else {
+        current_health
+    }
+}
+
+/// Calculate health damage from starvation
+pub fn calculate_starvation_damage(current_health: f32, hunger: f32, delta_hours: f32) -> f32 {
+    if hunger >= 1.0 {
+        current_health - 0.05 * delta_hours
+    } else {
+        current_health
+    }
+}
+
+/// Calculate health damage from exhaustion
+pub fn calculate_exhaustion_damage(current_health: f32, fatigue: f32, delta_hours: f32) -> f32 {
+    if fatigue >= 1.0 {
+        current_health - 0.02 * delta_hours
+    } else {
+        current_health
+    }
+}
+
+/// Calculate morale change based on average needs satisfaction
+pub fn calculate_morale_change(current_morale: f32, avg_needs: f32, delta_hours: f32) -> f32 {
+    if avg_needs > 0.7 {
+        (current_morale - 0.03 * delta_hours).max(0.0)
+    } else if avg_needs < 0.3 {
+        (current_morale + 0.01 * delta_hours).min(1.0)
+    } else {
+        current_morale
+    }
+}
+
+/// Calculate health damage from low oxygen
+pub fn calculate_oxygen_damage(current_health: f32, oxygen: f32, delta_hours: f32) -> f32 {
+    if oxygen < 0.16 {
+        let o2_damage = (0.16 - oxygen) * 0.5 * delta_hours;
+        current_health - o2_damage
+    } else {
+        current_health
+    }
+}
+
+/// Calculate fatigue increase from high CO2
+pub fn calculate_co2_fatigue(current_fatigue: f32, co2: f32, delta_hours: f32) -> f32 {
+    if co2 > 0.04 {
+        (current_fatigue + (co2 - 0.04) * 2.0 * delta_hours).min(1.0)
+    } else {
+        current_fatigue
+    }
+}
+
+/// Calculate health damage from high CO2
+pub fn calculate_co2_damage(current_health: f32, co2: f32, delta_hours: f32) -> f32 {
+    if co2 > 0.06 {
+        current_health - (co2 - 0.06) * 0.3 * delta_hours
+    } else {
+        current_health
+    }
+}
+
+/// Calculate comfort impact from temperature extremes
+pub fn calculate_temperature_discomfort(current_comfort: f32, temperature: f32, delta_hours: f32) -> f32 {
+    if temperature < 15.0 || temperature > 30.0 {
+        (current_comfort + 0.1 * delta_hours).min(1.0)
+    } else {
+        current_comfort
+    }
+}
+
+/// Calculate health damage from extreme temperatures
+pub fn calculate_temperature_damage(current_health: f32, temperature: f32, delta_hours: f32) -> f32 {
+    if temperature < 5.0 || temperature > 40.0 {
+        current_health - 0.05 * delta_hours
+    } else {
+        current_health
+    }
+}
+
+/// Calculate health damage from low pressure
+pub fn calculate_pressure_damage(current_health: f32, pressure: f32, delta_hours: f32) -> f32 {
+    if pressure < 80.0 {
+        current_health - (80.0 - pressure) * 0.01 * delta_hours
+    } else {
+        current_health
+    }
+}
+
+/// Calculate O2 consumption for a given population (fraction units per hour)
+pub fn calculate_o2_consumption(population: f32, exercising_count: f32, delta_hours: f32) -> f32 {
+    (population * 0.035 + exercising_count * 0.07) * delta_hours
+}
+
+/// Calculate CO2 production for a given population (fraction units per hour)
+pub fn calculate_co2_production(population: f32, exercising_count: f32, delta_hours: f32) -> f32 {
+    (population * 0.043 + exercising_count * 0.09) * delta_hours
+}
+
+/// Calculate life support efficiency from multiple subsystems
+pub fn calculate_life_support_efficiency(subsystem_healths: &[(f32, bool)]) -> f32 {
+    if subsystem_healths.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = subsystem_healths
+        .iter()
+        .map(|(health, degraded)| {
+            if *degraded {
+                health * 0.5
+            } else {
+                *health
+            }
+        })
+        .sum();
+    sum / subsystem_healths.len() as f32
+}
+
+/// Calculate resource consumption per person per hour
+pub fn calculate_food_consumption(person_count: f32, delta_hours: f32) -> f32 {
+    let food_rate = 2.0 / 24.0;
+    person_count * food_rate * delta_hours
+}
+
+/// Calculate water consumption per person per hour
+pub fn calculate_water_consumption(person_count: f32, delta_hours: f32) -> f32 {
+    let water_rate = 3.0 / 24.0;
+    person_count * water_rate * delta_hours
+}
+
+/// Calculate oxygen resource consumption per person per hour
+pub fn calculate_oxygen_resource_consumption(person_count: f32, delta_hours: f32) -> f32 {
+    let oxygen_rate = 0.84 / 24.0;
+    person_count * oxygen_rate * delta_hours
+}
+
+/// Calculate maintenance task priority (0.0 - 1.0)
+pub fn calculate_maintenance_priority(subsystem_health: f32) -> f32 {
+    (1.0 - subsystem_health).clamp(0.0, 1.0)
+}
+
+/// Calculate maintenance task duration based on damage severity
+pub fn calculate_maintenance_duration(subsystem_health: f32) -> f32 {
+    2.0 + (1.0 - subsystem_health) * 4.0
+}
+
+/// Calculate maintenance progress increment
+pub fn calculate_maintenance_progress(current_progress: f32, delta_hours: f32, duration_hours: f32) -> f32 {
+    (current_progress + delta_hours / duration_hours).min(1.0)
+}
+
+/// Determine component/subsystem status after repair
+pub fn calculate_repair_status(health: f32) -> u8 {
+    if health > 0.7 {
+        system_statuses::NOMINAL
+    } else {
+        system_statuses::DEGRADED
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // NEEDS SYSTEM TESTS
+    // ============================================================================
+
+    #[test]
+    fn need_increase_clamps_to_max() {
+        let result = calculate_need_change(0.9, 0.5, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn need_decrease_clamps_to_zero() {
+        let result = calculate_need_change(0.1, -0.5, 1.0);
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn need_change_normal_increase() {
+        let result = calculate_need_change(0.3, 0.2, 1.0);
+        assert_eq!(result, 0.5);
+    }
+
+    #[test]
+    fn need_change_normal_decrease() {
+        let result = calculate_need_change(0.5, -0.2, 1.0);
+        assert_eq!(result, 0.3);
+    }
+
+    #[test]
+    fn health_recovery_occurs_when_needs_satisfied() {
+        let result = calculate_health_recovery(0.8, 0.3, 0.3, 1.0);
+        assert_eq!(result, 0.81);
+    }
+
+    #[test]
+    fn health_recovery_no_change_when_already_full() {
+        let result = calculate_health_recovery(1.0, 0.3, 0.3, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn health_recovery_blocked_by_high_hunger() {
+        let result = calculate_health_recovery(0.8, 0.6, 0.3, 1.0);
+        assert_eq!(result, 0.8);
+    }
+
+    #[test]
+    fn health_recovery_blocked_by_high_fatigue() {
+        let result = calculate_health_recovery(0.8, 0.3, 0.6, 1.0);
+        assert_eq!(result, 0.8);
+    }
+
+    #[test]
+    fn starvation_causes_damage() {
+        let result = calculate_starvation_damage(1.0, 1.0, 1.0);
+        assert_eq!(result, 0.95);
+    }
+
+    #[test]
+    fn starvation_no_damage_when_fed() {
+        let result = calculate_starvation_damage(1.0, 0.8, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn exhaustion_causes_damage() {
+        let result = calculate_exhaustion_damage(1.0, 1.0, 1.0);
+        assert_eq!(result, 0.98);
+    }
+
+    #[test]
+    fn exhaustion_no_damage_when_rested() {
+        let result = calculate_exhaustion_damage(1.0, 0.8, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn morale_decreases_when_needs_high() {
+        let result = calculate_morale_change(1.0, 0.8, 1.0);
+        assert_eq!(result, 0.97);
+    }
+
+    #[test]
+    fn morale_increases_when_needs_low() {
+        let result = calculate_morale_change(0.5, 0.2, 1.0);
+        assert_eq!(result, 0.51);
+    }
+
+    #[test]
+    fn morale_stable_when_needs_moderate() {
+        let result = calculate_morale_change(0.7, 0.5, 1.0);
+        assert_eq!(result, 0.7);
+    }
+
+    #[test]
+    fn morale_clamps_to_zero() {
+        let result = calculate_morale_change(0.01, 0.9, 1.0);
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn morale_clamps_to_one() {
+        let result = calculate_morale_change(0.99, 0.1, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    // ============================================================================
+    // ATMOSPHERE SYSTEM TESTS
+    // ============================================================================
+
+    #[test]
+    fn low_oxygen_causes_damage() {
+        let result = calculate_oxygen_damage(1.0, 0.10, 1.0);
+        assert_eq!(result, 0.97); // (0.16 - 0.10) * 0.5 = 0.03 damage
+    }
+
+    #[test]
+    fn normal_oxygen_no_damage() {
+        let result = calculate_oxygen_damage(1.0, 0.21, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn high_co2_increases_fatigue() {
+        let result = calculate_co2_fatigue(0.5, 0.08, 1.0);
+        assert_eq!(result, 0.58); // (0.08 - 0.04) * 2.0 = 0.08
+    }
+
+    #[test]
+    fn normal_co2_no_fatigue_increase() {
+        let result = calculate_co2_fatigue(0.5, 0.03, 1.0);
+        assert_eq!(result, 0.5);
+    }
+
+    #[test]
+    fn very_high_co2_causes_damage() {
+        let result = calculate_co2_damage(1.0, 0.10, 1.0);
+        assert_eq!(result, 0.988); // (0.10 - 0.06) * 0.3 = 0.012 damage
+    }
+
+    #[test]
+    fn moderate_co2_no_damage() {
+        let result = calculate_co2_damage(1.0, 0.05, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn cold_temperature_causes_discomfort() {
+        let result = calculate_temperature_discomfort(0.3, 10.0, 1.0);
+        assert_eq!(result, 0.4);
+    }
+
+    #[test]
+    fn hot_temperature_causes_discomfort() {
+        let result = calculate_temperature_discomfort(0.3, 35.0, 1.0);
+        assert_eq!(result, 0.4);
+    }
+
+    #[test]
+    fn comfortable_temperature_no_discomfort() {
+        let result = calculate_temperature_discomfort(0.3, 22.0, 1.0);
+        assert_eq!(result, 0.3);
+    }
+
+    #[test]
+    fn extreme_cold_causes_damage() {
+        let result = calculate_temperature_damage(1.0, 0.0, 1.0);
+        assert_eq!(result, 0.95);
+    }
+
+    #[test]
+    fn extreme_heat_causes_damage() {
+        let result = calculate_temperature_damage(1.0, 45.0, 1.0);
+        assert_eq!(result, 0.95);
+    }
+
+    #[test]
+    fn moderate_temperature_no_damage() {
+        let result = calculate_temperature_damage(1.0, 25.0, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn low_pressure_causes_damage() {
+        let result = calculate_pressure_damage(1.0, 70.0, 1.0);
+        assert_eq!(result, 0.9); // (80.0 - 70.0) * 0.01 = 0.1 damage
+    }
+
+    #[test]
+    fn normal_pressure_no_damage() {
+        let result = calculate_pressure_damage(1.0, 101.0, 1.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn o2_consumption_scales_with_population() {
+        let result = calculate_o2_consumption(100.0, 0.0, 1.0);
+        assert_eq!(result, 3.5); // 100 * 0.035 * 1.0
+    }
+
+    #[test]
+    fn o2_consumption_higher_when_exercising() {
+        let result = calculate_o2_consumption(100.0, 10.0, 1.0);
+        assert_eq!(result, 4.2); // 100 * 0.035 + 10 * 0.07 = 3.5 + 0.7
+    }
+
+    #[test]
+    fn co2_production_scales_with_population() {
+        let result = calculate_co2_production(100.0, 0.0, 1.0);
+        assert_eq!(result, 4.3); // 100 * 0.043 * 1.0
+    }
+
+    #[test]
+    fn co2_production_higher_when_exercising() {
+        let result = calculate_co2_production(100.0, 10.0, 1.0);
+        assert!((result - 5.2).abs() < 0.01); // 100 * 0.043 + 10 * 0.09 = 4.3 + 0.9
+    }
+
+    #[test]
+    fn life_support_efficiency_zero_when_empty() {
+        let result = calculate_life_support_efficiency(&[]);
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn life_support_efficiency_full_when_healthy() {
+        let result = calculate_life_support_efficiency(&[(1.0, false), (1.0, false), (1.0, false)]);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn life_support_efficiency_reduced_when_degraded() {
+        let result = calculate_life_support_efficiency(&[(1.0, true), (1.0, false)]);
+        assert_eq!(result, 0.75); // (1.0 * 0.5 + 1.0) / 2
+    }
+
+    #[test]
+    fn life_support_efficiency_partial_when_damaged() {
+        let result = calculate_life_support_efficiency(&[(0.6, false), (0.4, false)]);
+        assert_eq!(result, 0.5); // (0.6 + 0.4) / 2
+    }
+
+    // ============================================================================
+    // SHIP SYSTEMS TESTS
+    // ============================================================================
+
+    #[test]
+    fn food_consumption_scales_with_population() {
+        let result = calculate_food_consumption(100.0, 24.0);
+        assert!((result - 200.0).abs() < 0.01); // 100 * (2.0/24.0) * 24 = 200
+    }
+
+    #[test]
+    fn water_consumption_scales_with_population() {
+        let result = calculate_water_consumption(100.0, 24.0);
+        assert!((result - 300.0).abs() < 0.01); // 100 * (3.0/24.0) * 24 = 300
+    }
+
+    #[test]
+    fn oxygen_resource_consumption_scales_with_population() {
+        let result = calculate_oxygen_resource_consumption(100.0, 24.0);
+        assert!((result - 84.0).abs() < 0.01); // 100 * (0.84/24.0) * 24 = 84
+    }
+
+    // ============================================================================
+    // DUTY SYSTEM TESTS
+    // ============================================================================
+
+    #[test]
+    fn alpha_shift_on_duty_during_day() {
+        assert!(should_be_on_duty(shifts::ALPHA, 10.0));
+    }
+
+    #[test]
+    fn alpha_shift_off_duty_at_night() {
+        assert!(!should_be_on_duty(shifts::ALPHA, 20.0));
+    }
+
+    #[test]
+    fn beta_shift_on_duty_during_evening() {
+        assert!(should_be_on_duty(shifts::BETA, 18.0));
+    }
+
+    #[test]
+    fn beta_shift_off_duty_at_night() {
+        assert!(!should_be_on_duty(shifts::BETA, 23.0));
+    }
+
+    #[test]
+    fn gamma_shift_on_duty_at_night() {
+        assert!(should_be_on_duty(shifts::GAMMA, 23.0));
+    }
+
+    #[test]
+    fn gamma_shift_off_duty_during_day() {
+        assert!(!should_be_on_duty(shifts::GAMMA, 12.0));
+    }
+
+    #[test]
+    fn breakfast_time_detected() {
+        assert!(is_meal_time(7.5));
+    }
+
+    #[test]
+    fn lunch_time_detected() {
+        assert!(is_meal_time(12.5));
+    }
+
+    #[test]
+    fn dinner_time_detected() {
+        assert!(is_meal_time(18.5));
+    }
+
+    #[test]
+    fn non_meal_time_detected() {
+        assert!(!is_meal_time(10.0));
+    }
+
+    #[test]
+    fn passenger_sleep_time_at_night() {
+        assert!(is_sleep_time(23.0, false));
+    }
+
+    #[test]
+    fn passenger_awake_time_during_day() {
+        assert!(!is_sleep_time(10.0, false));
+    }
+
+    #[test]
+    fn crew_never_sleep_time_based_on_simple_check() {
+        // Crew uses shift-based sleep, so this function returns false for crew
+        assert!(!is_sleep_time(23.0, true));
+    }
+
+    // ============================================================================
+    // SOCIAL SYSTEM TESTS
+    // ============================================================================
+
+    #[test]
+    fn strangers_have_low_familiarity() {
+        let result = classify_relationship(0.0, 0.05);
+        assert_eq!(result, relationship_types::STRANGER);
+    }
+
+    #[test]
+    fn enemies_have_negative_strength() {
+        let result = classify_relationship(-0.6, 0.2);
+        assert_eq!(result, relationship_types::ENEMY);
+    }
+
+    #[test]
+    fn rivals_have_moderate_negative_strength() {
+        let result = classify_relationship(-0.3, 0.2);
+        assert_eq!(result, relationship_types::RIVAL);
+    }
+
+    #[test]
+    fn acquaintances_have_low_familiarity() {
+        let result = classify_relationship(0.1, 0.2);
+        assert_eq!(result, relationship_types::ACQUAINTANCE);
+    }
+
+    #[test]
+    fn friends_have_positive_strength() {
+        let result = classify_relationship(0.5, 0.4);
+        assert_eq!(result, relationship_types::FRIEND);
+    }
+
+    #[test]
+    fn close_friends_have_high_strength() {
+        let result = classify_relationship(0.8, 0.5);
+        assert_eq!(result, relationship_types::CLOSE_FRIEND);
+    }
+
+    #[test]
+    fn colleagues_are_familiar_but_neutral() {
+        let result = classify_relationship(0.1, 0.4);
+        assert_eq!(result, relationship_types::COLLEAGUE);
+    }
+
+    // ============================================================================
+    // MAINTENANCE SYSTEM TESTS
+    // ============================================================================
+
+    #[test]
+    fn maintenance_priority_high_for_damaged_system() {
+        let result = calculate_maintenance_priority(0.2);
+        assert_eq!(result, 0.8);
+    }
+
+    #[test]
+    fn maintenance_priority_low_for_healthy_system() {
+        let result = calculate_maintenance_priority(0.9);
+        assert!((result - 0.1).abs() < 0.01);
+    }
+
+    #[test]
+    fn maintenance_priority_max_for_destroyed_system() {
+        let result = calculate_maintenance_priority(0.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn maintenance_duration_short_for_minor_damage() {
+        let result = calculate_maintenance_duration(0.9);
+        assert_eq!(result, 2.4); // 2.0 + (1.0 - 0.9) * 4.0
+    }
+
+    #[test]
+    fn maintenance_duration_long_for_severe_damage() {
+        let result = calculate_maintenance_duration(0.2);
+        assert_eq!(result, 5.2); // 2.0 + (1.0 - 0.2) * 4.0
+    }
+
+    #[test]
+    fn maintenance_progress_increments() {
+        let result = calculate_maintenance_progress(0.3, 1.0, 4.0);
+        assert_eq!(result, 0.55); // 0.3 + 1.0/4.0
+    }
+
+    #[test]
+    fn maintenance_progress_clamps_to_one() {
+        let result = calculate_maintenance_progress(0.9, 1.0, 2.0);
+        assert_eq!(result, 1.0);
+    }
+
+    #[test]
+    fn repair_status_nominal_when_healthy() {
+        let result = calculate_repair_status(0.8);
+        assert_eq!(result, system_statuses::NOMINAL);
+    }
+
+    #[test]
+    fn repair_status_degraded_when_damaged() {
+        let result = calculate_repair_status(0.5);
+        assert_eq!(result, system_statuses::DEGRADED);
+    }
+
+    #[test]
+    fn repair_status_degraded_at_threshold() {
+        let result = calculate_repair_status(0.7);
+        assert_eq!(result, system_statuses::DEGRADED);
+    }
+}
