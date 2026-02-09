@@ -3,19 +3,6 @@
 //! Top-down 3D view of the colony ship. All simulation runs on the server.
 //! The client renders the world, follows the player, and sends input.
 
-// TODO: Fix these clippy lints incrementally
-#![allow(clippy::needless_range_loop)]
-#![allow(clippy::type_complexity)]
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::collapsible_if)]
-#![allow(clippy::collapsible_else_if)]
-#![allow(clippy::derivable_impls)]
-#![allow(clippy::large_enum_variant)]
-#![allow(clippy::if_same_then_else)]
-#![allow(clippy::useless_format)]
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use spacetimedb_sdk::{DbContext, Table};
@@ -64,7 +51,7 @@ fn main() {
 enum ConnectionState {
     Disconnected,
     Connecting,
-    Connected(DbConnection),
+    Connected(Box<DbConnection>),
 }
 
 #[derive(Resource)]
@@ -109,7 +96,7 @@ impl Default for PlayerState {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct UiState {
     selected_person: Option<u64>,
     show_ship_overview: bool,
@@ -117,20 +104,9 @@ struct UiState {
     last_event_count: usize,
 }
 
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            selected_person: None,
-            show_ship_overview: false,
-            toasts: Vec::new(),
-            last_event_count: 0,
-        }
-    }
-}
-
 struct Toast {
     message: String,
-    color: Color,
+    _color: Color, // Reserved for future toast color coding
     timer: f32,
 }
 
@@ -140,12 +116,12 @@ struct Toast {
 
 #[derive(Component)]
 struct RoomEntity {
-    room_id: u32,
-    deck: i32,
+    _room_id: u32, // Preserved for future room interaction
+    _deck: i32,    // Preserved for future deck filtering
 }
 
 #[derive(Component)]
-struct RoomLabel;
+struct _RoomLabel; // Reserved for future 3D room labels
 
 #[derive(Component)]
 struct DoorMarker;
@@ -169,6 +145,58 @@ struct InfoPanel;
 
 #[derive(Component)]
 struct ToastContainer;
+
+// ============================================================================
+// TYPE ALIASES FOR COMPLEX BEVY QUERIES
+// ============================================================================
+
+type HudQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<HudText>,
+        Without<InfoPanel>,
+        Without<NeedsBar>,
+        Without<ToastContainer>,
+    ),
+>;
+
+type NeedsQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<NeedsBar>,
+        Without<HudText>,
+        Without<InfoPanel>,
+        Without<ToastContainer>,
+    ),
+>;
+
+type PanelQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<InfoPanel>,
+        Without<HudText>,
+        Without<NeedsBar>,
+        Without<ToastContainer>,
+    ),
+>;
+
+type ToastQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<ToastContainer>,
+        Without<HudText>,
+        Without<InfoPanel>,
+        Without<NeedsBar>,
+    ),
+>;
 
 // ============================================================================
 // SETUP
@@ -316,7 +344,7 @@ fn connect_to_server(mut state: ResMut<ConnectionState>) {
                 "SELECT * FROM maintenance_task",
                 "SELECT * FROM connected_player",
             ]);
-            *state = ConnectionState::Connected(conn);
+            *state = ConnectionState::Connected(Box::new(conn));
         }
         Err(e) => {
             error!("Failed to connect: {:?}", e);
@@ -461,10 +489,8 @@ fn player_input(
                         continue;
                     }
                     let dist = ((pos.x - my_pos.x).powi(2) + (pos.y - my_pos.y).powi(2)).sqrt();
-                    if dist < 15.0 {
-                        if closest.is_none() || dist < closest.unwrap().1 {
-                            closest = Some((pos.person_id, dist));
-                        }
+                    if dist < 15.0 && (closest.is_none() || dist < closest.unwrap().1) {
+                        closest = Some((pos.person_id, dist));
                     }
                 }
                 if let Some((target_id, _)) = closest {
@@ -510,7 +536,7 @@ fn player_input(
                         };
                         ui.toasts.push(Toast {
                             message: action_name.to_string(),
-                            color: Color::srgb(0.5, 1.0, 0.5),
+                            _color: Color::srgb(0.5, 1.0, 0.5),
                             timer: 2.0,
                         });
                     }
@@ -537,7 +563,7 @@ fn player_input(
                             let _ = conn.reducers().player_use_elevator(deck);
                             ui.toasts.push(Toast {
                                 message: format!("Taking elevator to Deck {}...", deck + 1),
-                                color: Color::srgb(0.5, 0.8, 1.0),
+                                _color: Color::srgb(0.5, 0.8, 1.0),
                                 timer: 2.0,
                             });
                         }
@@ -548,7 +574,7 @@ fn player_input(
                         let _ = conn.reducers().player_use_ladder(-1);
                         ui.toasts.push(Toast {
                             message: "Climbing up...".to_string(),
-                            color: Color::srgb(0.5, 0.8, 1.0),
+                            _color: Color::srgb(0.5, 0.8, 1.0),
                             timer: 2.0,
                         });
                     }
@@ -556,7 +582,7 @@ fn player_input(
                         let _ = conn.reducers().player_use_ladder(1);
                         ui.toasts.push(Toast {
                             message: "Climbing down...".to_string(),
-                            color: Color::srgb(0.5, 0.8, 1.0),
+                            _color: Color::srgb(0.5, 0.8, 1.0),
                             timer: 2.0,
                         });
                     }
@@ -658,7 +684,7 @@ fn player_input(
             if let Some(room) = conn.db.room().id().find(&evt.room_id) {
                 ui.toasts.push(Toast {
                     message: format!("{} in {}", msg, room.name),
-                    color,
+                    _color: color,
                     timer: 5.0,
                 });
             }
@@ -748,8 +774,8 @@ fn sync_rooms(
             })),
             Transform::from_xyz(room.x, 0.0, -room.y),
             RoomEntity {
-                room_id: room.id,
-                deck: room.deck,
+                _room_id: room.id,
+                _deck: room.deck,
             },
         ));
 
@@ -908,8 +934,8 @@ fn sync_rooms(
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
             commands.spawn((
@@ -918,8 +944,8 @@ fn sync_rooms(
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
         }
@@ -931,8 +957,8 @@ fn sync_rooms(
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
             commands.spawn((
@@ -941,8 +967,8 @@ fn sync_rooms(
                 Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
         }
@@ -955,8 +981,8 @@ fn sync_rooms(
                 Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
             commands.spawn((
@@ -965,8 +991,8 @@ fn sync_rooms(
                 Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
         }
@@ -978,8 +1004,8 @@ fn sync_rooms(
                 Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
             commands.spawn((
@@ -988,8 +1014,8 @@ fn sync_rooms(
                 Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
                 DoorMarker,
                 RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
+                    _room_id: room.id,
+                    _deck: room.deck,
                 },
             ));
         }
@@ -1013,11 +1039,27 @@ fn sync_rooms(
             })),
             Transform::from_xyz(shaft.x, 0.0, -shaft.y),
             RoomEntity {
-                room_id: u32::MAX,
-                deck: view.current_deck,
+                _room_id: u32::MAX,
+                _deck: view.current_deck,
             },
         ));
     }
+}
+
+/// Parameters for wall spawning
+struct WallParams<'a> {
+    color: Color,
+    wall_x: f32,
+    wall_z: f32,
+    wall_length: f32,
+    wall_height: f32,
+    wall_thickness: f32,
+    horizontal: bool,
+    door_positions: &'a [f32],
+    room_center: f32,
+    door_widths: &'a [f32],
+    room_id: u32,
+    deck: i32,
 }
 
 /// Spawn a wall with gaps cut out for doors
@@ -1025,39 +1067,29 @@ fn spawn_wall_with_gaps(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    color: Color,
-    wall_x: f32,
-    wall_z: f32, // 3D position of wall center
-    wall_length: f32,
-    wall_height: f32,
-    wall_thickness: f32,
-    horizontal: bool,       // true = runs along X, false = runs along Z
-    door_positions: &[f32], // door world positions along the wall axis
-    room_center: f32,       // room center along the wall axis (for converting door pos)
-    door_widths: &[f32],    // per-door widths
-    room_id: u32,
-    deck: i32,
+    params: WallParams,
 ) {
+    let (_room_id, _deck) = (params.room_id, params.deck); // Prepare for component construction
     let mat = materials.add(StandardMaterial {
-        base_color: color,
+        base_color: params.color,
         ..default()
     });
 
-    if door_positions.is_empty() {
+    if params.door_positions.is_empty() {
         // No doors — solid wall
-        if horizontal {
+        if params.horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_length, wall_height, wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(params.wall_length, params.wall_height, params.wall_thickness))),
                 MeshMaterial3d(mat),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
+                Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z),
+                RoomEntity { _room_id, _deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_length))),
+                Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, params.wall_length))),
                 MeshMaterial3d(mat),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
+                Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z),
+                RoomEntity { _room_id, _deck },
             ));
         }
         return;
@@ -1065,40 +1097,40 @@ fn spawn_wall_with_gaps(
 
     // Build wall segments around door gaps
     // Convert door positions to offsets along the wall
-    let mut gaps: Vec<(f32, f32)> = door_positions
+    let mut gaps: Vec<(f32, f32)> = params.door_positions
         .iter()
-        .zip(door_widths.iter())
+        .zip(params.door_widths.iter())
         .map(|(&dp, &dw)| {
-            let offset = if horizontal {
-                dp - room_center
+            let offset = if params.horizontal {
+                dp - params.room_center
             } else {
-                -(dp - room_center)
+                -(dp - params.room_center)
             };
             (offset - dw / 2.0, offset + dw / 2.0)
         })
         .collect();
     gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    let half_len = wall_length / 2.0;
+    let half_len = params.wall_length / 2.0;
     let mut cursor = -half_len;
 
     for (gap_start, gap_end) in &gaps {
         let seg_len = gap_start - cursor;
         if seg_len > 0.1 {
             let seg_center = cursor + seg_len / 2.0;
-            if horizontal {
+            if params.horizontal {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(seg_len, wall_height, wall_thickness))),
+                    Mesh3d(meshes.add(Cuboid::new(seg_len, params.wall_height, params.wall_thickness))),
                     MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
-                    RoomEntity { room_id, deck },
+                    Transform::from_xyz(params.wall_x + seg_center, params.wall_height / 2.0, params.wall_z),
+                    RoomEntity { _room_id, _deck },
                 ));
             } else {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, seg_len))),
+                    Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, seg_len))),
                     MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
-                    RoomEntity { room_id, deck },
+                    Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z + seg_center),
+                    RoomEntity { _room_id, _deck },
                 ));
             }
         }
@@ -1109,19 +1141,19 @@ fn spawn_wall_with_gaps(
     let seg_len = half_len - cursor;
     if seg_len > 0.1 {
         let seg_center = cursor + seg_len / 2.0;
-        if horizontal {
+        if params.horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(seg_len, wall_height, wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(seg_len, params.wall_height, params.wall_thickness))),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
+                Transform::from_xyz(params.wall_x + seg_center, params.wall_height / 2.0, params.wall_z),
+                RoomEntity { _room_id, _deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, seg_len))),
+                Mesh3d(meshes.add(Cuboid::new(params.wall_thickness, params.wall_height, seg_len))),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
-                RoomEntity { room_id, deck },
+                Transform::from_xyz(params.wall_x, params.wall_height / 2.0, params.wall_z + seg_center),
+                RoomEntity { _room_id, _deck },
             ));
         }
     }
@@ -1316,24 +1348,8 @@ fn render_hud(
     state: Res<ConnectionState>,
     view: Res<ViewState>,
     player: Res<PlayerState>,
-    mut hud_q: Query<
-        &mut Text,
-        (
-            With<HudText>,
-            Without<NeedsBar>,
-            Without<InfoPanel>,
-            Without<ToastContainer>,
-        ),
-    >,
-    mut needs_q: Query<
-        &mut Text,
-        (
-            With<NeedsBar>,
-            Without<HudText>,
-            Without<InfoPanel>,
-            Without<ToastContainer>,
-        ),
-    >,
+    mut hud_q: HudQuery,
+    mut needs_q: NeedsQuery,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
@@ -1422,7 +1438,7 @@ fn render_hud(
             person_count,
             atmo_str,
             activity_str,
-            if activity_str.is_empty() { "" } else { "" },
+            "",  // Placeholder for future activity details
             context_hint,
         );
     }
@@ -1443,14 +1459,12 @@ fn render_hud(
                         } else {
                             ""
                         }
+                    } else if val < 0.3 {
+                        "!!"
+                    } else if val < 0.6 {
+                        "!"
                     } else {
-                        if val < 0.3 {
-                            "!!"
-                        } else if val < 0.6 {
-                            "!"
-                        } else {
-                            ""
-                        }
+                        ""
                     };
                     format!(
                         "{}: [{}{}] {:.0}%{}",
@@ -1485,18 +1499,10 @@ fn render_hud(
 
 fn render_info_panel(
     state: Res<ConnectionState>,
-    view: Res<ViewState>,
+    _view: Res<ViewState>,
     player: Res<PlayerState>,
     ui: Res<UiState>,
-    mut panel_q: Query<
-        &mut Text,
-        (
-            With<InfoPanel>,
-            Without<HudText>,
-            Without<NeedsBar>,
-            Without<ToastContainer>,
-        ),
-    >,
+    mut panel_q: PanelQuery,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
@@ -1513,7 +1519,7 @@ fn render_info_panel(
         let passenger_count = conn.db.passenger().count();
         let active_events: Vec<_> = conn.db.event().iter().filter(|e| e.state != 2).collect();
 
-        let mut overview = format!("=== SHIP OVERVIEW ===\n");
+        let mut overview = "=== SHIP OVERVIEW ===\n".to_string();
         if let Some(c) = &config {
             overview += &format!("{}\n\n", c.name);
         }
@@ -1521,7 +1527,7 @@ fn render_info_panel(
 
         // Resources
         if let Some(res) = conn.db.ship_resources().id().find(&0) {
-            overview += &format!("--- Resources ---\n");
+            overview += "--- Resources ---\n";
             overview += &format!("Power: {:.0}/{:.0}\n", res.power, res.power_cap);
             overview += &format!("Food:  {:.0}/{:.0}\n", res.food, res.food_cap);
             overview += &format!("Water: {:.0}/{:.0}\n", res.water, res.water_cap);
@@ -1622,7 +1628,7 @@ fn render_info_panel(
         }
 
         if let Some(needs) = conn.db.needs().person_id().find(&selected_id) {
-            info += &format!("\n--- Needs ---\n");
+            info += "\n--- Needs ---\n";
             info += &format!(
                 "HP: {:.0}%  Morale: {:.0}%\n",
                 needs.health * 100.0,
@@ -1773,15 +1779,7 @@ fn render_info_panel(
 
 fn render_toasts(
     ui: Res<UiState>,
-    mut toast_q: Query<
-        &mut Text,
-        (
-            With<ToastContainer>,
-            Without<HudText>,
-            Without<NeedsBar>,
-            Without<InfoPanel>,
-        ),
-    >,
+    mut toast_q: ToastQuery,
 ) {
     let Ok(mut text) = toast_q.get_single_mut() else {
         return;
