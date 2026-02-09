@@ -28,7 +28,8 @@ impl SimpleRng {
             .state
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
-        ((self.state >> 33) as f32) / (u32::MAX as f32)
+        let bits = (self.state >> 32) as u32;
+        bits as f32 / (u32::MAX as f32)
     }
     #[allow(dead_code)]
     pub fn next_range(&mut self, min: f32, max: f32) -> f32 {
