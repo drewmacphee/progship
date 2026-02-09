@@ -4602,16 +4602,16 @@ mod tests {
     fn test_squarified_treemap_no_overlap() {
         let rooms = vec![(25.0, 0), (25.0, 1), (25.0, 2), (25.0, 3)];
         let result = squarified_treemap(&rooms, 0, 0, 20, 20);
-        
+
         // Check that we got all rooms
         assert_eq!(result.len(), 4);
-        
+
         // Check no rectangles overlap
         for i in 0..result.len() {
             for j in (i + 1)..result.len() {
                 let (_, x1, y1, w1, h1) = result[i];
                 let (_, x2, y2, w2, h2) = result[j];
-                
+
                 // Two rectangles don't overlap if one is completely to the left/right/above/below the other
                 let no_overlap = x1 + w1 <= x2 || x2 + w2 <= x1 || y1 + h1 <= y2 || y2 + h2 <= y1;
                 assert!(no_overlap, "Rectangles {} and {} overlap", i, j);
@@ -4625,13 +4625,13 @@ mod tests {
         let zone_w = 20;
         let zone_h = 20;
         let result = squarified_treemap(&rooms, 0, 0, zone_w, zone_h);
-        
+
         assert!(!result.is_empty());
-        
+
         // Total area of output should be close to zone area
         let total_output_area: usize = result.iter().map(|(_, _, _, w, h)| w * h).sum();
         let zone_area = zone_w * zone_h;
-        
+
         // Allow some slack due to integer rounding
         assert!(
             total_output_area >= zone_area * 90 / 100,
@@ -4646,12 +4646,12 @@ mod tests {
         // Two rooms: one twice the area of the other
         let rooms = vec![(200.0, 0), (100.0, 1)];
         let result = squarified_treemap(&rooms, 0, 0, 30, 30);
-        
+
         assert_eq!(result.len(), 2);
-        
+
         let area0 = result[0].3 * result[0].4;
         let area1 = result[1].3 * result[1].4;
-        
+
         // Room 0 should have roughly twice the area of room 1
         let ratio = area0 as f32 / area1 as f32;
         assert!(
@@ -4668,12 +4668,12 @@ mod tests {
         let width = 20;
         let height = 20;
         let grid = vec![vec![CELL_EMPTY; height]; width];
-        
+
         let zones = find_empty_zones(&grid, width, height);
-        
+
         // Should find at least one large zone
         assert!(!zones.is_empty());
-        
+
         // Largest zone should cover most of the space
         let largest = &zones[0];
         assert!(largest.w >= 3 && largest.h >= 3);
@@ -4684,14 +4684,14 @@ mod tests {
         let width = 20;
         let height = 20;
         let mut grid = vec![vec![CELL_EMPTY; height]; width];
-        
+
         // Add a vertical corridor
         for y in 0..height {
             grid[10][y] = CELL_MAIN_CORRIDOR;
         }
-        
+
         let zones = find_empty_zones(&grid, width, height);
-        
+
         // Verify no zone overlaps with the corridor
         for zone in &zones {
             for x in zone.x..(zone.x + zone.w) {
@@ -4711,9 +4711,9 @@ mod tests {
         let width = 10;
         let height = 10;
         let grid = vec![vec![CELL_EMPTY; height]; width];
-        
+
         let zones = find_empty_zones(&grid, width, height);
-        
+
         // All zones should have minimum dimensions (>= 3x3)
         for zone in &zones {
             assert!(zone.w >= 3, "Zone width {} is too small", zone.w);
@@ -4726,16 +4726,16 @@ mod tests {
         let width = 30;
         let height = 30;
         let mut grid = vec![vec![CELL_EMPTY; height]; width];
-        
+
         // Add a shaft
         for x in 10..13 {
             for y in 10..13 {
                 grid[x][y] = CELL_SHAFT;
             }
         }
-        
+
         let zones = find_empty_zones(&grid, width, height);
-        
+
         // Zones should not overlap with shaft
         for zone in &zones {
             for x in zone.x..(zone.x + zone.w) {
@@ -4832,10 +4832,7 @@ mod tests {
     #[test]
     fn test_should_have_room_door_bridge_connections() {
         // Bridge should connect to CIC and captain's ready room
-        assert!(should_have_room_door(
-            room_types::BRIDGE,
-            room_types::CIC
-        ));
+        assert!(should_have_room_door(room_types::BRIDGE, room_types::CIC));
         assert!(should_have_room_door(
             room_types::BRIDGE,
             room_types::CAPTAINS_READY_ROOM
@@ -4858,7 +4855,7 @@ mod tests {
             d if d >= 19 => 300,
             _ => SHIP_LENGTH,
         };
-        
+
         assert_eq!(hull_width, 40, "Command deck width should be 40m");
         assert_eq!(hull_length, 200, "Command deck length should be 200m");
     }
@@ -4868,7 +4865,7 @@ mod tests {
         // Mid decks should be 65m × 400m (SHIP_BEAM × SHIP_LENGTH)
         let deck = 10u32;
         let deck_count = 21u32;
-        
+
         let hull_width: usize = match deck {
             0..=1 => 40,
             d if d >= deck_count.saturating_sub(2) => 50,
@@ -4879,7 +4876,7 @@ mod tests {
             d if d >= deck_count.saturating_sub(2) => 300,
             _ => SHIP_LENGTH,
         };
-        
+
         assert_eq!(hull_width, 65, "Mid deck width should be 65m");
         assert_eq!(hull_length, 400, "Mid deck length should be 400m");
     }
@@ -4889,7 +4886,7 @@ mod tests {
         // Last 2 decks (engineering) should be 50m × 300m
         let deck_count = 21u32;
         let deck = deck_count - 1;
-        
+
         let hull_width: usize = match deck {
             0..=1 => 40,
             d if d >= deck_count.saturating_sub(2) => 50,
@@ -4900,7 +4897,7 @@ mod tests {
             d if d >= deck_count.saturating_sub(2) => 300,
             _ => SHIP_LENGTH,
         };
-        
+
         assert_eq!(hull_width, 50, "Engineering deck width should be 50m");
         assert_eq!(hull_length, 300, "Engineering deck length should be 300m");
     }
@@ -4910,18 +4907,16 @@ mod tests {
     #[test]
     fn test_facility_manifest_has_bridge() {
         // Build a simple facility manifest to verify presence of key rooms
-        let manifest = vec![
-            FacilitySpec {
-                name: "Bridge",
-                room_type: room_types::BRIDGE,
-                target_area: 200.0,
-                capacity: 10,
-                count: 1,
-                deck_zone: 0,
-                group: groups::COMMAND,
-            },
-        ];
-        
+        let manifest = vec![FacilitySpec {
+            name: "Bridge",
+            room_type: room_types::BRIDGE,
+            target_area: 200.0,
+            capacity: 10,
+            count: 1,
+            deck_zone: 0,
+            group: groups::COMMAND,
+        }];
+
         assert_eq!(manifest.len(), 1);
         assert_eq!(manifest[0].name, "Bridge");
         assert_eq!(manifest[0].room_type, room_types::BRIDGE);
@@ -4949,7 +4944,7 @@ mod tests {
             deck_zone: 1,
             group: groups::PASSENGER,
         };
-        
+
         assert_eq!(single_cabin.count, 200);
         assert_eq!(double_cabin.count, 50);
         assert_eq!(single_cabin.deck_zone, 1, "Cabins should be in zone 1");
@@ -4965,7 +4960,7 @@ mod tests {
             ("Mess Hall", room_types::MESS_HALL, 500.0),
             ("Hospital Ward", room_types::HOSPITAL_WARD, 250.0),
         ];
-        
+
         for (name, _room_type, area) in facilities {
             assert!(area >= 10.0, "{} area {} too small", name, area);
             assert!(area <= 1000.0, "{} area {} too large", name, area);
