@@ -4107,6 +4107,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "progship-logic"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "progship-server"
 version = "0.1.0"
 dependencies = [
@@ -4114,6 +4121,15 @@ dependencies = [
  "serde",
  "serde_json",
  "spacetimedb",
+]
+
+[[package]]
+name = "progship-simtest"
+version = "0.1.0"
+dependencies = [
+ "progship-logic",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

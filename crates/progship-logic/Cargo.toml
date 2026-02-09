@@ -1,0 +1,10 @@
+[package]
+name = "progship-logic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure simulation logic for ProgShip — no database, no engine dependencies"
+
+[dependencies]
+serde = { workspace = true }

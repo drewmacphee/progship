@@ -1,0 +1,16 @@
+[package]
+name = "progship-simtest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Headless simulation harness for ProgShip — validates logic and data without SpacetimeDB"
+
+[[bin]]
+name = "progship-simtest"
+path = "src/main.rs"
+
+[dependencies]
+progship-logic = { path = "../progship-logic" }
+serde = { workspace = true }
+serde_json = { workspace = true }
