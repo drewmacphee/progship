@@ -19,7 +19,7 @@ pub use atmosphere::tick_atmosphere;
 pub use duty::tick_duty;
 pub use events::tick_events;
 pub use maintenance::tick_maintenance;
-pub use movement::{door_world_position, tick_movement};
+pub use movement::tick_movement;
 pub use needs::tick_needs;
 pub use ship_systems::tick_ship_systems;
 pub use social::tick_social;
