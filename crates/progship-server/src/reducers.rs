@@ -1,5 +1,7 @@
 //! Client-facing reducers for game interaction and simulation ticking.
 
+use crate::logic::actions::{apply_needs_deltas, compute_action_effect, NeedsValues};
+use crate::logic::movement::{compute_move, DoorInfo, MoveInput, MoveResult, RoomBounds};
 use crate::simulation;
 use crate::tables::*;
 use spacetimedb::{reducer, ReducerContext, Table};
@@ -158,132 +160,59 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
         return;
     };
 
-    let player_radius = 0.5; // collision padding for player size
+    let player_radius = 0.5;
 
     if let Some(mut pos) = ctx.db.position().person_id().find(person_id) {
-        let new_x = pos.x + dx;
-        let new_y = pos.y + dy;
+        let Some(room) = ctx.db.room().id().find(pos.room_id) else {
+            return;
+        };
+        let current = RoomBounds::new(room.id, room.x, room.y, room.width, room.height);
 
-        // Check if new position is inside current room (with player radius padding)
-        if let Some(room) = ctx.db.room().id().find(pos.room_id) {
-            let half_w = room.width / 2.0 - player_radius;
-            let half_h = room.height / 2.0 - player_radius;
+        // Collect doors connected to the current room
+        let doors: Vec<DoorInfo> = ctx
+            .db
+            .door()
+            .iter()
+            .filter(|d| d.room_a == pos.room_id || d.room_b == pos.room_id)
+            .map(|d| DoorInfo {
+                room_a: d.room_a,
+                room_b: d.room_b,
+                door_x: d.door_x,
+                door_y: d.door_y,
+                width: d.width,
+            })
+            .collect();
 
-            if new_x >= room.x - half_w
-                && new_x <= room.x + half_w
-                && new_y >= room.y - half_h
-                && new_y <= room.y + half_h
-            {
-                pos.x = new_x;
-                pos.y = new_y;
+        let room_lookup = |id: u32| -> Option<RoomBounds> {
+            ctx.db
+                .room()
+                .id()
+                .find(id)
+                .map(|r| RoomBounds::new(r.id, r.x, r.y, r.width, r.height))
+        };
+
+        match compute_move(
+            &MoveInput {
+                px: pos.x,
+                py: pos.y,
+                dx,
+                dy,
+                player_radius,
+            },
+            &current,
+            &doors,
+            &room_lookup,
+        ) {
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
+                pos.x = x;
+                pos.y = y;
                 ctx.db.position().person_id().update(pos);
-                return;
             }
-        }
-
-        // Trying to leave current room — check if passing through a door
-        let current_room_id = pos.room_id;
-        let mut passed_door = false;
-        for door in ctx.db.door().iter() {
-            let (other_room_id, is_connected) = if door.room_a == current_room_id {
-                (door.room_b, true)
-            } else if door.room_b == current_room_id {
-                (door.room_a, true)
-            } else {
-                (0, false)
-            };
-            if !is_connected {
-                continue;
-            }
-
-            let Some(cur_room) = ctx.db.room().id().find(current_room_id) else {
-                continue;
-            };
-            let door_x = door.door_x;
-            let door_y = door.door_y;
-
-            // Distance from player to door center
-            let dist_to_door = ((pos.x - door_x).powi(2) + (pos.y - door_y).powi(2)).sqrt();
-
-            // Door interaction radius: half the door width + some slack
-            let door_radius = (door.width / 2.0 + 1.0).max(2.0);
-
-            if dist_to_door > door_radius {
-                continue;
-            }
-
-            // Determine which wall this door is on for the current room
-            let room_left = cur_room.x - cur_room.width / 2.0;
-            let room_right = cur_room.x + cur_room.width / 2.0;
-            let room_north = cur_room.y - cur_room.height / 2.0;
-            let room_south = cur_room.y + cur_room.height / 2.0;
-
-            let wall_tol = 2.0;
-            let on_east = (door_x - room_right).abs() < wall_tol;
-            let on_west = (door_x - room_left).abs() < wall_tol;
-            let on_north = (door_y - room_north).abs() < wall_tol;
-            let on_south = (door_y - room_south).abs() < wall_tol;
-
-            // Check player is moving toward the door's wall
-            let moving_toward = if on_east {
-                dx > 0.0
-            } else if on_west {
-                dx < 0.0
-            } else if on_north {
-                dy < 0.0
-            } else if on_south {
-                dy > 0.0
-            } else {
-                true
-            }; // embedded/interior doors — always passable
-
-            if !moving_toward {
-                continue;
-            }
-
-            if let Some(other_room) = ctx.db.room().id().find(other_room_id) {
-                let half_w = other_room.width / 2.0 - player_radius;
-                let half_h = other_room.height / 2.0 - player_radius;
-
-                // Place player at door position, offset slightly into destination room
-                let offset = 0.5;
-                let entry_x;
-                let entry_y;
-                if dx.abs() > dy.abs() {
-                    entry_x = if dx > 0.0 {
-                        door_x + offset
-                    } else {
-                        door_x - offset
-                    };
-                    entry_y = door_y;
-                } else {
-                    entry_x = door_x;
-                    entry_y = if dy > 0.0 {
-                        door_y + offset
-                    } else {
-                        door_y - offset
-                    };
-                }
-                // Clamp to destination room bounds
-                pos.x = entry_x.clamp(other_room.x - half_w, other_room.x + half_w);
-                pos.y = entry_y.clamp(other_room.y - half_h, other_room.y + half_h);
-                pos.room_id = other_room_id;
+            MoveResult::DoorTraversal { room_id, x, y } => {
+                pos.room_id = room_id;
+                pos.x = x;
+                pos.y = y;
                 ctx.db.position().person_id().update(pos);
-                passed_door = true;
-                break;
-            }
-        }
-
-        // Can't move through a door — slide along current room walls
-        if !passed_door {
-            if let Some(room) = ctx.db.room().id().find(current_room_id) {
-                if let Some(mut pos2) = ctx.db.position().person_id().find(person_id) {
-                    let half_w = room.width / 2.0 - player_radius;
-                    let half_h = room.height / 2.0 - player_radius;
-                    pos2.x = new_x.clamp(room.x - half_w, room.x + half_w);
-                    pos2.y = new_y.clamp(room.y - half_h, room.y + half_h);
-                    ctx.db.position().person_id().update(pos2);
-                }
             }
         }
     }
@@ -387,86 +316,68 @@ pub fn player_action(ctx: &ReducerContext, action: u8) {
         .map(|c| c.sim_time)
         .unwrap_or(0.0);
 
-    match action {
-        // Eat (must be in mess/galley)
-        2 if room.room_type == room_types::MESS_HALL || room.room_type == room_types::GALLEY => {
-            needs.hunger = (needs.hunger - 0.3).max(0.0);
-            needs.comfort = (needs.comfort - 0.05).max(0.0);
-            ctx.db.needs().person_id().update(needs);
-            if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
-                act.activity_type = activity_types::EATING;
-                act.started_at = sim_time;
-                act.duration = 0.5;
-                ctx.db.activity().person_id().update(act);
-            }
-        }
-        // Sleep (must be in quarters)
-        3 if room_types::is_quarters(room.room_type) => {
-            needs.fatigue = (needs.fatigue - 0.4).max(0.0);
-            needs.comfort = (needs.comfort - 0.1).max(0.0);
-            ctx.db.needs().person_id().update(needs);
-            if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
-                act.activity_type = activity_types::SLEEPING;
-                act.started_at = sim_time;
-                act.duration = 2.0;
-                ctx.db.activity().person_id().update(act);
-            }
-        }
-        // Repair (must be near a damaged subsystem in this room)
-        8 => {
-            let mut repaired = false;
-            let room_node_id = ctx.db.room().id().find(pos.room_id).map(|r| r.node_id);
-            if let Some(node_id) = room_node_id {
-                for mut sub in ctx.db.subsystem().iter() {
-                    if sub.node_id == node_id && sub.health < 0.9 {
-                        sub.health = (sub.health + 0.2).min(1.0);
-                        if sub.health > 0.8 {
-                            sub.status = system_statuses::NOMINAL;
-                        } else if sub.health > 0.5 {
-                            sub.status = system_statuses::DEGRADED;
-                        }
-                        ctx.db.subsystem().id().update(sub);
-                        repaired = true;
-                        break;
+    // Try repair action separately (requires DB queries for subsystems)
+    if action == 8 {
+        let mut repaired = false;
+        let room_node_id = ctx.db.room().id().find(pos.room_id).map(|r| r.node_id);
+        if let Some(node_id) = room_node_id {
+            for mut sub in ctx.db.subsystem().iter() {
+                if sub.node_id == node_id && sub.health < 0.9 {
+                    sub.health = (sub.health + 0.2).min(1.0);
+                    if sub.health > 0.8 {
+                        sub.status = system_statuses::NOMINAL;
+                    } else if sub.health > 0.5 {
+                        sub.status = system_statuses::DEGRADED;
                     }
-                }
-            }
-            if repaired {
-                if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
-                    act.activity_type = activity_types::MAINTENANCE;
-                    act.started_at = sim_time;
-                    act.duration = 0.25;
-                    ctx.db.activity().person_id().update(act);
+                    ctx.db.subsystem().id().update(sub);
+                    repaired = true;
+                    break;
                 }
             }
         }
-        // Exercise (must be in gym/recreation)
-        12 if room.room_type == room_types::GYM || room_types::is_recreation(room.room_type) => {
-            needs.comfort = (needs.comfort - 0.15).max(0.0);
-            needs.fatigue = (needs.fatigue + 0.1).min(1.0);
-            needs.morale = (needs.morale + 0.05).min(1.0);
-            ctx.db.needs().person_id().update(needs);
+        if repaired {
             if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
-                act.activity_type = activity_types::EXERCISING;
+                act.activity_type = activity_types::MAINTENANCE;
                 act.started_at = sim_time;
-                act.duration = 0.5;
+                act.duration = 0.25;
                 ctx.db.activity().person_id().update(act);
             }
         }
-        // Hygiene (must be in quarters)
-        6 if room_types::is_quarters(room.room_type)
-            || room.room_type == room_types::SHARED_BATHROOM =>
-        {
-            needs.hygiene = (needs.hygiene - 0.5).max(0.0);
+        return;
+    }
+
+    // All other actions use the extracted pure logic
+    match compute_action_effect(action, room.room_type) {
+        Some(effect) => {
+            let result = apply_needs_deltas(
+                &NeedsValues {
+                    hunger: needs.hunger,
+                    fatigue: needs.fatigue,
+                    social: needs.social,
+                    comfort: needs.comfort,
+                    hygiene: needs.hygiene,
+                    morale: needs.morale,
+                    health: needs.health,
+                },
+                &effect,
+            );
+            needs.hunger = result.hunger;
+            needs.fatigue = result.fatigue;
+            needs.social = result.social;
+            needs.comfort = result.comfort;
+            needs.hygiene = result.hygiene;
+            needs.morale = result.morale;
+            needs.health = result.health;
             ctx.db.needs().person_id().update(needs);
+
             if let Some(mut act) = ctx.db.activity().person_id().find(person_id) {
-                act.activity_type = activity_types::HYGIENE;
+                act.activity_type = effect.activity_type;
                 act.started_at = sim_time;
-                act.duration = 0.2;
+                act.duration = effect.duration;
                 ctx.db.activity().person_id().update(act);
             }
         }
-        _ => {
+        None => {
             log::warn!("Invalid action {} for room type {}", action, room.room_type);
         }
     }
