@@ -555,7 +555,7 @@ pub fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     // Prefer a spine segment; if none, fall back to a cross-corridor room.
                     let target_room_id = find_spine_segment(test_y)
                         .map(|seg| seg.room_id)
-                        .or_else(|| find_cross_room(test_y));
+                        .or_else(|| find_cross_room(test_y).map(|cr| cr.room_id));
                     if let Some(room_id) = target_room_id {
                         let boundary_y = (sy + sh) as f32;
                         ctx.db.door().insert(Door {
