@@ -26,17 +26,12 @@ use infrastructure::layout_ship;
 use people::{generate_crew, generate_passengers};
 use systems::{generate_atmospheres, generate_ship_systems};
 
-#[allow(dead_code)]
 const CORRIDOR_WIDTH: f32 = 6.0;
-#[allow(dead_code)]
 const CORRIDOR_HALF: f32 = CORRIDOR_WIDTH / 2.0;
-#[allow(dead_code)]
 const SERVICE_CORRIDOR_WIDTH: f32 = 3.0;
-#[allow(dead_code)]
 const SERVICE_X: f32 = -(CORRIDOR_HALF + SERVICE_CORRIDOR_WIDTH / 2.0);
 
 /// Descriptor for a graph node to be created during build_ship_graph.
-#[allow(dead_code)]
 struct NodeSpec {
     name: &'static str,
     function: u8,
@@ -45,7 +40,6 @@ struct NodeSpec {
     deck_preference: i32,
 }
 
-#[allow(dead_code)]
 fn base_area(function: u8) -> f32 {
     match function {
         room_types::BRIDGE | room_types::ENGINEERING | room_types::REACTOR => 200.0,
@@ -98,7 +92,6 @@ fn base_area(function: u8) -> f32 {
     }
 }
 
-#[allow(dead_code)]
 fn compute_room_dims(required_area: f32) -> (f32, f32) {
     // Aspect ratio between 1:1 and 2:1
     let w = required_area.sqrt() * 1.2;
