@@ -8,3 +8,4 @@ pub mod duty;
 pub mod health;
 pub mod movement;
 pub mod pathfinding;
+pub mod utility;
