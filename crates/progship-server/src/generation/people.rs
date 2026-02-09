@@ -113,11 +113,9 @@ impl SimpleRng {
             .wrapping_add(1442695040888963407);
         ((self.state >> 33) as f32) / (u32::MAX as f32)
     }
-    #[allow(dead_code)]
     pub fn next_range(&mut self, min: f32, max: f32) -> f32 {
         min + self.next_f32() * (max - min)
     }
-    #[allow(dead_code)]
     pub fn next_usize(&mut self, min: usize, max: usize) -> usize {
         if max <= min {
             return min;

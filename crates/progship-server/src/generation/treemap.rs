@@ -15,7 +15,6 @@ pub(super) struct RoomRequest {
 }
 
 /// Placed room result from treemap.
-#[allow(dead_code)]
 pub(super) struct PlacedRoom {
     pub room_id: u32,
     pub node_id: u64,
