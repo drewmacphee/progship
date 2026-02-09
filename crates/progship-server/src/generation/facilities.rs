@@ -82,11 +82,11 @@ mod tests {
 
         let reactor = manifest.iter().find(|f| f.name == "Reactor").unwrap();
         assert_eq!(reactor.room_type, room_types::REACTOR);
-        assert_eq!(reactor.group, groups::ENGINEERING);
+        assert_eq!(reactor.group, groups::PROPULSION);
 
         let cabin = manifest.iter().find(|f| f.name == "Single Cabin").unwrap();
         assert_eq!(cabin.room_type, room_types::CABIN_SINGLE);
-        assert_eq!(cabin.group, groups::PASSENGER);
+        assert_eq!(cabin.group, groups::HABITATION);
 
         let hydro = manifest
             .iter()
@@ -94,6 +94,24 @@ mod tests {
             .unwrap();
         assert_eq!(hydro.room_type, room_types::HYDROPONICS);
         assert_eq!(hydro.group, groups::LIFE_SUPPORT);
+
+        let hospital = manifest.iter().find(|f| f.name == "Hospital Ward").unwrap();
+        assert_eq!(hospital.group, groups::MEDICAL);
+
+        let cargo = manifest.iter().find(|f| f.name == "Cargo Bay").unwrap();
+        assert_eq!(cargo.group, groups::CARGO);
+
+        let gym = manifest.iter().find(|f| f.name == "Gym").unwrap();
+        assert_eq!(gym.group, groups::RECREATION);
+
+        let mess = manifest.iter().find(|f| f.name == "Mess Hall").unwrap();
+        assert_eq!(mess.group, groups::FOOD_SERVICE);
+
+        let brig = manifest.iter().find(|f| f.name == "Brig").unwrap();
+        assert_eq!(brig.group, groups::SECURITY);
+
+        let shop = manifest.iter().find(|f| f.name == "Machine Shop").unwrap();
+        assert_eq!(shop.group, groups::WORKSHOP);
     }
 
     #[test]

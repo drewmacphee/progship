@@ -679,12 +679,17 @@ pub mod access_levels {
 
 pub mod groups {
     pub const COMMAND: u8 = 0;
-    pub const ENGINEERING: u8 = 1;
-    pub const LIFE_SUPPORT: u8 = 2;
-    pub const COMMONS: u8 = 3;
-    pub const CREW: u8 = 4;
-    pub const PASSENGER: u8 = 5;
-    pub const INFRASTRUCTURE: u8 = 6;
+    pub const SECURITY: u8 = 1;
+    pub const HABITATION: u8 = 2;
+    pub const FOOD_SERVICE: u8 = 3;
+    pub const MEDICAL: u8 = 4;
+    pub const RECREATION: u8 = 5;
+    pub const ENGINEERING: u8 = 6;
+    pub const WORKSHOP: u8 = 7;
+    pub const PROPULSION: u8 = 8;
+    pub const LIFE_SUPPORT: u8 = 9;
+    pub const CARGO: u8 = 10;
+    pub const INFRASTRUCTURE: u8 = 11;
 }
 
 pub mod infra_types {
