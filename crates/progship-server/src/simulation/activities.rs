@@ -115,19 +115,31 @@ pub fn should_be_on_duty(shift: u8, hour: f32) -> bool {
     }
 }
 
-fn is_meal_time(hour: f32) -> bool {
+pub fn is_meal_time(hour: f32) -> bool {
     (7.0..8.0).contains(&hour) ||   // Breakfast
     (12.0..13.0).contains(&hour) ||  // Lunch
     (18.0..19.0).contains(&hour) // Dinner
 }
 
-fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
+pub fn is_sleep_time(hour: f32, is_crew: bool) -> bool {
     if is_crew {
         false
     }
     // Crew sleeps based on shift
     else {
         !(6.0..22.0).contains(&hour)
+    }
+}
+
+pub fn department_to_room_type(department: u8) -> u8 {
+    match department {
+        departments::COMMAND => room_types::BRIDGE,
+        departments::ENGINEERING => room_types::ENGINEERING,
+        departments::MEDICAL => room_types::HOSPITAL_WARD,
+        departments::SCIENCE => room_types::LABORATORY,
+        departments::SECURITY => room_types::CIC,
+        departments::OPERATIONS => room_types::ENGINEERING,
+        _ => room_types::CORRIDOR,
     }
 }
 
@@ -150,17 +162,127 @@ fn find_room_of_type_pred(ctx: &ReducerContext, pred: fn(u8) -> bool) -> Option<
 fn find_room_for_activity(ctx: &ReducerContext, activity: u8, department: u8) -> Option<u32> {
     match activity {
         activity_types::ON_DUTY => {
-            let room_type = match department {
-                departments::COMMAND => room_types::BRIDGE,
-                departments::ENGINEERING => room_types::ENGINEERING,
-                departments::MEDICAL => room_types::HOSPITAL_WARD,
-                departments::SCIENCE => room_types::LABORATORY,
-                departments::SECURITY => room_types::CIC,
-                departments::OPERATIONS => room_types::ENGINEERING,
-                _ => room_types::CORRIDOR,
-            };
+            let room_type = department_to_room_type(department);
             find_room_of_type(ctx, room_type)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_be_on_duty_alpha_shift() {
+        // Alpha: 6:00 - 14:00
+        assert!(should_be_on_duty(shifts::ALPHA, 6.0));
+        assert!(should_be_on_duty(shifts::ALPHA, 10.0));
+        assert!(should_be_on_duty(shifts::ALPHA, 13.9));
+        assert!(!should_be_on_duty(shifts::ALPHA, 5.9));
+        assert!(!should_be_on_duty(shifts::ALPHA, 14.0));
+        assert!(!should_be_on_duty(shifts::ALPHA, 20.0));
+    }
+
+    #[test]
+    fn test_should_be_on_duty_beta_shift() {
+        // Beta: 14:00 - 22:00
+        assert!(should_be_on_duty(shifts::BETA, 14.0));
+        assert!(should_be_on_duty(shifts::BETA, 18.0));
+        assert!(should_be_on_duty(shifts::BETA, 21.9));
+        assert!(!should_be_on_duty(shifts::BETA, 13.9));
+        assert!(!should_be_on_duty(shifts::BETA, 22.0));
+        assert!(!should_be_on_duty(shifts::BETA, 6.0));
+    }
+
+    #[test]
+    fn test_should_be_on_duty_gamma_shift() {
+        // Gamma: 22:00 - 6:00 (overnight)
+        assert!(should_be_on_duty(shifts::GAMMA, 22.0));
+        assert!(should_be_on_duty(shifts::GAMMA, 0.0));
+        assert!(should_be_on_duty(shifts::GAMMA, 3.0));
+        assert!(should_be_on_duty(shifts::GAMMA, 5.9));
+        assert!(!should_be_on_duty(shifts::GAMMA, 6.0));
+        assert!(!should_be_on_duty(shifts::GAMMA, 12.0));
+        assert!(!should_be_on_duty(shifts::GAMMA, 21.9));
+    }
+
+    #[test]
+    fn test_should_be_on_duty_invalid_shift() {
+        assert!(!should_be_on_duty(99, 10.0));
+    }
+
+    #[test]
+    fn test_is_meal_time() {
+        // Breakfast: 7-8
+        assert!(is_meal_time(7.0));
+        assert!(is_meal_time(7.5));
+        assert!(!is_meal_time(8.0));
+        assert!(!is_meal_time(6.9));
+
+        // Lunch: 12-13
+        assert!(is_meal_time(12.0));
+        assert!(is_meal_time(12.5));
+        assert!(!is_meal_time(13.0));
+
+        // Dinner: 18-19
+        assert!(is_meal_time(18.0));
+        assert!(is_meal_time(18.5));
+        assert!(!is_meal_time(19.0));
+
+        // Not meal time
+        assert!(!is_meal_time(10.0));
+        assert!(!is_meal_time(15.0));
+        assert!(!is_meal_time(20.0));
+    }
+
+    #[test]
+    fn test_is_sleep_time_crew() {
+        // Crew never sleeps during sleep time (they sleep based on shifts)
+        assert!(!is_sleep_time(23.0, true));
+        assert!(!is_sleep_time(3.0, true));
+        assert!(!is_sleep_time(12.0, true));
+    }
+
+    #[test]
+    fn test_is_sleep_time_passenger() {
+        // Passengers sleep outside 6:00-22:00
+        assert!(is_sleep_time(23.0, false));
+        assert!(is_sleep_time(0.0, false));
+        assert!(is_sleep_time(3.0, false));
+        assert!(is_sleep_time(5.9, false));
+        assert!(!is_sleep_time(6.0, false));
+        assert!(!is_sleep_time(12.0, false));
+        assert!(!is_sleep_time(21.9, false));
+        assert!(is_sleep_time(22.0, false));
+    }
+
+    #[test]
+    fn test_department_to_room_type() {
+        assert_eq!(
+            department_to_room_type(departments::COMMAND),
+            room_types::BRIDGE
+        );
+        assert_eq!(
+            department_to_room_type(departments::ENGINEERING),
+            room_types::ENGINEERING
+        );
+        assert_eq!(
+            department_to_room_type(departments::MEDICAL),
+            room_types::HOSPITAL_WARD
+        );
+        assert_eq!(
+            department_to_room_type(departments::SCIENCE),
+            room_types::LABORATORY
+        );
+        assert_eq!(
+            department_to_room_type(departments::SECURITY),
+            room_types::CIC
+        );
+        assert_eq!(
+            department_to_room_type(departments::OPERATIONS),
+            room_types::ENGINEERING
+        );
+        assert_eq!(department_to_room_type(99), room_types::CORRIDOR);
     }
 }
