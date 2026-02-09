@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/progship-logic",
     "crates/progship-server",
+    "crates/progship-simtest",
     "crates/progship-client-sdk",
     "crates/progship-client",
 ]

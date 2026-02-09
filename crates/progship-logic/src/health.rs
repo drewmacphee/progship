@@ -3,7 +3,7 @@
 //! Injury severity tiers, sickbay healing rates, natural recovery,
 //! and death determination — all as pure functions.
 
-use crate::tables::room_types;
+use crate::constants::room_types;
 
 /// Injury severity tiers based on health value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

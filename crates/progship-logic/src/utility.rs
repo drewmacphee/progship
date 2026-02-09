@@ -67,7 +67,7 @@ pub enum RoomCategory {
     Dining,
 }
 
-use crate::tables::{activity_types, room_types};
+use crate::constants::{activity_types, room_types};
 
 /// Compute the overcrowding stress factor for a room.
 /// Returns 0.0 (empty) to 1.0+ (severely overcrowded).
@@ -147,7 +147,7 @@ pub fn score_activities(input: &UtilityInput) -> Vec<ScoredActivity> {
         .unwrap_or(0.0);
 
     // --- Medical urgency (overrides everything) ---
-    if crate::logic::health::should_seek_medical(input.health) {
+    if crate::health::should_seek_medical(input.health) {
         candidates.push(ScoredActivity {
             activity_type: activity_types::IDLE,
             score: 100.0,
@@ -177,7 +177,7 @@ pub fn score_activities(input: &UtilityInput) -> Vec<ScoredActivity> {
         // Boost during sleep window
         let schedule_bonus = if input.is_crew {
             if let Some(shift) = input.shift {
-                if crate::logic::duty::is_crew_sleep_time(shift, input.hour) {
+                if crate::duty::is_crew_sleep_time(shift, input.hour) {
                     3.0
                 } else {
                     0.0
@@ -185,7 +185,7 @@ pub fn score_activities(input: &UtilityInput) -> Vec<ScoredActivity> {
             } else {
                 0.0
             }
-        } else if crate::logic::duty::is_passenger_sleep_time(input.hour) {
+        } else if crate::duty::is_passenger_sleep_time(input.hour) {
             3.0
         } else {
             0.0
