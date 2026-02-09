@@ -10,6 +10,7 @@
 #![allow(unused_assignments)]
 
 mod generation;
+pub mod logic;
 mod reducers;
 mod simulation;
 mod tables;
