@@ -1,7 +1,7 @@
 //! Client-facing reducers for game interaction and simulation ticking.
 
-use crate::logic::actions::{apply_needs_deltas, compute_action_effect, NeedsValues};
-use crate::logic::movement::{compute_move, DoorInfo, MoveInput, MoveResult, RoomBounds};
+use progship_logic::actions::{apply_needs_deltas, compute_action_effect, NeedsValues};
+use progship_logic::movement::{compute_move, DoorInfo, MoveInput, MoveResult, RoomBounds};
 use crate::simulation;
 use crate::tables::*;
 use spacetimedb::{reducer, ReducerContext, Table};

@@ -1,6 +1,6 @@
 //! Movement and pathfinding system - moves people through rooms via doors.
 
-use crate::logic::pathfinding::{DoorEdge, NavGraph};
+use progship_logic::pathfinding::{DoorEdge, NavGraph};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 

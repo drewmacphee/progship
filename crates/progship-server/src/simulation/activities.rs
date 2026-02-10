@@ -1,7 +1,7 @@
 //! Activity selection system - NPCs choose activities based on utility scoring.
 
-use crate::logic::duty as duty_logic;
-use crate::logic::utility::{self, RoomCategory, RoomTarget, UtilityInput};
+use progship_logic::duty as duty_logic;
+use progship_logic::utility::{self, RoomCategory, RoomTarget, UtilityInput};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 

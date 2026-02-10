@@ -1,6 +1,6 @@
 //! Duty system - crew shift management.
 
-use crate::logic::duty as duty_logic;
+use progship_logic::duty as duty_logic;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 

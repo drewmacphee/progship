@@ -1,6 +1,6 @@
 //! Ship systems simulation - resource flow, subsystem degradation, economy loop.
 
-use crate::logic::economy;
+use progship_logic::economy;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 

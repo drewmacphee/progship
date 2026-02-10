@@ -4321,6 +4321,7 @@ name = "progship-server"
 version = "0.1.0"
 dependencies = [
  "log",
+ "progship-logic",
  "serde",
  "serde_json",
  "spacetimedb",
