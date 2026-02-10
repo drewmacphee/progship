@@ -57,18 +57,12 @@ pub fn render_minimap(
     minimap: Res<MinimapState>,
     mut commands: Commands,
     existing_roots: Query<Entity, With<MinimapRoot>>,
-    existing_rooms: Query<Entity, With<MinimapRoom>>,
-    existing_players: Query<Entity, With<MinimapPlayer>>,
 ) {
-    // Clean up old minimap elements
+    // Clean up old minimap (root despawn_recursive handles all children)
     for entity in existing_roots.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in existing_rooms.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in existing_players.iter() {
-        commands.entity(entity).despawn_recursive();
+        if let Some(cmd) = commands.get_entity(entity) {
+            cmd.despawn_recursive();
+        }
     }
 
     if !minimap.visible {
