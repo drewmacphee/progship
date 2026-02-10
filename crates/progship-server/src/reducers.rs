@@ -161,7 +161,7 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
         return;
     };
 
-    let player_radius = 0.5;
+    let player_radius = 0.8;
 
     if let Some(mut pos) = ctx.db.position().person_id().find(person_id) {
         let Some(room) = ctx.db.room().id().find(pos.room_id) else {

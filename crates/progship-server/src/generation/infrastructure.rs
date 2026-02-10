@@ -87,31 +87,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         let hull_width: usize = hull_width(deck as u32, deck_count, SHIP_BEAM);
         let hull_length: usize = hull_length(deck as u32, deck_count, SHIP_LENGTH);
 
-        // Shaft positions relative to THIS deck's hull
         let deck_spine_cx = hull_width / 2;
-        // Place elevators adjacent to spine (just outside it on starboard side)
-        let fore_elev_deck = (deck_spine_cx + 2, 10usize, 3usize, 3usize);
-        let aft_elev_deck = (
-            deck_spine_cx + 2,
-            if hull_length > 20 {
-                hull_length - 14
-            } else {
-                hull_length / 2
-            },
-            3,
-            3,
-        );
-        let svc_elev_deck = (
-            hull_width.saturating_sub(5),
-            100usize.min(hull_length.saturating_sub(5)),
-            2,
-            2,
-        );
-        let ladders_deck: Vec<(usize, usize, usize, usize)> = [50, 150, 250, 350]
-            .iter()
-            .filter(|&&ly| ly + 2 <= hull_length)
-            .map(|&ly| (hull_width.saturating_sub(4), ly, 2, 2))
-            .collect();
 
         // Allocate grid: grid[x][y], size [hull_width][hull_length]
         let mut grid: Vec<Vec<u8>> = vec![vec![CELL_EMPTY; hull_length]; hull_width];
@@ -370,6 +346,39 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         };
 
         // ---- Step 2: Stamp vertical shaft anchors ----
+        // Compute shaft positions AFTER cross-corridors so we can avoid overlap
+        let shaft_x = deck_spine_cx + SPINE_WIDTH / 2 + 1;
+        let adjust_y = |mut y: usize| -> usize {
+            for &ccy in &cross_corridor_ys {
+                if y >= ccy.saturating_sub(1) && y < ccy + CROSS_CORRIDOR_WIDTH + 1 {
+                    y = ccy + CROSS_CORRIDOR_WIDTH + 1;
+                }
+            }
+            y.min(hull_length.saturating_sub(4))
+        };
+        let fore_elev_deck = (shaft_x, adjust_y(10), 3usize, 3usize);
+        let aft_elev_deck = (
+            shaft_x,
+            adjust_y(if hull_length > 20 {
+                hull_length - 14
+            } else {
+                hull_length / 2
+            }),
+            3,
+            3,
+        );
+        let svc_elev_deck = (
+            hull_width.saturating_sub(5),
+            adjust_y(100usize.min(hull_length.saturating_sub(5))),
+            2,
+            2,
+        );
+        let ladders_deck: Vec<(usize, usize, usize, usize)> = [50, 150, 250, 350]
+            .iter()
+            .filter(|&&ly| ly + 2 <= hull_length)
+            .map(|&ly| (hull_width.saturating_sub(4), adjust_y(ly), 2, 2))
+            .collect();
+
         let all_shafts: Vec<(usize, usize, usize, usize, u8, u8, &str, bool)> = {
             let mut v = Vec::new();
             v.push((
@@ -704,12 +713,30 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 // Cap room size to 1.5× target area to prevent treemap inflation.
                 let (rw, rh) = cap_room_dimensions(rw, rh, rr.target_area, 1.5, 2);
 
+                // Skip rooms that don't fully fit within hull bounds
+                if rx + rw > hull_width || ry + rh > hull_length {
+                    continue;
+                }
+
                 let cell_val = CELL_ROOM_BASE + (placed_rooms.len() % 246) as u8;
-                for xx in rx..(rx + rw).min(hull_width) {
-                    for yy in ry..(ry + rh).min(hull_length) {
-                        if grid[xx][yy] == CELL_EMPTY {
-                            grid[xx][yy] = cell_val;
+                let mut overlaps = false;
+                for xx in rx..(rx + rw) {
+                    for yy in ry..(ry + rh) {
+                        if grid[xx][yy] != CELL_EMPTY {
+                            overlaps = true;
+                            break;
                         }
+                    }
+                    if overlaps {
+                        break;
+                    }
+                }
+                if overlaps {
+                    continue;
+                }
+                for xx in rx..(rx + rw) {
+                    for yy in ry..(ry + rh) {
+                        grid[xx][yy] = cell_val;
                     }
                 }
 
@@ -1410,6 +1437,57 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     door_y: mid_y,
                 });
             }
+        }
+    }
+
+    // ---- Step 8: Remove disconnected rooms ----
+    // BFS from first corridor on deck 0 through doors to find all reachable rooms.
+    // Delete any rooms (and their doors) that aren't reachable.
+    let all_rooms: Vec<Room> = ctx.db.room().iter().collect();
+    let all_doors: Vec<Door> = ctx.db.door().iter().collect();
+
+    // Find spawn room (first corridor on deck 0)
+    let start_room = all_rooms
+        .iter()
+        .find(|r| r.deck == 0 && r.room_type == room_types::CORRIDOR);
+    if let Some(start) = start_room {
+        let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut queue: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+        queue.push_back(start.id);
+        visited.insert(start.id);
+
+        while let Some(room_id) = queue.pop_front() {
+            for door in &all_doors {
+                let neighbor = if door.room_a == room_id {
+                    Some(door.room_b)
+                } else if door.room_b == room_id {
+                    Some(door.room_a)
+                } else {
+                    None
+                };
+                if let Some(nid) = neighbor {
+                    if visited.insert(nid) {
+                        queue.push_back(nid);
+                    }
+                }
+            }
+        }
+
+        // Delete unreachable rooms and their doors
+        let mut removed = 0u32;
+        for room in &all_rooms {
+            if !visited.contains(&room.id) {
+                ctx.db.room().id().delete(room.id);
+                removed += 1;
+            }
+        }
+        for door in &all_doors {
+            if !visited.contains(&door.room_a) || !visited.contains(&door.room_b) {
+                ctx.db.door().id().delete(door.id);
+            }
+        }
+        if removed > 0 {
+            log::info!("Removed {} disconnected rooms", removed);
         }
     }
 }
