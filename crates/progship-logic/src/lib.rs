@@ -6,6 +6,7 @@
 //! tools, and any future engine.
 
 pub mod actions;
+pub mod archetypes;
 pub mod config;
 pub mod constants;
 pub mod duty;
