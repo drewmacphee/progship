@@ -24,29 +24,36 @@ pub(super) struct FacilitySpec {
 }
 
 /// Deck-zone → deck range mapping.
+/// Proportionally distributes zones across the available deck count.
 pub(super) fn deck_range_for_zone(zone: u8, deck_count: u32) -> (u32, u32) {
     let dc = deck_count;
-    match zone {
-        0 => (0, core::cmp::min(2, dc)),
-        1 => (2, core::cmp::min(10, dc)),
-        2 => (
-            core::cmp::min(10, dc.saturating_sub(1)),
-            core::cmp::min(12, dc),
-        ),
-        3 => (
-            core::cmp::min(12, dc.saturating_sub(1)),
-            core::cmp::min(14, dc),
-        ),
-        4 => (
-            core::cmp::min(14, dc.saturating_sub(1)),
-            core::cmp::min(17, dc),
-        ),
-        5 => (
-            core::cmp::min(17, dc.saturating_sub(1)),
-            core::cmp::min(19, dc),
-        ),
-        6 => (core::cmp::min(19, dc.saturating_sub(1)), dc),
-        _ => (0, dc),
+    // Zone weights: how many "slices" each zone ideally occupies (out of 20)
+    // 0=command(2), 1=hab(8), 2=services(2), 3=rec(2), 4=lifesup(3), 5=cargo(1), 6=eng(2)
+    let weights: [u32; 7] = [2, 8, 2, 2, 3, 1, 2];
+    let total_weight: u32 = weights.iter().sum(); // 20
+
+    // Compute cumulative boundaries scaled to deck_count
+    let mut boundaries = [0u32; 8];
+    let mut accum = 0u32;
+    for (i, &w) in weights.iter().enumerate() {
+        accum += w;
+        // Round to nearest deck, ensuring last boundary = deck_count
+        boundaries[i + 1] = if i == 6 {
+            dc
+        } else {
+            ((accum as f32 / total_weight as f32) * dc as f32).round() as u32
+        };
+    }
+
+    let z = zone.min(6) as usize;
+    let lo = boundaries[z].min(dc);
+    let hi = boundaries[z + 1].min(dc);
+    // Ensure every zone gets at least 1 deck (share with neighbor if needed)
+    if lo >= hi && dc > 0 {
+        let clamped_lo = lo.min(dc - 1);
+        (clamped_lo, (clamped_lo + 1).min(dc))
+    } else {
+        (lo, hi)
     }
 }
 

@@ -3,27 +3,90 @@
 //! Creates GraphNode entries for all rooms and GraphEdge entries for crew paths,
 //! power distribution, water/HVAC/data networks.
 
-use super::facilities::get_facility_manifest;
+use super::facilities::{get_facility_manifest, FacilitySpec};
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
-pub(super) fn build_ship_graph(ctx: &ReducerContext, _deck_count: u32) {
-    let facility_manifest = get_facility_manifest();
+/// Scale room counts based on actual population.
+/// The manifest counts are baselined for ~5000 people.
+fn scale_room_count(spec: &FacilitySpec, total_pop: u32, crew_count: u32, passenger_count: u32) -> u32 {
+    let base_pop = 5000.0f32;
+    let pop_ratio = total_pop as f32 / base_pop;
 
-    // Expand manifest: one GraphNode per individual room instance
+    match spec.room_type {
+        // Cabins scale to give every person a bed
+        // Single cabin = 1 person, double = 2, family suite = 4, crew quarters = 4
+        room_types::CABIN_SINGLE => {
+            // ~40% of passengers in singles
+            ((passenger_count as f32 * 0.4) / 1.0).ceil() as u32
+        }
+        room_types::CABIN_DOUBLE => {
+            // ~30% of passengers in doubles
+            ((passenger_count as f32 * 0.3) / 2.0).ceil() as u32
+        }
+        room_types::FAMILY_SUITE => {
+            // ~15% of passengers in family suites
+            ((passenger_count as f32 * 0.15) / 4.0).ceil() as u32
+        }
+        room_types::VIP_SUITE => {
+            // ~5% of passengers in VIP
+            ((passenger_count as f32 * 0.05) / 2.0).ceil().max(1.0) as u32
+        }
+        room_types::QUARTERS_PASSENGER => {
+            // ~10% of passengers in shared quarters
+            ((passenger_count as f32 * 0.1) / 8.0).ceil().max(1.0) as u32
+        }
+        room_types::QUARTERS_CREW => {
+            // Every crew member needs a berth (4 per quarters)
+            (crew_count as f32 / 4.0).ceil() as u32
+        }
+        room_types::QUARTERS_OFFICER => {
+            // ~10% of crew are officers (2 per quarters)
+            ((crew_count as f32 * 0.1) / 2.0).ceil().max(1.0) as u32
+        }
+        // Food/dining scales with population
+        room_types::MESS_HALL | room_types::GALLEY => {
+            (spec.count as f32 * pop_ratio).ceil().max(1.0) as u32
+        }
+        // Shared facilities scale with population
+        room_types::SHARED_BATHROOM | room_types::SHARED_LAUNDRY => {
+            (spec.count as f32 * pop_ratio).ceil().max(2.0) as u32
+        }
+        // Medical scales with population
+        room_types::HOSPITAL_WARD | room_types::MEDBAY => {
+            (spec.count as f32 * pop_ratio).ceil().max(1.0) as u32
+        }
+        // Recreation scales with population
+        room_types::CAFE | room_types::BAR | room_types::GAME_ROOM => {
+            (spec.count as f32 * pop_ratio).ceil().max(1.0) as u32
+        }
+        // Infrastructure rooms: use manifest count (don't scale)
+        _ => spec.count,
+    }
+}
+
+pub(super) fn build_ship_graph(ctx: &ReducerContext, _deck_count: u32, crew_count: u32, passenger_count: u32) {
+    let facility_manifest = get_facility_manifest();
+    let total_pop = crew_count + passenger_count;
+
+    // Expand manifest: one GraphNode per individual room instance.
+    // Scale habitation room counts based on actual population.
     let mut node_ids: Vec<u64> = Vec::new();
     let mut node_groups: Vec<u8> = Vec::new();
     let mut node_functions: Vec<u8> = Vec::new();
     let mut node_zones: Vec<u8> = Vec::new();
 
     for spec in &facility_manifest {
-        for i in 0..spec.count {
-            let name = if spec.count == 1 {
+        // Scale room counts for population-dependent room types
+        let count = scale_room_count(spec, total_pop, crew_count, passenger_count);
+        let area = spec.target_area;
+
+        for i in 0..count {
+            let name = if count == 1 {
                 spec.name.to_string()
             } else {
                 format!("{} {}", spec.name, i + 1)
             };
-            let area = spec.target_area;
             let node = ctx.db.graph_node().insert(GraphNode {
                 id: 0,
                 node_type: node_types::ROOM,

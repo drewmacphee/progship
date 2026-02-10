@@ -20,8 +20,8 @@ const CELL_SHAFT: u8 = 3;
 const CELL_ROOM_BASE: u8 = 10; // room N = CELL_ROOM_BASE + N (wraps at 246)
 
 // Ship geometry constants
-const SHIP_LENGTH: usize = 400;
-const SHIP_BEAM: usize = 65;
+// Hull dimensions are now computed dynamically in layout_ship() based on total room area.
+// These min values set a floor for very small populations.
 const SPINE_WIDTH: usize = 3;
 const CROSS_CORRIDOR_WIDTH: usize = 3;
 const CROSS_CORRIDOR_SPACING: usize = 50;
@@ -37,6 +37,20 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         .unwrap_or_default();
     let _rng = SimpleRng::from_name(&ship_name);
     let nodes: Vec<GraphNode> = ctx.db.graph_node().iter().collect();
+
+    // Compute hull dimensions from total room area needed
+    let total_area: f32 = nodes.iter().map(|n| n.required_area).sum();
+    // Add ~40% overhead for corridors, walls, and infrastructure
+    let gross_area = total_area * 1.4;
+    // Distribute across decks, derive hull from per-deck area
+    let area_per_deck = gross_area / deck_count as f32;
+    // Ship aspect ratio ~6:1 (length:beam)
+    let ship_beam = (area_per_deck.sqrt() / 2.45).max(30.0) as usize;
+    let ship_length = (area_per_deck / ship_beam as f32).max(100.0) as usize;
+    log::info!(
+        "Hull sizing: {:.0}m² total room area, {:.0}m² gross, {}×{} hull ({} decks)",
+        total_area, gross_area, ship_beam, ship_length, deck_count
+    );
 
     // Build per-deck-zone room request lists from graph nodes
     let mut zone_requests: Vec<Vec<RoomRequest>> = vec![Vec::new(); 7];
@@ -84,8 +98,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
     for deck in 0..deck_count as i32 {
         // Hull taper per deck
-        let hull_width: usize = hull_width(deck as u32, deck_count, SHIP_BEAM);
-        let hull_length: usize = hull_length(deck as u32, deck_count, SHIP_LENGTH);
+        let hull_width: usize = hull_width(deck as u32, deck_count, ship_beam);
+        let hull_length: usize = hull_length(deck as u32, deck_count, ship_length);
 
         let deck_spine_cx = hull_width / 2;
 
@@ -1316,7 +1330,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         .join(",");
 
     // Use standard-deck positions for VerticalShaft entries (visual markers)
-    let std_spine_cx = SHIP_BEAM / 2;
+    let std_spine_cx = ship_beam / 2;
     struct ShaftDef {
         x: usize,
         y: usize,
@@ -1338,7 +1352,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         },
         ShaftDef {
             x: std_spine_cx + 2,
-            y: SHIP_LENGTH - 14,
+            y: ship_length.saturating_sub(14),
             w: 3,
             h: 3,
             shaft_type: shaft_types::ELEVATOR,
@@ -1346,8 +1360,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             is_main: true,
         },
         ShaftDef {
-            x: SHIP_BEAM - 5,
-            y: 100,
+            x: ship_beam.saturating_sub(5),
+            y: ship_length / 4,
             w: 2,
             h: 2,
             shaft_type: shaft_types::SERVICE_ELEVATOR,
@@ -1355,8 +1369,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             is_main: false,
         },
         ShaftDef {
-            x: SHIP_BEAM - 4,
-            y: 50,
+            x: ship_beam.saturating_sub(4),
+            y: ship_length / 8,
             w: 2,
             h: 2,
             shaft_type: shaft_types::LADDER,
@@ -1364,8 +1378,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             is_main: false,
         },
         ShaftDef {
-            x: SHIP_BEAM - 4,
-            y: 150,
+            x: ship_beam.saturating_sub(4),
+            y: ship_length * 3 / 8,
             w: 2,
             h: 2,
             shaft_type: shaft_types::LADDER,
@@ -1373,8 +1387,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             is_main: false,
         },
         ShaftDef {
-            x: SHIP_BEAM - 4,
-            y: 250,
+            x: ship_beam.saturating_sub(4),
+            y: ship_length * 5 / 8,
             w: 2,
             h: 2,
             shaft_type: shaft_types::LADDER,
@@ -1382,8 +1396,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             is_main: false,
         },
         ShaftDef {
-            x: SHIP_BEAM - 4,
-            y: 350,
+            x: ship_beam.saturating_sub(4),
+            y: ship_length * 7 / 8,
             w: 2,
             h: 2,
             shaft_type: shaft_types::LADDER,
