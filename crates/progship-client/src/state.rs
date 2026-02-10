@@ -173,6 +173,10 @@ pub struct PersonEntity {
     pub person_id: u64,
 }
 
+/// Marker for activity indicators and conversation bubbles (despawned separately from people)
+#[derive(Component)]
+pub struct IndicatorEntity;
+
 #[derive(Component)]
 pub struct PlayerCamera;
 

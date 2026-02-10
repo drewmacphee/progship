@@ -7,7 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionState, DoorMarker, PersonEntity, PlayerState, RoomEntity, UiState, ViewState,
+    ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState, RoomEntity, UiState,
+    ViewState,
 };
 
 pub fn sync_rooms(
@@ -457,6 +458,7 @@ pub fn sync_people(
     ui: Res<UiState>,
     mut commands: Commands,
     mut existing: Query<(Entity, &PersonEntity, &mut Transform)>,
+    indicators: Query<Entity, With<IndicatorEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
@@ -473,7 +475,8 @@ pub fn sync_people(
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
                 if room.deck == view.current_deck {
                     let is_player = Some(pe.person_id) == player.person_id;
-                    let target = Vec3::new(pos.x, transform.translation.y, -pos.y);
+                    let person_height = if is_player { 1.0 } else { 0.8 };
+                    let target = Vec3::new(pos.x, person_height, -pos.y);
                     // Time-based lerp: ~10x/sec for player, ~5x/sec for NPCs
                     let lerp_rate = if is_player { 12.0 } else { 6.0 };
                     let t = (lerp_rate * dt).min(1.0);
@@ -503,6 +506,12 @@ pub fn sync_people(
         }
     }
     for entity in entities_to_despawn {
+        if let Some(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
+        }
+    }
+    // Despawn all indicator/bubble entities (recreated each rebuild)
+    for entity in indicators.iter() {
         if let Some(mut cmd) = commands.get_entity(entity) {
             cmd.despawn();
         }
@@ -579,9 +588,7 @@ pub fn sync_people(
                     ..default()
                 })),
                 Transform::from_xyz(pos.x, person_height * 2.0 + 0.8, -pos.y),
-                PersonEntity {
-                    person_id: pos.person_id,
-                },
+                IndicatorEntity,
             ));
         }
 
@@ -601,9 +608,7 @@ pub fn sync_people(
                     ..default()
                 })),
                 Transform::from_xyz(pos.x + 0.5, person_height * 2.0 + 1.5, -pos.y),
-                PersonEntity {
-                    person_id: pos.person_id,
-                },
+                IndicatorEntity,
             ));
         }
     }
