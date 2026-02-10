@@ -767,25 +767,26 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         }
 
         // ---- Step 6: Generate doors ----
+        // Scan ALL cells along each room wall for adjacent corridor cells
+        // (not just midpoint) to ensure every room that borders a corridor gets a door.
         let mut door_set: Vec<(u32, u32, u8)> = Vec::new();
 
         for pr in &placed_rooms {
-            // Compute absolute door positions from shared edges.
-            // Room grid coords: pr.x, pr.y, pr.w, pr.h
-            // Room center: (pr.x + pr.w/2, pr.y + pr.h/2)
             let room_center_y = pr.y as f32 + pr.h as f32 / 2.0;
             let room_center_x = pr.x as f32 + pr.w as f32 / 2.0;
 
-            // WEST edge (x - 1): room's west wall touches corridor to its left
+            // Helper: find first corridor cell along a wall edge
+            // WEST edge
             if pr.x > 0 {
                 let test_x = pr.x - 1;
-                let mid_y = pr.y + pr.h / 2;
-                if mid_y < hull_length && test_x < hull_width {
-                    let cell = grid[test_x][mid_y];
-                    // Shared edge at x = pr.x (room's west boundary)
-                    let boundary_x = pr.x as f32;
+                let boundary_x = pr.x as f32;
+                for scan_y in pr.y..(pr.y + pr.h) {
+                    if scan_y >= hull_length || test_x >= hull_width {
+                        continue;
+                    }
+                    let cell = grid[test_x][scan_y];
                     if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(mid_y) {
+                        if let Some(seg) = find_spine_segment(scan_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::WEST);
                             if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
@@ -802,7 +803,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 });
                                 door_set.push(key);
                             }
-                        } else if let Some(cr) = find_cross_room(mid_y) {
+                        } else if let Some(cr) = find_cross_room(scan_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::WEST);
                             if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
@@ -820,6 +821,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 door_set.push(key);
                             }
                         }
+                        break; // one door per wall per corridor is enough
                     } else if cell == CELL_SERVICE_CORRIDOR {
                         let key = (pr.room_id, svc_rid, wall_sides::WEST);
                         if !door_set.contains(&key) {
@@ -837,19 +839,21 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             });
                             door_set.push(key);
                         }
+                        break;
                     }
                 }
             }
-            // EAST edge (x + w): room's east wall touches corridor to its right
+            // EAST edge
             {
                 let test_x = pr.x + pr.w;
-                let mid_y = pr.y + pr.h / 2;
-                if test_x < hull_width && mid_y < hull_length {
-                    let cell = grid[test_x][mid_y];
-                    // Shared edge at x = pr.x + pr.w (room's east boundary)
-                    let boundary_x = (pr.x + pr.w) as f32;
+                let boundary_x = (pr.x + pr.w) as f32;
+                for scan_y in pr.y..(pr.y + pr.h) {
+                    if test_x >= hull_width || scan_y >= hull_length {
+                        continue;
+                    }
+                    let cell = grid[test_x][scan_y];
                     if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(mid_y) {
+                        if let Some(seg) = find_spine_segment(scan_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::EAST);
                             if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
@@ -866,7 +870,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 });
                                 door_set.push(key);
                             }
-                        } else if let Some(cr) = find_cross_room(mid_y) {
+                        } else if let Some(cr) = find_cross_room(scan_y) {
                             let key = (pr.room_id, cr.room_id, wall_sides::EAST);
                             if !door_set.contains(&key) {
                                 ctx.db.door().insert(Door {
@@ -884,6 +888,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 door_set.push(key);
                             }
                         }
+                        break;
                     } else if cell == CELL_SERVICE_CORRIDOR {
                         let key = (pr.room_id, svc_rid, wall_sides::EAST);
                         if !door_set.contains(&key) {
@@ -901,17 +906,19 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             });
                             door_set.push(key);
                         }
+                        break;
                     }
                 }
             }
-            // NORTH edge (y - 1): room's north wall touches corridor above
+            // NORTH edge
             if pr.y > 0 {
                 let test_y = pr.y - 1;
-                let mid_x = pr.x + pr.w / 2;
-                if mid_x < hull_width && test_y < hull_length {
-                    let cell = grid[mid_x][test_y];
-                    // Shared edge at y = pr.y (room's north boundary — low Y = fore)
-                    let boundary_y = pr.y as f32;
+                let boundary_y = pr.y as f32;
+                for scan_x in pr.x..(pr.x + pr.w) {
+                    if scan_x >= hull_width || test_y >= hull_length {
+                        continue;
+                    }
+                    let cell = grid[scan_x][test_y];
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(test_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::NORTH);
@@ -948,17 +955,19 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 door_set.push(key);
                             }
                         }
+                        break;
                     }
                 }
             }
-            // SOUTH edge (y + h): room's south wall touches corridor below
+            // SOUTH edge
             {
                 let test_y = pr.y + pr.h;
-                let mid_x = pr.x + pr.w / 2;
-                if test_y < hull_length && mid_x < hull_width {
-                    let cell = grid[mid_x][test_y];
-                    // Shared edge at y = pr.y + pr.h (room's south boundary)
-                    let boundary_y = (pr.y + pr.h) as f32;
+                let boundary_y = (pr.y + pr.h) as f32;
+                for scan_x in pr.x..(pr.x + pr.w) {
+                    if test_y >= hull_length || scan_x >= hull_width {
+                        continue;
+                    }
+                    let cell = grid[scan_x][test_y];
                     if cell == CELL_MAIN_CORRIDOR {
                         if let Some(seg) = find_spine_segment(test_y) {
                             let key = (pr.room_id, seg.room_id, wall_sides::SOUTH);
@@ -995,6 +1004,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                                 door_set.push(key);
                             }
                         }
+                        break;
                     }
                 }
             }

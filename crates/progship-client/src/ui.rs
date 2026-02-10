@@ -156,7 +156,10 @@ pub fn render_hud(
             .person_id
             .and_then(|pid| conn.db.position().person_id().find(&pid))
             .and_then(|pos| conn.db.room().id().find(&pos.room_id))
-            .map(|r| (r.name.clone(), context_action_hint(r.room_type)))
+            .map(|r| {
+                let total_decks = conn.db.ship_config().id().find(&0).map(|c| c.deck_count as i32);
+                (r.name.clone(), context_action_hint(r.room_type, Some(r.deck), total_decks))
+            })
             .unwrap_or_default();
 
         // Get player activity
@@ -719,14 +722,21 @@ pub fn event_type_name(event_type: u8) -> &'static str {
     }
 }
 
-pub fn context_action_hint(room_type: u8) -> &'static str {
+pub fn context_action_hint(room_type: u8, deck: Option<i32>, total_decks: Option<i32>) -> String {
     match room_type {
-        20 | 21 | 22 | 25 => " Eat",        // MESS_HALL, WARDROOM, GALLEY, CAFE
-        10..=18 => " Sleep/Wash",             // Cabins, quarters, bathrooms
-        60..=71 => " Repair",                 // Engineering rooms
-        40 | 51 => " Exercise",               // GYM, POOL
-        110 => " Elevator [1-6]",             // ELEVATOR_SHAFT
-        111 => " Ladder [Up/Down]",           // LADDER_SHAFT
-        _ => "",
+        20 | 21 | 22 | 25 => " Eat".to_string(),
+        10..=18 => " Sleep/Wash".to_string(),
+        60..=71 => " Repair".to_string(),
+        40 | 51 => " Exercise".to_string(),
+        110 => {
+            let d = deck.map(|d| d + 1).unwrap_or(0);
+            let t = total_decks.unwrap_or(12);
+            format!(" Elevator (Deck {d}/{t}) [1-9,0,-,=]")
+        }
+        111 => {
+            let d = deck.map(|d| d + 1).unwrap_or(0);
+            format!(" Ladder (Deck {d}) [Up/Down]")
+        }
+        _ => String::new(),
     }
 }

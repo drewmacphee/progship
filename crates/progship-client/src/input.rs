@@ -160,15 +160,22 @@ pub fn player_input(
         if let Some(pos) = conn.db.position().person_id().find(&pid) {
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
                 if room.room_type == 110 {
-                    // ELEVATOR_SHAFT
-                    for (key, deck) in [
-                        (KeyCode::Digit1, 0i32),
+                    // ELEVATOR_SHAFT — digit keys select target deck
+                    let deck_keys: &[(KeyCode, i32)] = &[
+                        (KeyCode::Digit1, 0),
                         (KeyCode::Digit2, 1),
                         (KeyCode::Digit3, 2),
                         (KeyCode::Digit4, 3),
                         (KeyCode::Digit5, 4),
                         (KeyCode::Digit6, 5),
-                    ] {
+                        (KeyCode::Digit7, 6),
+                        (KeyCode::Digit8, 7),
+                        (KeyCode::Digit9, 8),
+                        (KeyCode::Digit0, 9),
+                        (KeyCode::Minus, 10),
+                        (KeyCode::Equal, 11),
+                    ];
+                    for &(key, deck) in deck_keys {
                         if keyboard.just_pressed(key) && deck != room.deck {
                             let _ = conn.reducers().player_use_elevator(deck);
                             ui.toasts.push(Toast {
