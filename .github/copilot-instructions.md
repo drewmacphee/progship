@@ -2,13 +2,15 @@
 
 ## Project Overview
 
-**ProgShip** is a real-time colony ship simulation with 5,000+ crew and passengers. SpacetimeDB server (Rust → WASM) handles all game logic; Bevy 0.15 client is a thin renderer.
+**ProgShip** is a real-time simulation engine for deep space colony ships with 5,000+ crew and passengers. Built in Rust using Entity Component System (ECS) architecture for performance and scalability.
 
 ## Technology Stack
 
 - **Language**: Rust
+- **ECS**: hecs (core simulation), Bevy (visualization)
+- **Serialization**: serde, bincode
 - **Server**: SpacetimeDB (tables + reducers, compiled to WASM)
-- **Client**: Bevy 0.15 (3D rendering, input, camera)
+- **Client**: Bevy 0.15 (rendering, input, camera)
 - **SDK**: Auto-generated Rust bindings (`progship-client-sdk`)
 
 ## Repository Structure
@@ -16,53 +18,80 @@
 ```
 progship/
 ├── crates/
-│   ├── progship-server/       # SpacetimeDB module (tables, reducers, generation)
+│   ├── progship-logic/        # Pure simulation logic (portable, no engine deps)
+│   ├── progship-core/         # ECS simulation engine (hecs)
+│   ├── progship-server/       # SpacetimeDB module (tables, reducers)
 │   ├── progship-client-sdk/   # Auto-generated SDK (DO NOT modify)
-│   └── progship-client/       # Bevy 0.15 thin client
-├── scripts/                   # Build/verify PowerShell scripts
-├── docs/vault/                # Obsidian design notes
-├── verify_doors.py            # Mathematical door verification
-├── categorize_errors.py       # Error categorization for door issues
-├── archive/                   # Old Python/Godot code (read-only)
-└── data/                      # Static JSON data files
+│   ├── progship-client/       # Bevy 0.15 multiplayer client
+│   ├── progship-viewer/       # Bevy offline ship visualizer
+│   └── progship-simtest/      # Headless simulation test harness
+├── data/                      # Static JSON data files
+├── docs/                      # Documentation
+├── scripts/                   # Build/verify scripts
+└── archive/                   # Old Python/Godot code (read-only)
 ```
+
+## Git Workflow — MANDATORY
+
+**NEVER commit directly to master.** All changes must follow this workflow:
+
+1. Create a feature branch: `git checkout -b feature/description`
+2. Make changes, commit to the branch
+3. Run checks: `cargo fmt --all`, `cargo clippy -- -D warnings`, `cargo test --workspace --exclude progship-server --exclude progship-client`
+4. Push the branch: `git push -u origin feature/description`
+5. Create a PR: `gh pr create --title "..." --body "..."`
+6. Wait for CI to pass
+7. Merge via squash: `gh pr merge N --squash --delete-branch`
+
+This applies to ALL changes — even single-line fixes, doc updates, or config tweaks.
 
 ## Build & Test Commands
 
 ```bash
-# Build server (SpacetimeDB WASM module)
-spacetime build --project-path crates/progship-server
+# Build all crates
+cargo build --release
 
-# Build client (Bevy)
-cargo build --package progship-client
+# Build only the simulation logic
+cargo build --package progship-logic
 
-# Run all tests
-cargo test --all
+# Run tests (exclude WASM-only server and client)
+cargo test --workspace --exclude progship-server --exclude progship-client
+
+# Run headless simulation harness
+cargo run -p progship-simtest
+
+# Run offline ship viewer
+cargo run -p progship-viewer --release
 
 # Lint and format
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-
-# Full rebuild + verify (PowerShell)
-.\scripts\rebuild.ps1
-
-# Quick door verification
-.\scripts\verify.ps1
+cargo clippy -- -D warnings
+cargo fmt --all
 ```
 
 ## Architecture
 
+### progship-logic (Pure Logic — Portable)
+23 modules of pure functions and data structures with zero engine dependencies.
+Used by both the ECS core and SpacetimeDB server.
+
+Key modules: actions, archetypes, atmosphere, config, constants, conversation,
+cylinder, duty, economy, geometry, health, lod, manifest, mission, movement,
+pathfinding, population, security, service_decks, ship_config, skills, supplies,
+systems, utility
+
+### progship-core (ECS Simulation)
+- **Components**: Position, Movement, Needs, Crew, Passenger, Activity, Personality, Skills
+- **Systems**: movement (60Hz), activity (1Hz), needs (0.1Hz), ship systems (0.01Hz)
+- **Generation**: Procedural ship layout pipeline
+
 ### Server (SpacetimeDB)
-- **Tables**: Room, Door, Person, ShipSystem, etc. (defined in `tables.rs`)
-- **Reducers**: Player movement, door traversal, ship init (`reducers.rs`)
-- **Generation**: Procedural ship layout pipeline (`generation.rs`)
-- **Simulation**: Needs decay, activity system, NPC AI (`simulation.rs`)
+- **Tables**: Room, Door, Person, ShipSystem, etc.
+- **Reducers**: Player movement, door traversal, ship init
+- Cannot be tested natively on Windows (WASM-only symbols)
 
 ### Client (Bevy 0.15)
 - Thin client — subscribes to SpacetimeDB tables, renders state
-- `sync_people` rebuilds NPC entities at 5Hz; player entity preserved
-- Camera: top-down, `Vec3::NEG_Z` up vector
-- Coordinate mapping: `world_x = game_x`, `world_z = -game_y`
+- Requires SpacetimeDB server running at localhost:3000
 
 ### Key Constants
 - `NORTH=0` (low Y), `SOUTH=1` (high Y), `EAST=2` (high X), `WEST=3` (low X)
@@ -73,7 +102,6 @@ cargo fmt --all -- --check
 
 - `#[derive(Debug, Clone, Serialize, Deserialize)]` on all components/tables
 - Components/tables are pure data — logic in systems/reducers
-- No external crates in server (WASM sandbox)
 - Never modify `progship-client-sdk/` (auto-generated)
 - Minimal comments — only where logic isn't obvious
 - Unit tests for all new logic
