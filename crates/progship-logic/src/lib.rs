@@ -14,6 +14,7 @@ pub mod duty;
 pub mod economy;
 pub mod geometry;
 pub mod health;
+pub mod manifest;
 pub mod mission;
 pub mod movement;
 pub mod pathfinding;
