@@ -28,7 +28,7 @@ impl Default for ViewState {
     fn default() -> Self {
         Self {
             current_deck: 0,
-            camera_height: 80.0,
+            camera_height: 150.0, // Default shows ~200m area on 400m deck
             tick_timer: 0.0,
             people_sync_timer: 0.0,
         }

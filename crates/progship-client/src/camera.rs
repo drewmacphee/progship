@@ -11,7 +11,7 @@ pub fn setup_camera(mut commands: Commands) {
     // Top-down camera looking straight down
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 80.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
+        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
         PlayerCamera,
     ));
 

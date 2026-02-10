@@ -23,8 +23,9 @@ pub fn player_input(
         _ => return,
     };
 
-    // WASD movement — accumulate locally, send batched
-    let speed = 15.0 * time.delta_secs();
+    // WASD movement — speed scales with zoom level for comfortable panning
+    let zoom_factor = (view.camera_height / 80.0).max(0.5);
+    let speed = 15.0 * zoom_factor * time.delta_secs();
     let mut dx = 0.0f32;
     let mut dy = 0.0f32;
     if keyboard.pressed(KeyCode::KeyW) {
@@ -280,9 +281,10 @@ pub fn player_input(
         let _ = conn.reducers().set_time_scale((scale / 2.0).max(0.25));
     }
 
-    // Zoom camera
+    // Zoom camera — scale step with current height for smooth feel
     for event in scroll_events.read() {
-        view.camera_height = (view.camera_height - event.y * 5.0).clamp(20.0, 200.0);
+        let zoom_step = view.camera_height * 0.1; // 10% of current height per scroll
+        view.camera_height = (view.camera_height - event.y * zoom_step).clamp(15.0, 500.0);
     }
 
     // Detect new events for toasts
