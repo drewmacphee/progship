@@ -129,23 +129,10 @@ fn try_door_traversal(
         // Look up destination room
         let dest = door_rooms(other_room_id)?;
 
-        // Compute entry point
-        let offset = 0.5;
-        let (entry_x, entry_y) = if input.dx.abs() > input.dy.abs() {
-            let ex = if input.dx > 0.0 {
-                door.door_x + offset
-            } else {
-                door.door_x - offset
-            };
-            (ex, door.door_y)
-        } else {
-            let ey = if input.dy > 0.0 {
-                door.door_y + offset
-            } else {
-                door.door_y - offset
-            };
-            (door.door_x, ey)
-        };
+        // Place player just inside the destination room at the door position.
+        // Use a minimal offset so they appear at the doorway, not deep inside.
+        let entry_x = door.door_x;
+        let entry_y = door.door_y;
 
         let (cx, cy) = dest.clamp(entry_x, entry_y, input.player_radius);
         return Some(MoveResult::DoorTraversal {
