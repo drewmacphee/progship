@@ -169,12 +169,17 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
         };
         let current = RoomBounds::new(room.id, room.x, room.y, room.width, room.height);
 
-        // Collect doors connected to the current room
+        // Collect doors connected to the current room (same-deck only;
+        // cross-deck doors are used via elevator/ladder reducers)
         let doors: Vec<DoorInfo> = ctx
             .db
             .door()
             .iter()
             .filter(|d| d.room_a == pos.room_id || d.room_b == pos.room_id)
+            .filter(|d| {
+                let other_id = if d.room_a == pos.room_id { d.room_b } else { d.room_a };
+                ctx.db.room().id().find(other_id).is_some_and(|r| r.deck == room.deck)
+            })
             .map(|d| DoorInfo {
                 room_a: d.room_a,
                 room_b: d.room_b,
