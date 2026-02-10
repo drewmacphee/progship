@@ -23,10 +23,15 @@ pub fn sync_rooms(
         _ => return,
     };
 
-    // Only rebuild when deck changes
+    // Rebuild when deck changes or subscription data arrives
+    let room_count = conn.db.room().iter().count();
     if view.current_deck != view.prev_deck {
         view.rooms_dirty = true;
         view.prev_deck = view.current_deck;
+    }
+    if room_count != view.prev_room_count && room_count > 0 {
+        view.rooms_dirty = true;
+        view.prev_room_count = room_count;
     }
 
     if !view.rooms_dirty {
