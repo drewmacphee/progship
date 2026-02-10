@@ -110,10 +110,16 @@ pub fn compute_move(
             continue;
         };
 
-        // Determine door orientation by checking which wall the door sits on
-        let on_vertical_wall =
-            (door.door_x - (current_room.cx - current_room.half_w)).abs() < 1.5
-                || (door.door_x - (current_room.cx + current_room.half_w)).abs() < 1.5;
+        // Determine door orientation by checking which wall of current room
+        // the door is closest to. Compare distance to vertical walls (left/right)
+        // vs horizontal walls (top/bottom).
+        let dist_to_left = (door.door_x - (current_room.cx - current_room.half_w)).abs();
+        let dist_to_right = (door.door_x - (current_room.cx + current_room.half_w)).abs();
+        let dist_to_top = (door.door_y - (current_room.cy - current_room.half_h)).abs();
+        let dist_to_bottom = (door.door_y - (current_room.cy + current_room.half_h)).abs();
+        let min_vertical = dist_to_left.min(dist_to_right);
+        let min_horizontal = dist_to_top.min(dist_to_bottom);
+        let on_vertical_wall = min_vertical < min_horizontal;
 
         // Clamp perpendicular axis to door width so player can't clip through
         // adjacent walls, but allow free movement along the traversal axis
