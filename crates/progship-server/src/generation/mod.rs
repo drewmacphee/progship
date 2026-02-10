@@ -7,6 +7,8 @@
 //!   4. generate_atmospheres  -- per-deck atmosphere state
 //!   5. generate_crew         -- crew members
 //!   6. generate_passengers   -- passengers
+//!
+//! Uses progship-logic for population sizing and supply manifest calculation.
 
 use crate::tables::*;
 use spacetimedb::{reducer, ReducerContext, Table};
@@ -122,6 +124,23 @@ pub fn init_ship(
         return;
     }
 
+    // Use progship-logic to compute population profile and supply manifest
+    let mission = progship_logic::mission::MissionConfig::default();
+    let overrides = progship_logic::config::SystemOverrides::default();
+    let systems = progship_logic::config::select_systems(&mission, &overrides);
+    let population = progship_logic::population::compute_population(
+        &mission,
+        &systems,
+    );
+    let supplies = progship_logic::supplies::compute_supply_manifest(
+        &mission,
+        &systems,
+        &population,
+    );
+
+    // Scale supplies to game units (tons → game units, roughly 1:1000)
+    let scale = 1000.0;
+
     // Ship config
     ctx.db.ship_config().insert(ShipConfig {
         id: 0,
@@ -136,21 +155,22 @@ pub fn init_ship(
         rationing_level: 0,
     });
 
-    // Resources (singleton)
+    // Resources from supply manifest
+    let reserve_factor = 1.5; // cap = stockpile × factor
     ctx.db.ship_resources().insert(ShipResources {
         id: 0,
-        power: 10000.0,
-        water: 50000.0,
-        oxygen: 20000.0,
-        food: 30000.0,
-        fuel: 100000.0,
-        spare_parts: 5000.0,
-        power_cap: 15000.0,
-        water_cap: 60000.0,
-        oxygen_cap: 25000.0,
-        food_cap: 40000.0,
-        fuel_cap: 120000.0,
-        spare_parts_cap: 8000.0,
+        power: (progship_logic::config::total_power_draw(&systems) as f64 * 1.2) as f32,
+        water: (supplies.water.stockpile_tons * scale) as f32,
+        oxygen: (supplies.oxygen.stockpile_tons * scale) as f32,
+        food: (supplies.food.stockpile_tons * scale) as f32,
+        fuel: (supplies.fuel.stockpile_tons * scale) as f32,
+        spare_parts: (supplies.spare_parts.stockpile_tons * scale) as f32,
+        power_cap: (progship_logic::config::total_power_draw(&systems) as f64 * 1.5) as f32,
+        water_cap: (supplies.water.stockpile_tons * scale * reserve_factor) as f32,
+        oxygen_cap: (supplies.oxygen.stockpile_tons * scale * reserve_factor) as f32,
+        food_cap: (supplies.food.stockpile_tons * scale * reserve_factor) as f32,
+        fuel_cap: (supplies.fuel.stockpile_tons * scale * reserve_factor) as f32,
+        spare_parts_cap: (supplies.spare_parts.stockpile_tons * scale * reserve_factor) as f32,
     });
 
     build_ship_graph(ctx, deck_count);
@@ -161,8 +181,11 @@ pub fn init_ship(
     generate_passengers(ctx, passenger_count, deck_count);
 
     log::info!(
-        "Ship '{}' initialized with {} people",
+        "Ship '{}' initialized with {} people (supplies: {:.0}t food, {:.0}t water, {:.0}t fuel)",
         name,
-        crew_count + passenger_count
+        crew_count + passenger_count,
+        supplies.food.stockpile_tons,
+        supplies.water.stockpile_tons,
+        supplies.fuel.stockpile_tons,
     );
 }
