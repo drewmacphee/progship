@@ -14,6 +14,63 @@ pub enum ConnectionState {
     Disconnected,
     Connecting,
     Connected(DbConnection),
+    Reconnecting,
+}
+
+#[derive(Resource)]
+pub struct ConnectionConfig {
+    pub server_url: String,
+    pub module_name: String,
+    pub reconnect_delay: f32,
+    pub reconnect_timer: f32,
+    pub reconnect_attempts: u32,
+    pub max_reconnect_delay: f32,
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            server_url: "http://localhost:3000".to_string(),
+            module_name: "progship".to_string(),
+            reconnect_delay: 1.0,
+            reconnect_timer: 0.0,
+            reconnect_attempts: 0,
+            max_reconnect_delay: 30.0,
+        }
+    }
+}
+
+impl ConnectionConfig {
+    pub fn from_args() -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        let mut config = Self::default();
+        let mut i = 1;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--server" | "-s" if i + 1 < args.len() => {
+                    config.server_url = args[i + 1].clone();
+                    i += 2;
+                }
+                "--module" | "-m" if i + 1 < args.len() => {
+                    config.module_name = args[i + 1].clone();
+                    i += 2;
+                }
+                _ => i += 1,
+            }
+        }
+        config
+    }
+
+    pub fn reset_backoff(&mut self) {
+        self.reconnect_delay = 1.0;
+        self.reconnect_attempts = 0;
+    }
+
+    pub fn advance_backoff(&mut self) {
+        self.reconnect_attempts += 1;
+        self.reconnect_delay = (self.reconnect_delay * 2.0).min(self.max_reconnect_delay);
+        self.reconnect_timer = self.reconnect_delay;
+    }
 }
 
 #[derive(Resource)]
@@ -44,6 +101,10 @@ pub struct PlayerState {
     pub pending_dy: f32,
     /// Timer for throttling movement sends
     pub move_send_timer: f32,
+    /// Timer for join timeout/retry
+    pub join_timer: f32,
+    /// Number of join attempts
+    pub join_attempts: u32,
 }
 
 impl Default for PlayerState {
@@ -54,6 +115,8 @@ impl Default for PlayerState {
             pending_dx: 0.0,
             pending_dy: 0.0,
             move_send_timer: 0.0,
+            join_timer: 0.0,
+            join_attempts: 0,
         }
     }
 }

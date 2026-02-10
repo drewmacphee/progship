@@ -31,10 +31,16 @@ use input::player_input;
 use minimap::{minimap_toggle, render_minimap, MinimapState};
 use networking::{auto_join_game, connect_to_server, process_messages};
 use rendering::{sync_people, sync_rooms};
-use state::{ConnectionState, PlayerState, UiState, ViewState};
+use state::{ConnectionConfig, ConnectionState, PlayerState, UiState, ViewState};
 use ui::{render_hud, render_info_panel, render_toasts, setup_ui};
 
 fn main() {
+    let conn_config = ConnectionConfig::from_args();
+    info!(
+        "ProgShip Client — server: {} module: {}",
+        conn_config.server_url, conn_config.module_name
+    );
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -46,6 +52,7 @@ fn main() {
             ..default()
         }))
         .insert_resource(ConnectionState::Disconnected)
+        .insert_resource(conn_config)
         .insert_resource(ViewState::default())
         .insert_resource(PlayerState::default())
         .insert_resource(UiState::default())
