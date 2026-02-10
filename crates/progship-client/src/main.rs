@@ -20,6 +20,7 @@ use bevy::prelude::*;
 
 mod camera;
 mod input;
+mod minimap;
 mod networking;
 mod rendering;
 mod state;
@@ -27,6 +28,7 @@ mod ui;
 
 use camera::{camera_follow_player, setup_camera};
 use input::player_input;
+use minimap::{minimap_toggle, render_minimap, MinimapState};
 use networking::{auto_join_game, connect_to_server, process_messages};
 use rendering::{sync_people, sync_rooms};
 use state::{ConnectionState, PlayerState, UiState, ViewState};
@@ -47,6 +49,7 @@ fn main() {
         .insert_resource(ViewState::default())
         .insert_resource(PlayerState::default())
         .insert_resource(UiState::default())
+        .insert_resource(MinimapState::default())
         .add_systems(Startup, (setup_camera, setup_ui))
         .add_systems(
             Update,
@@ -55,12 +58,14 @@ fn main() {
                 process_messages,
                 auto_join_game,
                 player_input,
+                minimap_toggle,
                 camera_follow_player,
                 sync_rooms,
                 sync_people,
                 render_hud,
                 render_info_panel,
                 render_toasts,
+                render_minimap,
             ),
         )
         .run();
