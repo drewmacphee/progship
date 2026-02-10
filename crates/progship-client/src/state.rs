@@ -78,6 +78,7 @@ pub struct ViewState {
     pub current_deck: i32,
     pub prev_deck: i32,
     pub rooms_dirty: bool,
+    pub prev_room_count: usize,
     pub camera_height: f32,
     pub tick_timer: f32,
     pub people_sync_timer: f32,
@@ -89,6 +90,7 @@ impl Default for ViewState {
             current_deck: 0,
             prev_deck: -1, // Force initial rebuild
             rooms_dirty: true,
+            prev_room_count: 0,
             camera_height: 150.0, // Default shows ~200m area on 400m deck
             tick_timer: 0.0,
             people_sync_timer: 0.0,
