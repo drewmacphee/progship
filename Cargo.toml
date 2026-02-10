@@ -6,6 +6,7 @@ members = [
     "crates/progship-simtest",
     "crates/progship-client-sdk",
     "crates/progship-client",
+    "crates/progship-viewer",
 ]
 
 [workspace.package]
