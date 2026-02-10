@@ -98,10 +98,10 @@ pub fn compute_move(
             continue;
         };
 
-        // Check player is near this door
+        // Use current position (not new) for door proximity — prevents skipping doors
         let dist_to_door =
-            ((new_x - door.door_x).powi(2) + (new_y - door.door_y).powi(2)).sqrt();
-        let door_zone = (door.width / 2.0 + 1.5).max(3.0);
+            ((input.px - door.door_x).powi(2) + (input.py - door.door_y).powi(2)).sqrt();
+        let door_zone = (door.width / 2.0 + 2.0).max(3.0);
         if dist_to_door > door_zone {
             continue;
         }
@@ -110,52 +110,48 @@ pub fn compute_move(
             continue;
         };
 
-        // Determine door orientation: is it on a horizontal or vertical wall?
-        // If door is near the left/right edge of current room → vertical wall (passage along X)
-        // If door is near the top/bottom edge → horizontal wall (passage along Y)
-        let on_vertical_wall = (door.door_x - (current_room.cx - current_room.half_w)).abs() < 1.5
-            || (door.door_x - (current_room.cx + current_room.half_w)).abs() < 1.5;
+        // Determine door orientation by checking which wall the door sits on
+        let on_vertical_wall =
+            (door.door_x - (current_room.cx - current_room.half_w)).abs() < 1.5
+                || (door.door_x - (current_room.cx + current_room.half_w)).abs() < 1.5;
 
-        // Clamp position to stay within door opening (perpendicular to traversal axis)
+        // Clamp perpendicular axis to door width so player can't clip through
+        // adjacent walls, but allow free movement along the traversal axis
         let half_door = door.width / 2.0;
-        let (clamped_x, clamped_y) = if on_vertical_wall {
-            // Door on east/west wall: free movement along X, clamp Y to door width
+        let (pass_x, pass_y) = if on_vertical_wall {
             let cy = new_y.clamp(door.door_y - half_door, door.door_y + half_door);
             (new_x, cy)
         } else {
-            // Door on north/south wall: free movement along Y, clamp X to door width
             let cx = new_x.clamp(door.door_x - half_door, door.door_x + half_door);
             (cx, new_y)
         };
 
-        // If clamped position is inside the destination room, transition
-        if dest.contains(clamped_x, clamped_y, input.player_radius) {
+        // Check if we've crossed into the destination room
+        if dest.contains(pass_x, pass_y, input.player_radius) {
             return MoveResult::DoorTraversal {
                 room_id: other_room_id,
-                x: clamped_x,
-                y: clamped_y,
+                x: pass_x,
+                y: pass_y,
             };
         }
 
-        // In the doorway — switch room when closer to destination
-        let dist_curr =
-            (clamped_x - current_room.cx).powi(2) + (clamped_y - current_room.cy).powi(2);
-        let dist_dest = (clamped_x - dest.cx).powi(2) + (clamped_y - dest.cy).powi(2);
-        if dist_dest < dist_curr {
-            return MoveResult::DoorTraversal {
-                room_id: other_room_id,
-                x: clamped_x,
-                y: clamped_y,
-            };
-        } else {
-            return MoveResult::InRoom {
-                x: clamped_x,
-                y: clamped_y,
-            };
-        }
+        // Still in doorway — allow the movement but keep player in current room.
+        // Clamp to the union of current room + door zone so they don't bounce.
+        let union_x = pass_x.clamp(
+            (current_room.cx - current_room.half_w).min(dest.cx - dest.half_w),
+            (current_room.cx + current_room.half_w).max(dest.cx + dest.half_w),
+        );
+        let union_y = pass_y.clamp(
+            (current_room.cy - current_room.half_h).min(dest.cy - dest.half_h),
+            (current_room.cy + current_room.half_h).max(dest.cy + dest.half_h),
+        );
+        return MoveResult::InRoom {
+            x: union_x,
+            y: union_y,
+        };
     }
 
-    // No door nearby — wall-slide
+    // No door nearby — wall-slide along current room boundary
     let (cx, cy) = current_room.clamp(new_x, new_y, input.player_radius);
     MoveResult::WallSlide { x: cx, y: cy }
 }
