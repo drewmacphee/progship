@@ -135,19 +135,19 @@ pub fn compute_move(
             };
         }
 
-        // Still in doorway — allow the movement but keep player in current room.
-        // Clamp to the union of current room + door zone so they don't bounce.
-        let union_x = pass_x.clamp(
-            (current_room.cx - current_room.half_w).min(dest.cx - dest.half_w),
-            (current_room.cx + current_room.half_w).max(dest.cx + dest.half_w),
-        );
-        let union_y = pass_y.clamp(
-            (current_room.cy - current_room.half_h).min(dest.cy - dest.half_h),
-            (current_room.cy + current_room.half_h).max(dest.cy + dest.half_h),
-        );
+        // Still in doorway — allow movement through the door opening only.
+        // Clamp to the current room but relax the boundary on the door's wall.
+        let (cx, cy) = current_room.clamp(pass_x, pass_y, input.player_radius);
+        let (final_x, final_y) = if on_vertical_wall {
+            // Door on east/west wall: allow X to extend toward dest, keep Y clamped
+            (pass_x, cy)
+        } else {
+            // Door on north/south wall: allow Y to extend toward dest, keep X clamped
+            (cx, pass_y)
+        };
         return MoveResult::InRoom {
-            x: union_x,
-            y: union_y,
+            x: final_x,
+            y: final_y,
         };
     }
 
