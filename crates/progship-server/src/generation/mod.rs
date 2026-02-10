@@ -173,7 +173,7 @@ pub fn init_ship(
         spare_parts_cap: (supplies.spare_parts.stockpile_tons * scale * reserve_factor) as f32,
     });
 
-    build_ship_graph(ctx, deck_count);
+    build_ship_graph(ctx, deck_count, crew_count, passenger_count);
     layout_ship(ctx, deck_count);
     generate_ship_systems(ctx);
     generate_atmospheres(ctx, deck_count);
