@@ -164,7 +164,7 @@ pub(super) fn generate_crew(ctx: &ReducerContext, count: u32) {
         };
         let shift = (i % 3) as u8;
 
-        // Assign duty station based on department
+        // Assign duty station based on department — distribute across all matching rooms
         let duty_room_type = match dept {
             departments::ENGINEERING => room_types::ENGINEERING,
             departments::MEDICAL => room_types::HOSPITAL_WARD,
@@ -173,13 +173,18 @@ pub(super) fn generate_crew(ctx: &ReducerContext, count: u32) {
             departments::COMMAND => room_types::BRIDGE,
             _ => room_types::CORRIDOR,
         };
-        let duty_station_id = ctx
+        let matching_rooms: Vec<u32> = ctx
             .db
             .room()
             .iter()
-            .find(|r| r.room_type == duty_room_type)
+            .filter(|r| r.room_type == duty_room_type)
             .map(|r| r.id)
-            .unwrap_or(0);
+            .collect();
+        let duty_station_id = if matching_rooms.is_empty() {
+            0
+        } else {
+            matching_rooms[i as usize % matching_rooms.len()]
+        };
 
         // Place crew in their duty station room
         let spawn_room = ctx
@@ -273,14 +278,38 @@ pub(super) fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count:
         "Architect",
     ];
 
-    // Find passenger quarters room
-    let passenger_room_id = ctx
+    // Collect all cabin/quarters rooms for passenger distribution
+    let cabin_room_types = [
+        room_types::CABIN_SINGLE,
+        room_types::CABIN_DOUBLE,
+        room_types::FAMILY_SUITE,
+        room_types::VIP_SUITE,
+        room_types::QUARTERS_CREW,
+        room_types::QUARTERS_PASSENGER,
+    ];
+    let passenger_rooms: Vec<u32> = ctx
         .db
         .room()
         .iter()
-        .find(|r| r.room_type == room_types::QUARTERS_PASSENGER)
+        .filter(|r| cabin_room_types.contains(&r.room_type))
         .map(|r| r.id)
-        .unwrap_or(0);
+        .collect();
+    // Fallback: if no cabin rooms exist, use any habitable room
+    let fallback_rooms: Vec<u32> = if passenger_rooms.is_empty() {
+        ctx.db
+            .room()
+            .iter()
+            .filter(|r| r.room_type < 100) // non-infrastructure
+            .map(|r| r.id)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let pax_rooms = if passenger_rooms.is_empty() {
+        &fallback_rooms
+    } else {
+        &passenger_rooms
+    };
 
     for i in 0..count {
         let given_idx = (i as usize + 40) % GIVEN_NAMES.len();
@@ -300,20 +329,26 @@ pub(super) fn generate_passengers(ctx: &ReducerContext, count: u32, _deck_count:
             })
             .id;
 
+        // Distribute passengers round-robin across available rooms
+        let assigned_room_id = if pax_rooms.is_empty() {
+            0
+        } else {
+            pax_rooms[i as usize % pax_rooms.len()]
+        };
         let (rx, ry, rw, rh) = ctx
             .db
             .room()
             .id()
-            .find(passenger_room_id)
+            .find(assigned_room_id)
             .map(|r| (r.x, r.y, r.width, r.height))
             .unwrap_or((0.0, 0.0, 24.0, 18.0));
-        let spread_x = ((i as f32 * 1.7) % (rw - 2.0)) - (rw / 2.0 - 1.0);
-        let spread_y = ((i as f32 * 2.3) % (rh - 2.0)) - (rh / 2.0 - 1.0);
+        let spread_x = ((i as f32 * 1.7) % (rw - 2.0).max(1.0)) - ((rw - 2.0).max(1.0) / 2.0);
+        let spread_y = ((i as f32 * 2.3) % (rh - 2.0).max(1.0)) - ((rh - 2.0).max(1.0) / 2.0);
         ctx.db.position().insert(Position {
             person_id,
-            room_id: passenger_room_id,
-            x: rx + spread_x,
-            y: ry + spread_y,
+            room_id: assigned_room_id,
+            x: rx + spread_x.clamp(-rw / 2.0 + 0.5, rw / 2.0 - 0.5),
+            y: ry + spread_y.clamp(-rh / 2.0 + 0.5, rh / 2.0 - 0.5),
             z: 0.0,
         });
 
