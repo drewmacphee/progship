@@ -7,6 +7,7 @@
 
 pub mod actions;
 pub mod archetypes;
+pub mod atmosphere;
 pub mod config;
 pub mod constants;
 pub mod duty;
