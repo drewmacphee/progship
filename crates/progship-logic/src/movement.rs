@@ -98,7 +98,7 @@ pub fn compute_move(
             continue;
         };
 
-        // Check player is near this door (generous radius for smooth transition)
+        // Check player is near this door
         let dist_to_door =
             ((new_x - door.door_x).powi(2) + (new_y - door.door_y).powi(2)).sqrt();
         let door_zone = (door.width / 2.0 + 1.5).max(3.0);
@@ -106,32 +106,52 @@ pub fn compute_move(
             continue;
         }
 
-        // Look up destination room
         let Some(dest) = door_rooms(other_room_id) else {
             continue;
         };
 
-        // If new position is inside the destination room, transition
-        if dest.contains(new_x, new_y, input.player_radius) {
+        // Determine door orientation: is it on a horizontal or vertical wall?
+        // If door is near the left/right edge of current room → vertical wall (passage along X)
+        // If door is near the top/bottom edge → horizontal wall (passage along Y)
+        let on_vertical_wall = (door.door_x - (current_room.cx - current_room.half_w)).abs() < 1.5
+            || (door.door_x - (current_room.cx + current_room.half_w)).abs() < 1.5;
+
+        // Clamp position to stay within door opening (perpendicular to traversal axis)
+        let half_door = door.width / 2.0;
+        let (clamped_x, clamped_y) = if on_vertical_wall {
+            // Door on east/west wall: free movement along X, clamp Y to door width
+            let cy = new_y.clamp(door.door_y - half_door, door.door_y + half_door);
+            (new_x, cy)
+        } else {
+            // Door on north/south wall: free movement along Y, clamp X to door width
+            let cx = new_x.clamp(door.door_x - half_door, door.door_x + half_door);
+            (cx, new_y)
+        };
+
+        // If clamped position is inside the destination room, transition
+        if dest.contains(clamped_x, clamped_y, input.player_radius) {
             return MoveResult::DoorTraversal {
                 room_id: other_room_id,
-                x: new_x,
-                y: new_y,
+                x: clamped_x,
+                y: clamped_y,
             };
         }
 
-        // Player is in the doorway (outside both rooms). Allow free movement
-        // in the door zone without clamping. Switch room_id when closer to dest.
-        let dist_curr = (new_x - current_room.cx).powi(2) + (new_y - current_room.cy).powi(2);
-        let dist_dest = (new_x - dest.cx).powi(2) + (new_y - dest.cy).powi(2);
+        // In the doorway — switch room when closer to destination
+        let dist_curr =
+            (clamped_x - current_room.cx).powi(2) + (clamped_y - current_room.cy).powi(2);
+        let dist_dest = (clamped_x - dest.cx).powi(2) + (clamped_y - dest.cy).powi(2);
         if dist_dest < dist_curr {
             return MoveResult::DoorTraversal {
                 room_id: other_room_id,
-                x: new_x,
-                y: new_y,
+                x: clamped_x,
+                y: clamped_y,
             };
         } else {
-            return MoveResult::InRoom { x: new_x, y: new_y };
+            return MoveResult::InRoom {
+                x: clamped_x,
+                y: clamped_y,
+            };
         }
     }
 
