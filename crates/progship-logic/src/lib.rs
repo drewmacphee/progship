@@ -17,14 +17,14 @@
 //! | [`duty`] | Shift scheduling, duty fitness, sleep windows |
 //! | [`economy`] | Resource scarcity, rationing, production rates |
 //! | [`geometry`] | Ship layout validation (room bounds, doors, connectivity) |
-//! | [`lod`] | Level-of-detail tiers for 5,000+ agent simulation scale-up |
-//! | [`manifest`] | Dynamic facility manifest from systems + population |
 //! | [`health`] | Injury severity, medical recovery, death determination |
+//! | [`lod`] | Level-of-detail tiers for 5,000+ agent simulation scale-up |
 //! | [`manifest`] | Dynamic facility manifest from systems + population |
 //! | [`mission`] | Mission config, destinations, propulsion, voyage profile |
 //! | [`movement`] | Room-bounded movement, door traversal, wall-sliding |
 //! | [`pathfinding`] | BFS pathfinding over door connectivity graph |
 //! | [`population`] | Crew sizing, department allocation, genetic diversity |
+//! | [`security`] | Access control, lockdown, patrol routing |
 //! | [`skills`] | Skill checks, experience gain, training, and decay |
 //! | [`supplies`] | Voyage supply manifest and mass budget validation |
 //! | [`systems`] | System variant definitions (power, life support, etc.) |
@@ -45,6 +45,7 @@ pub mod mission;
 pub mod movement;
 pub mod pathfinding;
 pub mod population;
+pub mod security;
 pub mod service_decks;
 pub mod skills;
 pub mod supplies;
