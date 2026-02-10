@@ -1,6 +1,6 @@
 //! Need decay system - hunger, fatigue, social, comfort, hygiene.
 
-use crate::logic::health;
+use progship_logic::health;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 

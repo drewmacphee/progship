@@ -1,6 +1,6 @@
 //! Death system - checks for and processes NPC deaths.
 
-use crate::logic::health;
+use progship_logic::health;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
