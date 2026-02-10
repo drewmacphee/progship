@@ -17,7 +17,7 @@
 //! # Usage
 //!
 //! ```
-//! use progship_logic::lod::{LodTier, classify_agent, should_update, LodConfig};
+//! use progship_logic::lod::{LodTier, LodSystem, classify_agent, should_update, LodConfig};
 //!
 //! let config = LodConfig::default();
 //! let tier = classify_agent(3, 3, &[2, 3, 4], true);
