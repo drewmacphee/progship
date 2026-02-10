@@ -12,7 +12,7 @@ use crate::state::{
 
 pub fn sync_rooms(
     state: Res<ConnectionState>,
-    view: Res<ViewState>,
+    mut view: ResMut<ViewState>,
     mut commands: Commands,
     existing: Query<Entity, With<RoomEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -23,9 +23,21 @@ pub fn sync_rooms(
         _ => return,
     };
 
+    // Only rebuild when deck changes
+    if view.current_deck != view.prev_deck {
+        view.rooms_dirty = true;
+        view.prev_deck = view.current_deck;
+    }
+
+    if !view.rooms_dirty {
+        return;
+    }
+    view.rooms_dirty = false;
+
+    // Despawn existing room entities (flat hierarchy, no children)
     for entity in existing.iter() {
-        if let Some(cmd) = commands.get_entity(entity) {
-            cmd.despawn_recursive();
+        if let Some(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
         }
     }
 
@@ -450,15 +462,17 @@ pub fn sync_people(
     };
 
     // Every frame: smoothly update ALL existing person transforms toward server positions
+    let dt = time.delta_secs();
     for (_, pe, mut transform) in existing.iter_mut() {
         if let Some(pos) = conn.db.position().person_id().find(&pe.person_id) {
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
                 if room.deck == view.current_deck {
                     let is_player = Some(pe.person_id) == player.person_id;
                     let target = Vec3::new(pos.x, transform.translation.y, -pos.y);
-                    // Player lerps faster for responsiveness
-                    let lerp_speed = if is_player { 0.5 } else { 0.2 };
-                    transform.translation = transform.translation.lerp(target, lerp_speed);
+                    // Time-based lerp: ~10x/sec for player, ~5x/sec for NPCs
+                    let lerp_rate = if is_player { 12.0 } else { 6.0 };
+                    let t = (lerp_rate * dt).min(1.0);
+                    transform.translation = transform.translation.lerp(target, t);
                 } else {
                     transform.translation.y = -100.0;
                 }
@@ -484,8 +498,8 @@ pub fn sync_people(
         }
     }
     for entity in entities_to_despawn {
-        if let Some(cmd) = commands.get_entity(entity) {
-            cmd.despawn_recursive();
+        if let Some(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
         }
     }
 

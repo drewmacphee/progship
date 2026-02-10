@@ -721,12 +721,12 @@ pub fn event_type_name(event_type: u8) -> &'static str {
 
 pub fn context_action_hint(room_type: u8) -> &'static str {
     match room_type {
-        9 | 10 => " Eat",
-        5..=8 => " Sleep/Wash",
-        2 | 3 | 4 | 21..=23 => " Repair",
-        12 | 13 => " Exercise",
-        25 => " Elevator [1-6]",
-        26 => " Ladder [Up/Down]",
+        20 | 21 | 22 | 25 => " Eat",        // MESS_HALL, WARDROOM, GALLEY, CAFE
+        10..=18 => " Sleep/Wash",             // Cabins, quarters, bathrooms
+        60..=71 => " Repair",                 // Engineering rooms
+        40 | 51 => " Exercise",               // GYM, POOL
+        110 => " Elevator [1-6]",             // ELEVATOR_SHAFT
+        111 => " Ladder [Up/Down]",           // LADDER_SHAFT
         _ => "",
     }
 }

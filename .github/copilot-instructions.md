@@ -102,6 +102,23 @@ systems, utility
 - Thin client — subscribes to SpacetimeDB tables, renders state
 - Requires SpacetimeDB server running at localhost:3000
 
+### Client SDK Regeneration — MANDATORY
+
+When **any** server table schema changes (fields added/removed/reordered in `tables.rs`),
+the client SDK **must** be regenerated. Stale SDK causes silent deserialization bugs
+(fields shift, wrong data in wrong fields).
+
+```bash
+# Regenerate SDK from server module
+spacetime generate --lang rust --out-dir crates/progship-client-sdk/src --project-path crates/progship-server
+
+# IMPORTANT: rename mod.rs → lib.rs (spacetime generates mod.rs, crate needs lib.rs)
+mv crates/progship-client-sdk/src/mod.rs crates/progship-client-sdk/src/lib.rs
+
+# Rebuild client to verify
+cargo build -p progship-client --release
+```
+
 ### Key Constants
 - `NORTH=0` (low Y), `SOUTH=1` (high Y), `EAST=2` (high X), `WEST=3` (low X)
 - 1 grid cell = 1 meter
