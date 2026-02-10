@@ -101,6 +101,21 @@ Benchmarked with tiered update system:
 
 All well under 16ms budget for 60 FPS.
 
+## Development Setup
+
+### Pre-commit Hook
+
+Install the pre-commit hook to run `cargo fmt` and `cargo clippy` before each commit:
+
+```bash
+# Option A: Point git to the shared hooks directory
+git config core.hooksPath .github/hooks
+
+# Option B: Copy the hook manually
+cp .github/hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
 ## License
 
 TBD
