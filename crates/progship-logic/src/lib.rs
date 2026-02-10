@@ -14,6 +14,7 @@
 //! | [`atmosphere`] | Per-room O2/CO2/temperature/pressure simulation |
 //! | [`config`] | System selection algorithm (weighted scoring) |
 //! | [`constants`] | Room types, activity types, groups, shifts (u8 IDs) |
+//! | [`cylinder`] | O'Neill cylinder ship geometry, sectors, ring corridors |
 //! | [`duty`] | Shift scheduling, duty fitness, sleep windows |
 //! | [`economy`] | Resource scarcity, rationing, production rates |
 //! | [`geometry`] | Ship layout validation (room bounds, doors, connectivity) |
@@ -35,6 +36,7 @@ pub mod archetypes;
 pub mod atmosphere;
 pub mod config;
 pub mod constants;
+pub mod cylinder;
 pub mod duty;
 pub mod economy;
 pub mod geometry;
