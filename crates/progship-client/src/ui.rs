@@ -7,7 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState, ToastContainer, UiState, ViewState,
+    ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState, ToastContainer,
+    UiState, ViewState,
 };
 
 pub fn setup_ui(mut commands: Commands) {
@@ -84,6 +85,7 @@ pub fn setup_ui(mut commands: Commands) {
 
 pub fn render_hud(
     state: Res<ConnectionState>,
+    config: Res<ConnectionConfig>,
     view: Res<ViewState>,
     player: Res<PlayerState>,
     mut hud_q: Query<
@@ -107,9 +109,20 @@ pub fn render_hud(
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
+        ConnectionState::Reconnecting => {
+            if let Ok(mut text) = hud_q.get_single_mut() {
+                **text = format!(
+                    "Reconnecting to {}... (attempt {}, {:.0}s)",
+                    config.server_url,
+                    config.reconnect_attempts,
+                    config.reconnect_timer.max(0.0)
+                );
+            }
+            return;
+        }
         _ => {
             if let Ok(mut text) = hud_q.get_single_mut() {
-                **text = "Connecting...".into();
+                **text = format!("Connecting to {}...", config.server_url);
             }
             return;
         }
@@ -244,7 +257,14 @@ pub fn render_hud(
                 );
             }
         } else {
-            **text = "Joining game...".into();
+            let join_msg = if player.join_attempts >= 3 {
+                "Failed to join — is the ship initialized?\nRun: spacetime call progship init_ship -- '\"Ship Name\"' 12 200 800 -s <server>"
+            } else if player.joined {
+                &format!("Joining game... ({:.0}s)", player.join_timer)
+            } else {
+                "Waiting for server..."
+            };
+            **text = join_msg.to_string();
         }
     }
 }
