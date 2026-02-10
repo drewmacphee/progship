@@ -24,6 +24,7 @@
 //! | [`movement`] | Room-bounded movement, door traversal, wall-sliding |
 //! | [`pathfinding`] | BFS pathfinding over door connectivity graph |
 //! | [`population`] | Crew sizing, department allocation, genetic diversity |
+//! | [`security`] | Access control, lockdown, patrol routing |
 //! | [`supplies`] | Voyage supply manifest and mass budget validation |
 //! | [`systems`] | System variant definitions (power, life support, etc.) |
 //! | [`utility`] | Personality-driven utility AI for activity selection |
@@ -43,6 +44,7 @@ pub mod mission;
 pub mod movement;
 pub mod pathfinding;
 pub mod population;
+pub mod security;
 pub mod service_decks;
 pub mod supplies;
 pub mod systems;
