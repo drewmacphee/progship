@@ -27,6 +27,7 @@
 //! | [`pathfinding`] | BFS pathfinding over door connectivity graph |
 //! | [`population`] | Crew sizing, department allocation, genetic diversity |
 //! | [`security`] | Access control, lockdown, patrol routing |
+//! | [`ship_config`] | Player-facing ship configuration builder and validation |
 //! | [`skills`] | Skill checks, experience gain, training, and decay |
 //! | [`supplies`] | Voyage supply manifest and mass budget validation |
 //! | [`systems`] | System variant definitions (power, life support, etc.) |
@@ -51,6 +52,7 @@ pub mod pathfinding;
 pub mod population;
 pub mod security;
 pub mod service_decks;
+pub mod ship_config;
 pub mod skills;
 pub mod supplies;
 pub mod systems;
