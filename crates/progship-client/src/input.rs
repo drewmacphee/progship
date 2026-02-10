@@ -29,16 +29,16 @@ pub fn player_input(
     let mut dx = 0.0f32;
     let mut dy = 0.0f32;
     if keyboard.pressed(KeyCode::KeyW) {
-        dy -= speed;
-    }
-    if keyboard.pressed(KeyCode::KeyS) {
         dy += speed;
     }
+    if keyboard.pressed(KeyCode::KeyS) {
+        dy -= speed;
+    }
     if keyboard.pressed(KeyCode::KeyA) {
-        dx += speed;
+        dx -= speed;
     }
     if keyboard.pressed(KeyCode::KeyD) {
-        dx -= speed;
+        dx += speed;
     }
 
     // Arrow keys for movement ONLY if not in a ladder shaft
@@ -57,16 +57,16 @@ pub fn player_input(
 
     if !in_ladder_shaft {
         if keyboard.pressed(KeyCode::ArrowUp) {
-            dy -= speed;
-        }
-        if keyboard.pressed(KeyCode::ArrowDown) {
             dy += speed;
         }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            dy -= speed;
+        }
         if keyboard.pressed(KeyCode::ArrowLeft) {
-            dx += speed;
+            dx -= speed;
         }
         if keyboard.pressed(KeyCode::ArrowRight) {
-            dx -= speed;
+            dx += speed;
         }
     }
 
