@@ -17,6 +17,7 @@
 //! | [`duty`] | Shift scheduling, duty fitness, sleep windows |
 //! | [`economy`] | Resource scarcity, rationing, production rates |
 //! | [`geometry`] | Ship layout validation (room bounds, doors, connectivity) |
+//! | [`lod`] | Level-of-detail tiers for 5,000+ agent simulation scale-up |
 //! | [`health`] | Injury severity, medical recovery, death determination |
 //! | [`manifest`] | Dynamic facility manifest from systems + population |
 //! | [`mission`] | Mission config, destinations, propulsion, voyage profile |
@@ -36,6 +37,7 @@ pub mod duty;
 pub mod economy;
 pub mod geometry;
 pub mod health;
+pub mod lod;
 pub mod manifest;
 pub mod mission;
 pub mod movement;
