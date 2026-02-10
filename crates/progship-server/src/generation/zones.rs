@@ -74,6 +74,57 @@ pub(super) fn find_empty_zones(
 
     // Sort largest-first
     zones.sort_by(|a, b| (b.w * b.h).cmp(&(a.w * a.h)));
+
+    // Second pass: scan unclaimed cells in Y-first order to catch tall thin strips
+    // missed by the X-first scan above.
+    for y in 0..height {
+        for x in 0..width {
+            if grid[x][y] != cell_empty || claimed[x][y] {
+                continue;
+            }
+
+            // Find vertical run starting at (x, y)
+            let mut run_h = 0;
+            while y + run_h < height && grid[x][y + run_h] == cell_empty && !claimed[x][y + run_h]
+            {
+                run_h += 1;
+            }
+            if run_h < 3 {
+                continue;
+            }
+
+            // Extend rightward while same y-range is all empty
+            let mut run_w = 1;
+            'outer2: while x + run_w < width {
+                for yy in y..(y + run_h) {
+                    if grid[x + run_w][yy] != cell_empty || claimed[x + run_w][yy] {
+                        break 'outer2;
+                    }
+                }
+                run_w += 1;
+            }
+
+            if run_w < 3 {
+                continue;
+            }
+
+            for xx in x..(x + run_w) {
+                for yy in y..(y + run_h) {
+                    claimed[xx][yy] = true;
+                }
+            }
+
+            zones.push(GridZone {
+                x,
+                y,
+                w: run_w,
+                h: run_h,
+            });
+        }
+    }
+
+    // Re-sort after second pass
+    zones.sort_by(|a, b| (b.w * b.h).cmp(&(a.w * a.h)));
     zones
 }
 

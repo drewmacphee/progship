@@ -197,7 +197,7 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
                 .map(|r| RoomBounds::new(r.id, r.x, r.y, r.width, r.height))
         };
 
-        match compute_move(
+        let result = compute_move(
             &MoveInput {
                 px: pos.x,
                 py: pos.y,
@@ -208,19 +208,47 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             &current,
             &doors,
             &room_lookup,
-        ) {
+        );
+
+        let (mut final_x, mut final_y, new_room) = match result {
             MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
-                pos.x = x;
-                pos.y = y;
-                ctx.db.position().person_id().update(pos);
+                (x, y, pos.room_id)
             }
             MoveResult::DoorTraversal { room_id, x, y } => {
-                pos.room_id = room_id;
-                pos.x = x;
-                pos.y = y;
-                ctx.db.position().person_id().update(pos);
+                (x, y, room_id)
+            }
+        };
+
+        // Push away from NPCs in the same room to prevent overlap
+        let npc_radius = 0.3;
+        let min_dist = player_radius + npc_radius;
+        for other_pos in ctx.db.position().iter() {
+            if other_pos.person_id == person_id || other_pos.room_id != new_room {
+                continue;
+            }
+            let dx_npc = final_x - other_pos.x;
+            let dy_npc = final_y - other_pos.y;
+            let dist_sq = dx_npc * dx_npc + dy_npc * dy_npc;
+            if dist_sq < min_dist * min_dist && dist_sq > 0.001 {
+                let dist = dist_sq.sqrt();
+                let push = (min_dist - dist) * 0.5;
+                final_x += (dx_npc / dist) * push;
+                final_y += (dy_npc / dist) * push;
             }
         }
+
+        // Reclamp to room bounds after NPC push
+        let final_room = if new_room != pos.room_id {
+            room_lookup(new_room).unwrap_or(current)
+        } else {
+            current
+        };
+        let (fx, fy) = final_room.clamp(final_x, final_y, player_radius);
+
+        pos.room_id = new_room;
+        pos.x = fx;
+        pos.y = fy;
+        ctx.db.position().person_id().update(pos);
     }
 }
 
