@@ -45,6 +45,15 @@ progship/
 
 This applies to ALL changes — even single-line fixes, doc updates, or config tweaks.
 
+### Branch Naming
+
+| Prefix | Use Case | Example |
+|--------|----------|---------|
+| `feature/` | New features, modules | `feature/disease-system` |
+| `fix/` | Bug fixes | `fix/lod-doctest-import` |
+| `docs/` | Documentation only | `docs/update-readme` |
+| `chore/` | Config, tooling, maintenance | `chore/add-workspace-member` |
+
 ## Build & Test Commands
 
 ```bash
