@@ -135,15 +135,23 @@ pub fn compute_move(
             };
         }
 
-        // Still in doorway — allow movement through the door opening only.
-        // Clamp to the current room but relax the boundary on the door's wall.
+        // Still in doorway — clamp traversal axis to span between the two rooms,
+        // and perpendicular axis to the door width (already done in pass_x/pass_y).
         let (cx, cy) = current_room.clamp(pass_x, pass_y, input.player_radius);
         let (final_x, final_y) = if on_vertical_wall {
-            // Door on east/west wall: allow X to extend toward dest, keep Y clamped
-            (pass_x, cy)
+            // Door on east/west wall: bound X between current and dest room edges
+            let min_x = (current_room.cx - current_room.half_w)
+                .min(dest.cx - dest.half_w);
+            let max_x = (current_room.cx + current_room.half_w)
+                .max(dest.cx + dest.half_w);
+            (pass_x.clamp(min_x + input.player_radius, max_x - input.player_radius), cy)
         } else {
-            // Door on north/south wall: allow Y to extend toward dest, keep X clamped
-            (cx, pass_y)
+            // Door on north/south wall: bound Y between current and dest room edges
+            let min_y = (current_room.cy - current_room.half_h)
+                .min(dest.cy - dest.half_h);
+            let max_y = (current_room.cy + current_room.half_h)
+                .max(dest.cy + dest.half_h);
+            (cx, pass_y.clamp(min_y + input.player_radius, max_y - input.player_radius))
         };
         return MoveResult::InRoom {
             x: final_x,
