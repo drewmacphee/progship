@@ -588,27 +588,107 @@ pub fn sync_people(
 
 fn room_color(room_type: u8) -> Color {
     match room_type {
-        0 => Color::srgb(0.15, 0.2, 0.5),         // Bridge - dark blue
-        1 => Color::srgb(0.25, 0.25, 0.4),        // Conference
-        2 => Color::srgb(0.45, 0.25, 0.15),       // Engineering - brown
-        3 => Color::srgb(0.5, 0.15, 0.1),         // Reactor - dark red
-        4 => Color::srgb(0.35, 0.3, 0.2),         // Maintenance - tan
-        5..=8 => Color::srgb(0.25, 0.35, 0.25),   // Quarters - green
-        9 => Color::srgb(0.5, 0.4, 0.15),         // Mess - warm yellow
-        10 => Color::srgb(0.4, 0.35, 0.15),       // Galley
-        11 => Color::srgb(0.6, 0.6, 0.7),         // Medical - light blue
-        12 => Color::srgb(0.25, 0.4, 0.35),       // Recreation - teal
-        13 => Color::srgb(0.35, 0.4, 0.25),       // Gym
-        14..=15 => Color::srgb(0.25, 0.25, 0.25), // Cargo/Storage - gray
-        16 => Color::srgb(0.5, 0.1, 0.1),         // Airlock - red
-        17 => Color::srgb(0.2, 0.2, 0.25),        // Corridor - dark gray
-        18 => Color::srgb(0.35, 0.35, 0.4),       // Elevator
-        19 => Color::srgb(0.25, 0.35, 0.5),       // Laboratory - blue
-        20 => Color::srgb(0.15, 0.25, 0.4),       // Observatory
-        21 => Color::srgb(0.25, 0.4, 0.5),        // Life Support - cyan
-        22 => Color::srgb(0.15, 0.5, 0.15),       // Hydroponics - green
-        23 => Color::srgb(0.15, 0.3, 0.5),        // Water Recycling - blue
-        _ => Color::srgb(0.25, 0.25, 0.25),
+        // Command (dark blue / gold tones) — 0..=8
+        0 => Color::srgb(0.12, 0.15, 0.45), // Bridge
+        1 => Color::srgb(0.18, 0.18, 0.40), // Conference
+        2 => Color::srgb(0.10, 0.12, 0.38), // CIC
+        3 => Color::srgb(0.15, 0.20, 0.42), // Comms Room
+        4 => Color::srgb(0.20, 0.18, 0.45), // Captain's Ready Room
+        5 => Color::srgb(0.35, 0.15, 0.15), // Security Office
+        6 => Color::srgb(0.40, 0.12, 0.12), // Brig
+        7 => Color::srgb(0.22, 0.20, 0.38), // Admin Office
+        8 => Color::srgb(0.15, 0.22, 0.50), // Observatory
+
+        // Habitation (blue / teal tones) — 10..=18
+        10 => Color::srgb(0.20, 0.30, 0.35), // Cabin Single
+        11 => Color::srgb(0.22, 0.32, 0.38), // Cabin Double
+        12 => Color::srgb(0.25, 0.35, 0.42), // Family Suite
+        13 => Color::srgb(0.30, 0.40, 0.48), // VIP Suite
+        14 => Color::srgb(0.18, 0.28, 0.32), // Crew Quarters
+        15 => Color::srgb(0.22, 0.30, 0.38), // Officer Quarters
+        16 => Color::srgb(0.20, 0.32, 0.36), // Passenger Quarters
+        17 => Color::srgb(0.35, 0.45, 0.50), // Shared Bathroom
+        18 => Color::srgb(0.32, 0.42, 0.48), // Shared Laundry
+
+        // Food service (warm yellow / orange) — 20..=27
+        20 => Color::srgb(0.50, 0.40, 0.15), // Mess Hall
+        21 => Color::srgb(0.45, 0.38, 0.18), // Wardroom
+        22 => Color::srgb(0.48, 0.35, 0.12), // Galley
+        23 => Color::srgb(0.30, 0.28, 0.22), // Food Storage Cold
+        24 => Color::srgb(0.35, 0.30, 0.18), // Food Storage Dry
+        25 => Color::srgb(0.52, 0.42, 0.20), // Cafe
+        26 => Color::srgb(0.55, 0.40, 0.18), // Bakery
+        27 => Color::srgb(0.25, 0.35, 0.50), // Water Purification
+
+        // Medical (white / cyan tones) — 30..=37
+        30 => Color::srgb(0.60, 0.65, 0.70), // Hospital Ward
+        31 => Color::srgb(0.55, 0.60, 0.68), // Surgery
+        32 => Color::srgb(0.58, 0.62, 0.65), // Dental Clinic
+        33 => Color::srgb(0.50, 0.55, 0.62), // Pharmacy
+        34 => Color::srgb(0.52, 0.58, 0.60), // Mental Health
+        35 => Color::srgb(0.55, 0.50, 0.50), // Quarantine
+        36 => Color::srgb(0.35, 0.30, 0.30), // Morgue
+        37 => Color::srgb(0.58, 0.63, 0.68), // Medbay
+
+        // Recreation (green tones) — 40..=56
+        40 => Color::srgb(0.25, 0.45, 0.25), // Gym
+        41 => Color::srgb(0.35, 0.30, 0.40), // Theatre
+        42 => Color::srgb(0.30, 0.35, 0.25), // Library
+        43 => Color::srgb(0.38, 0.32, 0.42), // Chapel
+        44 => Color::srgb(0.28, 0.40, 0.30), // Game Room
+        45 => Color::srgb(0.40, 0.30, 0.20), // Bar
+        46 => Color::srgb(0.35, 0.38, 0.30), // Art Studio
+        47 => Color::srgb(0.32, 0.35, 0.38), // Music Room
+        48 => Color::srgb(0.20, 0.35, 0.50), // Holodeck
+        49 => Color::srgb(0.15, 0.50, 0.20), // Arboretum
+        50 => Color::srgb(0.20, 0.30, 0.45), // Observation Lounge
+        51 => Color::srgb(0.25, 0.45, 0.55), // Pool
+        52 => Color::srgb(0.40, 0.45, 0.30), // Nursery
+        53 => Color::srgb(0.35, 0.42, 0.28), // School
+        54 => Color::srgb(0.30, 0.42, 0.32), // Recreation Center
+        55 => Color::srgb(0.32, 0.38, 0.35), // Lounge
+        56 => Color::srgb(0.42, 0.38, 0.25), // Shops
+
+        // Engineering & Propulsion (orange / amber) — 60..=71
+        60 => Color::srgb(0.50, 0.30, 0.10), // Main Engineering
+        61 => Color::srgb(0.55, 0.15, 0.10), // Reactor
+        62 => Color::srgb(0.50, 0.18, 0.12), // Backup Reactor
+        63 => Color::srgb(0.48, 0.28, 0.12), // Engine Room
+        64 => Color::srgb(0.45, 0.32, 0.15), // Power Distribution
+        65 => Color::srgb(0.42, 0.30, 0.18), // Machine Shop
+        66 => Color::srgb(0.38, 0.32, 0.22), // Electronics Lab
+        67 => Color::srgb(0.35, 0.28, 0.18), // Parts Storage
+        68 => Color::srgb(0.45, 0.20, 0.10), // Fuel Storage
+        69 => Color::srgb(0.40, 0.30, 0.20), // Robotics Bay
+        70 => Color::srgb(0.42, 0.28, 0.15), // Maintenance Bay
+        71 => Color::srgb(0.38, 0.35, 0.25), // Cooling Plant
+
+        // Life support (teal / cyan) — 80..=86
+        80 => Color::srgb(0.15, 0.45, 0.20), // Hydroponics
+        81 => Color::srgb(0.20, 0.38, 0.45), // Atmosphere Processing
+        82 => Color::srgb(0.18, 0.35, 0.50), // Water Recycling
+        83 => Color::srgb(0.22, 0.32, 0.35), // Waste Processing
+        84 => Color::srgb(0.20, 0.40, 0.42), // Environmental Monitoring
+        85 => Color::srgb(0.22, 0.42, 0.48), // Life Support Center
+        86 => Color::srgb(0.25, 0.38, 0.42), // HVAC Control
+
+        // Cargo & Storage (brown / gray) — 90..=95
+        90 => Color::srgb(0.30, 0.25, 0.18), // Cargo Bay
+        91 => Color::srgb(0.28, 0.25, 0.20), // Storage
+        92 => Color::srgb(0.38, 0.18, 0.15), // Armory
+        93 => Color::srgb(0.32, 0.30, 0.28), // Shuttle Bay
+        94 => Color::srgb(0.50, 0.12, 0.12), // Airlock
+        95 => Color::srgb(0.22, 0.30, 0.45), // Laboratory
+
+        // Infrastructure (dark gray) — 100..=120
+        100 => Color::srgb(0.18, 0.18, 0.22), // Corridor
+        101 => Color::srgb(0.15, 0.15, 0.18), // Service Corridor
+        102 => Color::srgb(0.20, 0.20, 0.24), // Cross Corridor
+        110 => Color::srgb(0.30, 0.30, 0.35), // Elevator Shaft
+        111 => Color::srgb(0.28, 0.28, 0.32), // Ladder Shaft
+        120 => Color::srgb(0.12, 0.12, 0.15), // Service Deck
+
+        _ => Color::srgb(0.25, 0.25, 0.25), // Unknown - neutral gray
     }
 }
 
