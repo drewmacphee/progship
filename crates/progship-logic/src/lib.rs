@@ -19,6 +19,7 @@ pub mod mission;
 pub mod movement;
 pub mod pathfinding;
 pub mod population;
+pub mod service_decks;
 pub mod supplies;
 pub mod systems;
 pub mod utility;
