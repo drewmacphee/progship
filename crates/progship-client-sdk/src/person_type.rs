@@ -12,6 +12,7 @@ pub struct Person {
     pub family_name: String,
     pub is_crew: bool,
     pub is_player: bool,
+    pub is_alive: bool,
     pub owner_identity: Option<__sdk::Identity>,
 }
 
@@ -28,6 +29,7 @@ pub struct PersonCols {
     pub family_name: __sdk::__query_builder::Col<Person, String>,
     pub is_crew: __sdk::__query_builder::Col<Person, bool>,
     pub is_player: __sdk::__query_builder::Col<Person, bool>,
+    pub is_alive: __sdk::__query_builder::Col<Person, bool>,
     pub owner_identity: __sdk::__query_builder::Col<Person, Option<__sdk::Identity>>,
 }
 
@@ -40,6 +42,7 @@ impl __sdk::__query_builder::HasCols for Person {
             family_name: __sdk::__query_builder::Col::new(table_name, "family_name"),
             is_crew: __sdk::__query_builder::Col::new(table_name, "is_crew"),
             is_player: __sdk::__query_builder::Col::new(table_name, "is_player"),
+            is_alive: __sdk::__query_builder::Col::new(table_name, "is_alive"),
             owner_identity: __sdk::__query_builder::Col::new(table_name, "owner_identity"),
         }
     }

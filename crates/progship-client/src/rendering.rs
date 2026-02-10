@@ -24,7 +24,9 @@ pub fn sync_rooms(
     };
 
     for entity in existing.iter() {
-        commands.entity(entity).despawn_recursive();
+        if let Some(cmd) = commands.get_entity(entity) {
+            cmd.despawn_recursive();
+        }
     }
 
     // Collect doors for this deck
@@ -482,7 +484,9 @@ pub fn sync_people(
         }
     }
     for entity in entities_to_despawn {
-        commands.entity(entity).despawn_recursive();
+        if let Some(cmd) = commands.get_entity(entity) {
+            cmd.despawn_recursive();
+        }
     }
 
     let capsule_mesh = meshes.add(Capsule3d::new(0.4, 1.2));

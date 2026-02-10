@@ -15,6 +15,8 @@ pub struct ShipConfig {
     pub sim_time: f64,
     pub time_scale: f32,
     pub paused: bool,
+    pub death_count: u32,
+    pub rationing_level: u8,
 }
 
 impl __sdk::InModule for ShipConfig {
@@ -33,6 +35,8 @@ pub struct ShipConfigCols {
     pub sim_time: __sdk::__query_builder::Col<ShipConfig, f64>,
     pub time_scale: __sdk::__query_builder::Col<ShipConfig, f32>,
     pub paused: __sdk::__query_builder::Col<ShipConfig, bool>,
+    pub death_count: __sdk::__query_builder::Col<ShipConfig, u32>,
+    pub rationing_level: __sdk::__query_builder::Col<ShipConfig, u8>,
 }
 
 impl __sdk::__query_builder::HasCols for ShipConfig {
@@ -47,6 +51,8 @@ impl __sdk::__query_builder::HasCols for ShipConfig {
             sim_time: __sdk::__query_builder::Col::new(table_name, "sim_time"),
             time_scale: __sdk::__query_builder::Col::new(table_name, "time_scale"),
             paused: __sdk::__query_builder::Col::new(table_name, "paused"),
+            death_count: __sdk::__query_builder::Col::new(table_name, "death_count"),
+            rationing_level: __sdk::__query_builder::Col::new(table_name, "rationing_level"),
         }
     }
 }
