@@ -215,10 +215,13 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
-        // Cross-corridors: use midship positions, span full hull width (only within hull)
+        // Cross-corridors: use midship positions, span hull width minus ring margins
         let cross_ys = &mid_cross_ys;
+        let ring_margin = SVC_CORRIDOR_WIDTH;
+        let cc_x0 = x_margin + ring_margin;
+        let cc_x1 = hw.saturating_sub(x_margin + ring_margin);
         for &cy in cross_ys.iter() {
-            for x in 0..hw {
+            for x in cc_x0..cc_x1 {
                 for y in cy..cy + CROSS_CORRIDOR_WIDTH {
                     if y < hl && grid[x][y] == CELL_EMPTY {
                         grid[x][y] = CELL_MAIN_CORRIDOR;
@@ -228,23 +231,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         }
 
         // ---- Phase 2: Stamp global shafts that fit within this deck's hull ----
-        // Filter out shafts whose cells would land outside the hull boundary
-        let deck_shaft_placements: Vec<&ShaftPlacement> = global_shaft_placements
-            .iter()
-            .filter(|sp| {
-                sp.x + sp.w <= hw
-                    && sp.y + sp.h <= hl
-                    && sp.x >= x_margin
-                    && sp.x + sp.w <= hw - x_margin
-                    && sp.y >= y_margin
-                    && sp.y + sp.h <= hl - y_margin
-            })
-            .collect();
-
-        for sp in &deck_shaft_placements {
-            for sx in sp.x..((sp.x + sp.w).min(hw)) {
-                for sy in sp.y..((sp.y + sp.h).min(hl)) {
-                    grid[sx][sy] = CELL_SHAFT;
+        for sp in &global_shaft_placements {
+            if sp.x >= x_margin
+                && sp.x + sp.w <= hw - x_margin
+                && sp.y >= y_margin
+                && sp.y + sp.h <= hl - y_margin
+            {
+                for sx in sp.x..((sp.x + sp.w).min(hw)) {
+                    for sy in sp.y..((sp.y + sp.h).min(hl)) {
+                        grid[sx][sy] = CELL_SHAFT;
+                    }
                 }
             }
         }
@@ -298,15 +294,15 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             carries: carries_flags::CREW_PATH | carries_flags::POWER | carries_flags::DATA,
         });
 
-        // Cross-corridor Room entries (only those within hull, span full width)
+        // Cross-corridor Room entries (clipped to ring margins)
         let mut cross_rooms: Vec<(u32, usize)> = Vec::new(); // (room_id, y_start)
         for &cy in cross_ys.iter() {
             if cy < y_margin || cy + CROSS_CORRIDOR_WIDTH > hl - y_margin {
                 continue;
             }
-            let cc_x0 = x_margin;
-            let cc_x1 = hw - x_margin;
-            let cc_w = cc_x1.saturating_sub(cc_x0);
+            let cc_room_x0 = x_margin + ring_margin;
+            let cc_room_x1 = hw.saturating_sub(x_margin + ring_margin);
+            let cc_w = cc_room_x1.saturating_sub(cc_room_x0);
             if cc_w < MIN_ROOM_DIM {
                 continue;
             }
@@ -317,7 +313,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 name: format!("Cross-Corridor D{} Y{}", deck + 1, cy),
                 room_type: room_types::CROSS_CORRIDOR,
                 deck,
-                x: cc_x0 as f32 + cc_w as f32 / 2.0,
+                x: cc_room_x0 as f32 + cc_w as f32 / 2.0,
                 y: cy as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0,
                 width: cc_w as f32,
                 height: CROSS_CORRIDOR_WIDTH as f32,
@@ -327,7 +323,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 id: 0,
                 deck,
                 corridor_type: corridor_types::BRANCH,
-                x: cc_x0 as f32,
+                x: cc_room_x0 as f32,
                 y: cy as f32,
                 width: cc_w as f32,
                 length: CROSS_CORRIDOR_WIDTH as f32,
@@ -404,7 +400,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         }
 
         // ---- Shaft Room entries + doors to corridors ----
-        for (si, sp) in deck_shaft_placements.iter().enumerate() {
+        // Use global index to correctly map to shaft_infos
+        for (global_idx, sp) in global_shaft_placements.iter().enumerate() {
+            // Skip shafts that don't fit within this deck's hull boundary
+            if sp.x < x_margin
+                || sp.x + sp.w > hw - x_margin
+                || sp.y < y_margin
+                || sp.y + sp.h > hl - y_margin
+            {
+                continue;
+            }
             let shaft_room_id = next_id();
             let srt = if sp.shaft_type == shaft_types::ELEVATOR
                 || sp.shaft_type == shaft_types::SERVICE_ELEVATOR
@@ -427,13 +432,12 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             });
 
             // Record in shaft_infos for cross-deck doors
-            if si < shaft_infos.len() {
-                shaft_infos[si].deck_room_ids[deck as usize] = Some(shaft_room_id);
-                // Always use global position as reference
-                shaft_infos[si].ref_x = sp.x as f32 + sp.w as f32 / 2.0;
-                shaft_infos[si].ref_y = sp.y as f32 + sp.h as f32 / 2.0;
-                shaft_infos[si].ref_w = sp.w as f32;
-                shaft_infos[si].ref_h = sp.h as f32;
+            if global_idx < shaft_infos.len() {
+                shaft_infos[global_idx].deck_room_ids[deck as usize] = Some(shaft_room_id);
+                shaft_infos[global_idx].ref_x = sp.x as f32 + sp.w as f32 / 2.0;
+                shaft_infos[global_idx].ref_y = sp.y as f32 + sp.h as f32 / 2.0;
+                shaft_infos[global_idx].ref_w = sp.w as f32;
+                shaft_infos[global_idx].ref_h = sp.h as f32;
             }
 
             // Connect shaft to adjacent corridor
