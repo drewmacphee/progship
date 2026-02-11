@@ -22,7 +22,6 @@ mod people;
 mod systems;
 pub mod traits;
 mod treemap;
-mod zones;
 
 use graph::build_ship_graph;
 use infrastructure::layout_ship;

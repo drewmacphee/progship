@@ -1,14 +1,14 @@
-//! Grid stamping and spatial layout for ship infrastructure.
+//! Corridor-first ship layout generation.
 //!
-//! Implements the ship layout pipeline: stamps spine/cross/service corridors
-//! and vertical shafts onto a 2D grid, then packs functional rooms using treemap.
+//! Pipeline: hull sizing → corridor skeleton → shafts at intersections →
+//! attachment strip scanning → BSP room packing → room-to-room doors.
+//! Rooms are ONLY placed adjacent to corridors, guaranteeing connectivity
+//! by construction (no BFS cleanup needed).
 
 use super::doors::should_have_room_door;
 use super::facilities::deck_range_for_zone;
 use super::hull::{hull_length, hull_width};
-use super::people::SimpleRng;
-use super::treemap::{cap_room_dimensions, squarified_treemap, PlacedRoom, RoomRequest};
-use super::zones::{find_empty_zones, GridZone};
+use super::treemap::RoomRequest;
 use crate::tables::*;
 use spacetimedb::{ReducerContext, Table};
 
@@ -17,34 +17,48 @@ const CELL_EMPTY: u8 = 0;
 const CELL_MAIN_CORRIDOR: u8 = 1;
 const CELL_SERVICE_CORRIDOR: u8 = 2;
 const CELL_SHAFT: u8 = 3;
-const CELL_ROOM_BASE: u8 = 10; // room N = CELL_ROOM_BASE + N (wraps at 246)
+const CELL_ROOM_BASE: u8 = 10;
 
-// Ship geometry constants
-// Hull dimensions are now computed dynamically in layout_ship() based on total room area.
-// These min values set a floor for very small populations.
+// Corridor geometry
 const SPINE_WIDTH: usize = 3;
 const CROSS_CORRIDOR_WIDTH: usize = 3;
-const CROSS_CORRIDOR_SPACING: usize = 50;
 const SVC_CORRIDOR_WIDTH: usize = 2;
+const MIN_ROOM_DIM: usize = 4;
+
+/// An attachment strip: a rectangular area of empty cells directly adjacent to a corridor wall.
+/// Rooms can only be placed within attachment strips, guaranteeing corridor adjacency.
+struct AttachmentStrip {
+    corridor_room_id: u32,
+    /// Grid coordinates of the strip
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    /// Which wall side of the corridor this strip is on
+    wall_side: u8,
+    /// Where the door should go (corridor-adjacent edge)
+    door_x: usize,
+    door_y: usize,
+}
+
+/// Shaft definition for placement at corridor intersections.
+struct ShaftPlacement {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    shaft_type: u8,
+    name: &'static str,
+    is_main: bool,
+}
 
 pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
-    let ship_name = ctx
-        .db
-        .ship_config()
-        .id()
-        .find(0)
-        .map(|c| c.name.clone())
-        .unwrap_or_default();
-    let _rng = SimpleRng::from_name(&ship_name);
     let nodes: Vec<GraphNode> = ctx.db.graph_node().iter().collect();
 
-    // Compute hull dimensions from total room area needed
+    // ---- Hull sizing from total room area ----
     let total_area: f32 = nodes.iter().map(|n| n.required_area).sum();
-    // Add ~40% overhead for corridors, walls, and infrastructure
-    let gross_area = total_area * 1.4;
-    // Distribute across decks, derive hull from per-deck area
+    let gross_area = total_area * 1.4; // 40% overhead for corridors/walls
     let area_per_deck = gross_area / deck_count as f32;
-    // Ship aspect ratio ~6:1 (length:beam)
     let ship_beam = (area_per_deck.sqrt() / 2.45).max(30.0) as usize;
     let ship_length = (area_per_deck / ship_beam as f32).max(100.0) as usize;
     log::info!(
@@ -52,7 +66,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         total_area, gross_area, ship_beam, ship_length, deck_count
     );
 
-    // Build per-deck-zone room request lists from graph nodes
+    // ---- Build per-zone room request lists ----
     let mut zone_requests: Vec<Vec<RoomRequest>> = vec![Vec::new(); 7];
     for node in &nodes {
         let zone = (node.deck_preference as u8).min(6);
@@ -65,7 +79,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             group: node.group,
         });
     }
-    // Sort each zone's requests: largest rooms first for better treemap packing
+    // Sort: largest rooms first for better packing
     for zr in zone_requests.iter_mut() {
         zr.sort_by(|a, b| {
             b.target_area
@@ -81,246 +95,209 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         id
     };
 
-    // Per-deck shaft positions are computed inside the deck loop below
-
-    /// Spine segment info for a deck: (room_id, y_start, y_end)
-    struct SpineSegment {
-        room_id: u32,
-        y_start: usize,
-        y_end: usize,
+    // Track shaft positions across decks for VerticalShaft entries
+    struct ShaftInfo {
+        name: &'static str,
+        shaft_type: u8,
+        is_main: bool,
+        // Per-deck room IDs for cross-deck doors
+        deck_room_ids: Vec<Option<u32>>,
+        // Reference position (from largest deck)
+        ref_x: f32,
+        ref_y: f32,
+        ref_w: f32,
+        ref_h: f32,
     }
 
-    /// Cross-corridor Room info: (room_id, y_start)
-    struct CrossCorridorRoom {
-        room_id: u32,
-        y_start: usize,
-    }
+    // We'll define shaft templates and fill per-deck room IDs
+    let shaft_templates: Vec<(&str, u8, bool)> = vec![
+        ("Fore Elevator", shaft_types::ELEVATOR, true),
+        ("Aft Elevator", shaft_types::ELEVATOR, true),
+        ("Service Elevator", shaft_types::SERVICE_ELEVATOR, false),
+        ("Ladder A", shaft_types::LADDER, false),
+        ("Ladder B", shaft_types::LADDER, false),
+    ];
+    let mut shaft_infos: Vec<ShaftInfo> = shaft_templates
+        .iter()
+        .map(|(name, st, is_main)| ShaftInfo {
+            name,
+            shaft_type: *st,
+            is_main: *is_main,
+            deck_room_ids: vec![None; deck_count as usize],
+            ref_x: 0.0,
+            ref_y: 0.0,
+            ref_w: 3.0,
+            ref_h: 3.0,
+        })
+        .collect();
 
+    // ---- Per-deck generation ----
     for deck in 0..deck_count as i32 {
-        // Hull taper per deck
-        let hull_width: usize = hull_width(deck as u32, deck_count, ship_beam);
-        let hull_length: usize = hull_length(deck as u32, deck_count, ship_length);
+        let hw: usize = hull_width(deck as u32, deck_count, ship_beam);
+        let hl: usize = hull_length(deck as u32, deck_count, ship_length);
 
-        let deck_spine_cx = hull_width / 2;
+        if hw < 12 || hl < 30 {
+            log::warn!("Deck {} too small ({}×{}), skipping", deck + 1, hw, hl);
+            continue;
+        }
 
-        // Allocate grid: grid[x][y], size [hull_width][hull_length]
-        let mut grid: Vec<Vec<u8>> = vec![vec![CELL_EMPTY; hull_length]; hull_width];
+        let mut grid: Vec<Vec<u8>> = vec![vec![CELL_EMPTY; hl]; hw];
 
-        // ---- Step 1: Stamp corridor skeleton ----
+        // ---- Phase 1: Corridor skeleton ----
 
-        // Main spine: SPINE_WIDTH cells wide, centered, full length
-        let spine_left = hull_width / 2 - SPINE_WIDTH / 2;
+        // Spine: centered, full deck length
+        let spine_left = hw / 2 - SPINE_WIDTH / 2;
         let spine_right = spine_left + SPINE_WIDTH;
-        for x in spine_left..spine_right.min(hull_width) {
-            for y in 0..hull_length {
+        for x in spine_left..spine_right.min(hw) {
+            for y in 0..hl {
                 grid[x][y] = CELL_MAIN_CORRIDOR;
             }
         }
 
-        // Compute service corridor boundary early (needed by cross-corridors)
-        let svc_left = hull_width.saturating_sub(SVC_CORRIDOR_WIDTH);
+        // Cross-corridors: proportionally spaced, 1 per ~35 cells
+        let num_cross = ((hl as f32 / 35.0).round() as usize).max(1);
+        let cross_spacing = hl / (num_cross + 1);
+        let mut cross_ys: Vec<usize> = Vec::new();
+        for i in 1..=num_cross {
+            let cy = i * cross_spacing;
+            if cy + CROSS_CORRIDOR_WIDTH <= hl {
+                cross_ys.push(cy);
+            }
+        }
 
-        // Cross-corridors: CROSS_CORRIDOR_WIDTH cells wide, horizontal, every CROSS_CORRIDOR_SPACING
-        // Only span from x=0 to svc_left (stop before service corridor)
-        let mut cross_corridor_ys: Vec<usize> = Vec::new();
-        let mut cy = CROSS_CORRIDOR_SPACING;
-        while cy + CROSS_CORRIDOR_WIDTH <= hull_length {
-            for x in 0..svc_left {
-                for dy in 0..CROSS_CORRIDOR_WIDTH {
-                    let yy = cy + dy;
-                    if yy < hull_length {
-                        // Don't overwrite shaft cells (will be stamped later, but we
-                        // pre-check to keep cross-corridor Room bounds accurate)
-                        grid[x][yy] = CELL_MAIN_CORRIDOR;
+        // Stamp cross-corridors
+        let svc_left = hw - SVC_CORRIDOR_WIDTH;
+        for &cy in &cross_ys {
+            for x in 0..svc_left.min(hw) {
+                for y in cy..cy + CROSS_CORRIDOR_WIDTH {
+                    if grid[x][y] == CELL_EMPTY {
+                        grid[x][y] = CELL_MAIN_CORRIDOR;
                     }
                 }
             }
-            cross_corridor_ys.push(cy);
-            cy += CROSS_CORRIDOR_SPACING;
         }
 
-        // FIX 1: Create SEGMENTED spine Room entries (one per section between cross-corridors)
-        // Boundaries are: 0, cross1_start, cross1_end, cross2_start, ..., hull_length
-        let mut spine_segments: Vec<SpineSegment> = Vec::new();
-        {
-            let mut seg_start = 0usize;
-            for &ccy in &cross_corridor_ys {
-                // Spine segment from seg_start to ccy (just before cross-corridor)
-                if ccy > seg_start {
-                    let seg_len = ccy - seg_start;
-                    let sid = next_id();
-                    let seg_cy = seg_start as f32 + seg_len as f32 / 2.0;
-                    ctx.db.room().insert(Room {
-                        id: sid,
-                        node_id: 0,
-                        name: format!("Deck {} Spine Seg {}", deck + 1, spine_segments.len() + 1),
-                        room_type: room_types::CORRIDOR,
-                        deck,
-                        x: (spine_left + spine_right) as f32 / 2.0,
-                        y: seg_cy,
-                        width: SPINE_WIDTH as f32,
-                        height: seg_len as f32,
-                        capacity: 50,
-                    });
-                    spine_segments.push(SpineSegment {
-                        room_id: sid,
-                        y_start: seg_start,
-                        y_end: ccy,
-                    });
+        // Service corridor: starboard edge, full length
+        for x in svc_left..hw {
+            for y in 0..hl {
+                if grid[x][y] == CELL_EMPTY {
+                    grid[x][y] = CELL_SERVICE_CORRIDOR;
                 }
-                // Skip past the cross-corridor band (seg_start advances after it)
-                seg_start = ccy + CROSS_CORRIDOR_WIDTH;
             }
-            // Final segment after last cross-corridor to hull end
-            if seg_start < hull_length {
-                let seg_len = hull_length - seg_start;
-                let sid = next_id();
-                let seg_cy = seg_start as f32 + seg_len as f32 / 2.0;
+        }
+
+        // ---- Phase 2: Shafts at corridor intersections ----
+        let shaft_placements = compute_shaft_placements(
+            spine_right, svc_left, &cross_ys, hw, hl,
+        );
+
+        for sp in &shaft_placements {
+            for sx in sp.x..((sp.x + sp.w).min(hw)) {
+                for sy in sp.y..((sp.y + sp.h).min(hl)) {
+                    grid[sx][sy] = CELL_SHAFT;
+                }
+            }
+        }
+
+        // Create corridor Room entries
+        // Spine segments (between cross-corridors)
+        let mut spine_segments: Vec<(u32, usize, usize)> = Vec::new(); // (room_id, y_start, y_end)
+        {
+            let mut seg_boundaries: Vec<usize> = vec![0];
+            for &cy in &cross_ys {
+                seg_boundaries.push(cy);
+                seg_boundaries.push(cy + CROSS_CORRIDOR_WIDTH);
+            }
+            seg_boundaries.push(hl);
+
+            for chunk in seg_boundaries.chunks(2) {
+                if chunk.len() < 2 || chunk[0] >= chunk[1] {
+                    continue;
+                }
+                let y0 = chunk[0];
+                let y1 = chunk[1];
+                let seg_id = next_id();
                 ctx.db.room().insert(Room {
-                    id: sid,
+                    id: seg_id,
                     node_id: 0,
-                    name: format!("Deck {} Spine Seg {}", deck + 1, spine_segments.len() + 1),
+                    name: format!("Spine D{} Y{}-{}", deck + 1, y0, y1),
                     room_type: room_types::CORRIDOR,
                     deck,
-                    x: (spine_left + spine_right) as f32 / 2.0,
-                    y: seg_cy,
+                    x: spine_left as f32,
+                    y: y0 as f32,
                     width: SPINE_WIDTH as f32,
-                    height: seg_len as f32,
-                    capacity: 50,
+                    height: (y1 - y0) as f32,
+                    capacity: 0,
                 });
-                spine_segments.push(SpineSegment {
-                    room_id: sid,
-                    y_start: seg_start,
-                    y_end: hull_length,
-                });
+                spine_segments.push((seg_id, y0, y1));
             }
         }
 
-        // Corridor table entry for full spine (rendering uses Corridor table)
+        // Create Corridor table entry for the spine
         ctx.db.corridor().insert(Corridor {
             id: 0,
             deck,
             corridor_type: corridor_types::MAIN,
-            x: (spine_left + spine_right) as f32 / 2.0,
-            y: hull_length as f32 / 2.0,
+            x: spine_left as f32,
+            y: 0.0,
             width: SPINE_WIDTH as f32,
-            length: hull_length as f32,
+            length: hl as f32,
             orientation: 1,
             carries: carries_flags::CREW_PATH | carries_flags::POWER | carries_flags::DATA,
         });
 
-        // Doors connecting adjacent spine segments (through cross-corridors)
-        // Each spine segment's SOUTH wall connects to the next segment's NORTH wall.
-        // The door is at the spine's center X and at the boundary Y between segments.
-        let spine_center_x = (spine_left + spine_right) as f32 / 2.0;
-        for _i in 0..spine_segments.len().saturating_sub(1) {
-            // Spine segments connect through cross-corridor rooms, not directly.
-            // seg_a SOUTH → cross-corridor NORTH, cross-corridor SOUTH → seg_b NORTH
-        }
-
-        // FIX 2: Create Room entries for each cross-corridor
-        // Width limited to svc_left (does not extend into service corridor zone)
-        // Shafts may sit inside the cross-corridor — that overlap is tolerated
-        let mut cross_rooms: Vec<CrossCorridorRoom> = Vec::new();
-        for (ci, &ccy) in cross_corridor_ys.iter().enumerate() {
-            let cross_cy_f = ccy as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0;
-            let crid = next_id();
-            let cross_width = svc_left as f32;
+        // Cross-corridor Room entries
+        let mut cross_rooms: Vec<(u32, usize)> = Vec::new(); // (room_id, y_start)
+        for &cy in &cross_ys {
+            let cc_id = next_id();
             ctx.db.room().insert(Room {
-                id: crid,
+                id: cc_id,
                 node_id: 0,
-                name: format!("Deck {} Cross-Corridor {}", deck + 1, ci + 1),
+                name: format!("Cross-Corridor D{} Y{}", deck + 1, cy),
                 room_type: room_types::CROSS_CORRIDOR,
                 deck,
-                x: cross_width / 2.0,
-                y: cross_cy_f,
-                width: cross_width,
+                x: 0.0,
+                y: cy as f32,
+                width: svc_left as f32,
                 height: CROSS_CORRIDOR_WIDTH as f32,
-                capacity: 20,
+                capacity: 0,
             });
             ctx.db.corridor().insert(Corridor {
                 id: 0,
                 deck,
                 corridor_type: corridor_types::BRANCH,
-                x: cross_width / 2.0,
-                y: cross_cy_f,
-                width: cross_width,
+                x: 0.0,
+                y: cy as f32,
+                width: svc_left as f32,
                 length: CROSS_CORRIDOR_WIDTH as f32,
                 orientation: 0,
                 carries: carries_flags::CREW_PATH,
             });
-            cross_rooms.push(CrossCorridorRoom {
-                room_id: crid,
-                y_start: ccy,
-            });
-
-            // Door from cross-corridor to adjacent spine segments
-            // The cross-corridor sits between spine segment i and i+1
-            // Connect to the segment that ends at ccy (shared edge at y=ccy)
-            // and segment that starts at ccy+CROSS_CORRIDOR_WIDTH (shared edge there)
-            for seg in &spine_segments {
-                if seg.y_end == ccy {
-                    // Spine segment's south edge at y=ccy, cross-corridor's north edge at y=ccy
-                    // Door at spine center X, boundary Y = ccy
-                    ctx.db.door().insert(Door {
-                        id: 0,
-                        room_a: crid,
-                        room_b: seg.room_id,
-                        wall_a: wall_sides::NORTH,
-                        wall_b: wall_sides::SOUTH,
-                        position_along_wall: 0.5,
-                        width: SPINE_WIDTH as f32,
-                        access_level: access_levels::PUBLIC,
-                        door_x: spine_center_x,
-                        door_y: ccy as f32,
-                    });
-                }
-                if seg.y_start == ccy + CROSS_CORRIDOR_WIDTH {
-                    // Cross-corridor's south edge at y=ccy+width, spine segment's north edge there
-                    ctx.db.door().insert(Door {
-                        id: 0,
-                        room_a: crid,
-                        room_b: seg.room_id,
-                        wall_a: wall_sides::SOUTH,
-                        wall_b: wall_sides::NORTH,
-                        position_along_wall: 0.5,
-                        width: SPINE_WIDTH as f32,
-                        access_level: access_levels::PUBLIC,
-                        door_x: spine_center_x,
-                        door_y: (ccy + CROSS_CORRIDOR_WIDTH) as f32,
-                    });
-                }
-            }
+            cross_rooms.push((cc_id, cy));
         }
 
-        // Service corridor: SVC_CORRIDOR_WIDTH cells wide, along starboard (right) edge
-        // (svc_left already computed above before cross-corridors)
-        for x in svc_left..hull_width {
-            for y in 0..hull_length {
-                grid[x][y] = CELL_SERVICE_CORRIDOR;
-            }
-        }
-        let svc_rid = next_id();
+        // Service corridor Room entry
+        let svc_id = next_id();
         ctx.db.room().insert(Room {
-            id: svc_rid,
+            id: svc_id,
             node_id: 0,
-            name: format!("Deck {} Service Corridor", deck + 1),
+            name: format!("Service Corridor D{}", deck + 1),
             room_type: room_types::SERVICE_CORRIDOR,
             deck,
-            x: (svc_left as f32 + hull_width as f32) / 2.0,
-            y: hull_length as f32 / 2.0,
+            x: svc_left as f32,
+            y: 0.0,
             width: SVC_CORRIDOR_WIDTH as f32,
-            height: hull_length as f32,
-            capacity: 4,
+            height: hl as f32,
+            capacity: 0,
         });
         ctx.db.corridor().insert(Corridor {
             id: 0,
             deck,
             corridor_type: corridor_types::SERVICE,
-            x: (svc_left as f32 + hull_width as f32) / 2.0,
-            y: hull_length as f32 / 2.0,
+            x: svc_left as f32,
+            y: 0.0,
             width: SVC_CORRIDOR_WIDTH as f32,
-            length: hull_length as f32,
+            length: hl as f32,
             orientation: 1,
             carries: carries_flags::POWER
                 | carries_flags::WATER
@@ -328,1190 +305,824 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 | carries_flags::COOLANT,
         });
 
-        // Door connecting service corridor to each cross-corridor
-        for cr in &cross_rooms {
-            // Service corridor's west edge at x=svc_left, cross-corridor's east side
-            // Door at the shared boundary X=svc_left, centered in the cross-corridor Y range
-            let cr_cy = cr.y_start as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0;
+        // ---- Corridor-to-corridor doors ----
+
+        // Spine segments ↔ cross-corridors
+        for &(cc_id, cy) in &cross_rooms {
+            // Find spine segments adjacent to this cross-corridor
+            for &(seg_id, seg_y0, seg_y1) in &spine_segments {
+                if seg_y1 == cy {
+                    // Segment above cross-corridor
+                    let dx = spine_left as f32 + SPINE_WIDTH as f32 / 2.0;
+                    let dy = cy as f32;
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: seg_id,
+                        room_b: cc_id,
+                        wall_a: wall_sides::SOUTH,
+                        wall_b: wall_sides::NORTH,
+                        position_along_wall: 0.5,
+                        width: SPINE_WIDTH as f32,
+                        access_level: access_levels::PUBLIC,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+                if seg_y0 == cy + CROSS_CORRIDOR_WIDTH {
+                    // Segment below cross-corridor
+                    let dx = spine_left as f32 + SPINE_WIDTH as f32 / 2.0;
+                    let dy = (cy + CROSS_CORRIDOR_WIDTH) as f32;
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: cc_id,
+                        room_b: seg_id,
+                        wall_a: wall_sides::SOUTH,
+                        wall_b: wall_sides::NORTH,
+                        position_along_wall: 0.5,
+                        width: SPINE_WIDTH as f32,
+                        access_level: access_levels::PUBLIC,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+            // Cross-corridor ↔ service corridor
+            let dx = svc_left as f32;
+            let dy = cy as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0;
             ctx.db.door().insert(Door {
                 id: 0,
-                room_a: svc_rid,
-                room_b: cr.room_id,
-                wall_a: wall_sides::WEST,
-                wall_b: wall_sides::EAST,
+                room_a: cc_id,
+                room_b: svc_id,
+                wall_a: wall_sides::EAST,
+                wall_b: wall_sides::WEST,
                 position_along_wall: 0.5,
-                width: 2.0,
+                width: CROSS_CORRIDOR_WIDTH as f32,
                 access_level: access_levels::CREW_ONLY,
-                door_x: svc_left as f32,
-                door_y: cr_cy,
+                door_x: dx,
+                door_y: dy,
             });
         }
 
-        // Helper closures for finding corridor segments by Y coordinate
-        let find_spine_segment = |y: usize| -> Option<&SpineSegment> {
-            spine_segments
-                .iter()
-                .find(|s| y >= s.y_start && y < s.y_end)
-        };
-        let find_cross_room = |y: usize| -> Option<&CrossCorridorRoom> {
-            cross_rooms
-                .iter()
-                .find(|c| y >= c.y_start && y < c.y_start + CROSS_CORRIDOR_WIDTH)
-        };
-
-        // ---- Step 2: Stamp vertical shaft anchors ----
-        // Compute shaft positions AFTER cross-corridors so we can avoid overlap
-        let shaft_x = deck_spine_cx + SPINE_WIDTH / 2 + 1;
-        let adjust_y = |mut y: usize| -> usize {
-            for &ccy in &cross_corridor_ys {
-                if y >= ccy.saturating_sub(1) && y < ccy + CROSS_CORRIDOR_WIDTH + 1 {
-                    y = ccy + CROSS_CORRIDOR_WIDTH + 1;
-                }
+        // Doors between consecutive spine segments
+        for i in 0..spine_segments.len().saturating_sub(1) {
+            let (seg_a, _, seg_a_end) = spine_segments[i];
+            let (seg_b, seg_b_start, _) = spine_segments[i + 1];
+            if seg_a_end == seg_b_start {
+                // Direct adjacency (no cross-corridor between)
+                let dx = spine_left as f32 + SPINE_WIDTH as f32 / 2.0;
+                let dy = seg_a_end as f32;
+                ctx.db.door().insert(Door {
+                    id: 0,
+                    room_a: seg_a,
+                    room_b: seg_b,
+                    wall_a: wall_sides::SOUTH,
+                    wall_b: wall_sides::NORTH,
+                    position_along_wall: 0.5,
+                    width: SPINE_WIDTH as f32,
+                    access_level: access_levels::PUBLIC,
+                    door_x: dx,
+                    door_y: dy,
+                });
             }
-            y.min(hull_length.saturating_sub(4))
-        };
-        let fore_elev_deck = (shaft_x, adjust_y(10), 3usize, 3usize);
-        let aft_elev_deck = (
-            shaft_x,
-            adjust_y(if hull_length > 20 {
-                hull_length - 14
+        }
+
+        // ---- Shaft Room entries + doors to corridors ----
+        for (si, sp) in shaft_placements.iter().enumerate() {
+            let shaft_room_id = next_id();
+            let srt = if sp.shaft_type == shaft_types::ELEVATOR
+                || sp.shaft_type == shaft_types::SERVICE_ELEVATOR
+            {
+                room_types::ELEVATOR_SHAFT
             } else {
-                hull_length / 2
-            }),
-            3,
-            3,
-        );
-        let svc_elev_deck = (
-            hull_width.saturating_sub(5),
-            adjust_y(100usize.min(hull_length.saturating_sub(5))),
-            2,
-            2,
-        );
-        let ladders_deck: Vec<(usize, usize, usize, usize)> = [50, 150, 250, 350]
-            .iter()
-            .filter(|&&ly| ly + 2 <= hull_length)
-            .map(|&ly| (hull_width.saturating_sub(4), adjust_y(ly), 2, 2))
-            .collect();
-
-        let all_shafts: Vec<(usize, usize, usize, usize, u8, u8, &str, bool)> = {
-            let mut v = Vec::new();
-            v.push((
-                fore_elev_deck.0,
-                fore_elev_deck.1,
-                fore_elev_deck.2,
-                fore_elev_deck.3,
-                shaft_types::ELEVATOR,
-                room_types::ELEVATOR_SHAFT,
-                "Fore Elevator",
-                true,
-            ));
-            v.push((
-                aft_elev_deck.0,
-                aft_elev_deck.1,
-                aft_elev_deck.2,
-                aft_elev_deck.3,
-                shaft_types::ELEVATOR,
-                room_types::ELEVATOR_SHAFT,
-                "Aft Elevator",
-                true,
-            ));
-            v.push((
-                svc_elev_deck.0,
-                svc_elev_deck.1,
-                svc_elev_deck.2,
-                svc_elev_deck.3,
-                shaft_types::SERVICE_ELEVATOR,
-                room_types::ELEVATOR_SHAFT,
-                "Service Elevator",
-                false,
-            ));
-            for (li, &(lx, ly, lw, lh)) in ladders_deck.iter().enumerate() {
-                v.push((
-                    lx,
-                    ly,
-                    lw,
-                    lh,
-                    shaft_types::LADDER,
-                    room_types::LADDER_SHAFT,
-                    match li {
-                        0 => "Ladder A",
-                        1 => "Ladder B",
-                        2 => "Ladder C",
-                        _ => "Ladder D",
-                    },
-                    false,
-                ));
-            }
-            v
-        };
-
-        for &(sx, sy, sw, sh, _shaft_type, srt, sname, is_main) in &all_shafts {
-            if sx + sw > hull_width || sy + sh > hull_length {
-                continue;
-            }
-
-            for xx in sx..(sx + sw) {
-                for yy in sy..(sy + sh) {
-                    grid[xx][yy] = CELL_SHAFT;
-                }
-            }
-
-            let rid = next_id();
+                room_types::LADDER_SHAFT
+            };
             ctx.db.room().insert(Room {
-                id: rid,
+                id: shaft_room_id,
                 node_id: 0,
-                name: format!("{} D{}", sname, deck + 1),
+                name: format!("{} D{}", sp.name, deck + 1),
                 room_type: srt,
                 deck,
-                x: sx as f32 + sw as f32 / 2.0,
-                y: sy as f32 + sh as f32 / 2.0,
-                width: sw as f32,
-                height: sh as f32,
-                capacity: if is_main { 6 } else { 2 },
+                x: sp.x as f32,
+                y: sp.y as f32,
+                width: sp.w as f32,
+                height: sp.h as f32,
+                capacity: 0,
             });
 
-            // Connect shaft to adjacent corridor via shared edge
-            let access = if is_main {
+            // Record in shaft_infos for cross-deck doors
+            if si < shaft_infos.len() {
+                shaft_infos[si].deck_room_ids[deck as usize] = Some(shaft_room_id);
+                if deck == deck_count as i32 / 2 {
+                    shaft_infos[si].ref_x = sp.x as f32 + sp.w as f32 / 2.0;
+                    shaft_infos[si].ref_y = sp.y as f32 + sp.h as f32 / 2.0;
+                    shaft_infos[si].ref_w = sp.w as f32;
+                    shaft_infos[si].ref_h = sp.h as f32;
+                }
+            }
+
+            // Connect shaft to adjacent corridor
+            let access = if sp.is_main {
                 access_levels::PUBLIC
             } else {
                 access_levels::CREW_ONLY
             };
-            let shaft_cy = sy + sh / 2;
-            let shaft_cx = sx + sw / 2;
-            let shaft_center_x = sx as f32 + sw as f32 / 2.0;
-            let shaft_center_y = sy as f32 + sh as f32 / 2.0;
-
-            // First: check if shaft overlaps a cross-corridor (shaft sits inside it)
-            // If so, connect to it at the shaft's north or south edge
-            let mut connected = false;
-            for cr in &cross_rooms {
-                let cr_end = cr.y_start + CROSS_CORRIDOR_WIDTH;
-                // Shaft overlaps cross-corridor if their Y ranges intersect
-                if sy < cr_end && sy + sh > cr.y_start {
-                    // Connect via shaft's WEST edge to the cross-corridor.
-                    // Shaft is embedded inside the corridor — no corridor wall at this boundary.
-                    // wall_a=WEST creates gap in shaft wall; wall_b=255 skips corridor gap.
-                    let boundary_x = sx as f32;
-                    ctx.db.door().insert(Door {
-                        id: 0,
-                        room_a: rid,
-                        room_b: cr.room_id,
-                        wall_a: wall_sides::WEST,
-                        wall_b: 255,
-                        position_along_wall: 0.5,
-                        width: sh.min(CROSS_CORRIDOR_WIDTH) as f32,
-                        access_level: access,
-                        door_x: boundary_x,
-                        door_y: shaft_center_y,
-                    });
-                    connected = true;
-                    break;
-                }
-            }
-
-            // Then check all 4 edges for adjacent corridor cells in the grid
-
-            // SOUTH edge of shaft (y + sh): check if corridor is below
-            if sy + sh < hull_length {
-                let test_y = sy + sh;
-                let test_x = shaft_cx.min(hull_width - 1);
-                if grid[test_x][test_y] == CELL_MAIN_CORRIDOR
-                    || test_y < hull_length
-                        && grid[test_x.min(hull_width - 1)][test_y] == CELL_MAIN_CORRIDOR
-                {
-                    let target = find_spine_segment(test_y).or({
-                        // Check if it's in a cross-corridor
-                        None
-                    });
-                    if let Some(seg) = target {
-                        let boundary_y = (sy + sh) as f32;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: rid,
-                            room_b: seg.room_id,
-                            wall_a: wall_sides::SOUTH,
-                            wall_b: wall_sides::NORTH,
-                            position_along_wall: 0.5,
-                            width: sw as f32,
-                            access_level: access,
-                            door_x: shaft_center_x,
-                            door_y: boundary_y,
-                        });
-                        connected = true;
-                    }
-                }
-            }
-
-            // NORTH edge of shaft (y - 1): check if corridor is above
-            if sy > 0 && !connected {
-                let test_y = sy - 1;
-                let test_x = shaft_cx.min(hull_width - 1);
-                if grid[test_x][test_y] == CELL_MAIN_CORRIDOR {
-                    if let Some(seg) = find_spine_segment(test_y) {
-                        let boundary_y = sy as f32;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: rid,
-                            room_b: seg.room_id,
-                            wall_a: wall_sides::NORTH,
-                            wall_b: wall_sides::SOUTH,
-                            position_along_wall: 0.5,
-                            width: sw as f32,
-                            access_level: access,
-                            door_x: shaft_center_x,
-                            door_y: boundary_y,
-                        });
-                        connected = true;
-                    }
-                }
-            }
-
-            // EAST edge of shaft (x + sw): check if corridor is to the right
-            if sx + sw < hull_width && !connected {
-                let test_x = sx + sw;
-                let test_y = shaft_cy.min(hull_length - 1);
-                let cell = grid[test_x][test_y];
-                if cell == CELL_MAIN_CORRIDOR || cell == CELL_SERVICE_CORRIDOR {
-                    let boundary_x = (sx + sw) as f32;
-                    let target_id = if cell == CELL_MAIN_CORRIDOR {
-                        find_spine_segment(test_y).map(|s| s.room_id)
-                    } else {
-                        Some(svc_rid)
-                    };
-                    if let Some(tid) = target_id {
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: rid,
-                            room_b: tid,
-                            wall_a: wall_sides::EAST,
-                            wall_b: wall_sides::WEST,
-                            position_along_wall: 0.5,
-                            width: sh as f32,
-                            access_level: access,
-                            door_x: boundary_x,
-                            door_y: shaft_center_y,
-                        });
-                        connected = true;
-                    }
-                }
-            }
-
-            // WEST edge of shaft (x - 1): check if corridor is to the left
-            if sx > 0 && !connected {
-                let test_x = sx - 1;
-                let test_y = shaft_cy.min(hull_length - 1);
-                let cell = grid[test_x][test_y];
-                if cell == CELL_MAIN_CORRIDOR || cell == CELL_SERVICE_CORRIDOR {
-                    let boundary_x = sx as f32;
-                    let target_id = if cell == CELL_MAIN_CORRIDOR {
-                        find_spine_segment(test_y).map(|s| s.room_id)
-                    } else {
-                        Some(svc_rid)
-                    };
-                    if let Some(tid) = target_id {
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: rid,
-                            room_b: tid,
-                            wall_a: wall_sides::WEST,
-                            wall_b: wall_sides::EAST,
-                            position_along_wall: 0.5,
-                            width: sh as f32,
-                            access_level: access,
-                            door_x: boundary_x,
-                            door_y: shaft_center_y,
-                        });
-                        connected = true;
-                    }
-                }
-            }
-
-            // Shaft is either connected via cross-corridor overlap, edge adjacency, or remains isolated
+            connect_shaft_to_corridor(
+                ctx,
+                shaft_room_id,
+                sp,
+                &spine_segments,
+                &cross_rooms,
+                svc_id,
+                spine_left,
+                spine_right,
+                svc_left,
+                access,
+            );
         }
 
-        // ---- Step 3: Find empty rectangular zones ----
-        let zones = find_empty_zones(&grid, hull_width, hull_length, CELL_EMPTY);
+        // ---- Phase 3: Find attachment strips ----
+        let strips = find_attachment_strips(
+            &grid,
+            hw,
+            hl,
+            spine_left,
+            spine_right,
+            svc_left,
+            &cross_ys,
+            &spine_segments,
+            &cross_rooms,
+        );
 
-        // ---- Step 4: Determine which rooms go on this deck ----
-        let mut deck_room_requests: Vec<RoomRequest> = Vec::new();
-        for zone_idx in 0..7u8 {
-            let (lo, hi) = deck_range_for_zone(zone_idx, deck_count);
+        // ---- Phase 4: Collect room requests for this deck ----
+        let mut deck_requests: Vec<RoomRequest> = Vec::new();
+        for zone in 0..7u8 {
+            let (lo, hi) = deck_range_for_zone(zone, deck_count);
             if (deck as u32) >= lo && (deck as u32) < hi {
-                let zone_deck_count = hi.saturating_sub(lo).max(1);
-                let deck_offset = (deck as u32).saturating_sub(lo);
-                let zone_reqs = &zone_requests[zone_idx as usize];
-                let total_rooms = zone_reqs.len();
-                let per_deck = total_rooms / zone_deck_count as usize;
-                let extra = total_rooms % zone_deck_count as usize;
-                let start = deck_offset as usize * per_deck + (deck_offset as usize).min(extra);
-                let count = per_deck + if (deck_offset as usize) < extra { 1 } else { 0 };
-                for i in start..(start + count).min(total_rooms) {
-                    let rr = &zone_reqs[i];
-                    deck_room_requests.push(RoomRequest {
-                        node_id: rr.node_id,
-                        name: rr.name.clone(),
-                        room_type: rr.room_type,
-                        target_area: rr.target_area,
-                        capacity: rr.capacity,
-                        group: rr.group,
-                    });
+                // How many decks in this zone?
+                let zone_decks = hi.saturating_sub(lo).max(1);
+                let deck_index_in_zone = (deck as u32).saturating_sub(lo);
+                let requests = &zone_requests[zone as usize];
+                // Distribute requests round-robin across zone decks
+                for (i, req) in requests.iter().enumerate() {
+                    if (i as u32 % zone_decks) == deck_index_in_zone {
+                        deck_requests.push(req.clone());
+                    }
                 }
             }
         }
+        // Sort: largest first
+        deck_requests.sort_by(|a, b| {
+            b.target_area
+                .partial_cmp(&a.target_area)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
 
-        if deck_room_requests.is_empty() {
-            continue;
-        }
+        // ---- Phase 5: BSP pack rooms into attachment strips ----
+        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        let mut request_idx = 0;
+        let total_strip_area: usize = strips.iter().map(|s| s.w * s.h).sum();
+        let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
 
-        // ---- Step 5: Assign rooms to zones using squarified treemap ----
-        // FIX 3: Distribute rooms PROPORTIONALLY across zones by area (not greedy)
-        let mut placed_rooms: Vec<PlacedRoom> = Vec::new();
-        let total_zone_area: f32 = zones
-            .iter()
-            .filter(|z| (z.w * z.h) as f32 >= 9.0)
-            .map(|z| (z.w * z.h) as f32)
-            .sum();
-        let _total_room_area: f32 = deck_room_requests.iter().map(|r| r.target_area).sum();
-
-        // Pre-allocate room counts per zone proportional to zone area
-        let usable_zones: Vec<&GridZone> =
-            zones.iter().filter(|z| (z.w * z.h) as f32 >= 9.0).collect();
-        let mut rooms_per_zone: Vec<usize> = Vec::new();
-        let mut allocated = 0usize;
-        for (zi, zone) in usable_zones.iter().enumerate() {
-            let zone_area = (zone.w * zone.h) as f32;
-            let fraction = if total_zone_area > 0.0 {
-                zone_area / total_zone_area
-            } else {
-                0.0
-            };
-            let room_count = if zi == usable_zones.len() - 1 {
-                deck_room_requests.len().saturating_sub(allocated)
-            } else {
-                (fraction * deck_room_requests.len() as f32).round() as usize
-            };
-            let room_count = room_count.min(deck_room_requests.len().saturating_sub(allocated));
-            rooms_per_zone.push(room_count);
-            allocated += room_count;
-        }
-
-        let mut request_cursor = 0usize;
-        for (zi, zone) in usable_zones.iter().enumerate() {
-            if request_cursor >= deck_room_requests.len() {
+        for strip in &strips {
+            if request_idx >= deck_requests.len() {
                 break;
             }
-            let count = rooms_per_zone[zi];
-            if count == 0 {
-                continue;
-            }
+            // BSP subdivide this strip and pack rooms
+            let mut sub_rects: Vec<(usize, usize, usize, usize)> = Vec::new();
+            bsp_subdivide(strip.x, strip.y, strip.w, strip.h, &deck_requests[request_idx..], &mut sub_rects);
 
-            let end: usize = (request_cursor + count).min(deck_room_requests.len());
-            let mut batch: Vec<(f32, usize)> = Vec::new();
-            for i in request_cursor..end {
-                batch.push((deck_room_requests[i].target_area, i));
-            }
-            request_cursor = end;
-
-            if batch.is_empty() {
-                continue;
-            }
-
-            let placements = squarified_treemap(&batch, zone.x, zone.y, zone.w, zone.h);
-
-            for (orig_idx, rx, ry, rw, rh) in placements {
-                if rw < 2 || rh < 2 {
-                    continue;
+            for (rx, ry, rw, rh) in &sub_rects {
+                if request_idx >= deck_requests.len() {
+                    break;
                 }
-                let rr = &deck_room_requests[orig_idx];
+                let req = &deck_requests[request_idx];
+                let room_id = next_id();
 
-                // Cap room size to 1.5× target area to prevent treemap inflation.
-                let (rw, rh) = cap_room_dimensions(rw, rh, rr.target_area, 1.5, 2);
-
-                // Skip rooms that don't fully fit within hull bounds
-                if rx + rw > hull_width || ry + rh > hull_length {
-                    continue;
-                }
-
-                let cell_val = CELL_ROOM_BASE + (placed_rooms.len() % 246) as u8;
-                let mut overlaps = false;
-                for xx in rx..(rx + rw) {
-                    for yy in ry..(ry + rh) {
-                        if grid[xx][yy] != CELL_EMPTY {
-                            overlaps = true;
-                            break;
+                // Stamp grid
+                for gx in *rx..(*rx + *rw).min(hw) {
+                    for gy in *ry..(*ry + *rh).min(hl) {
+                        if grid[gx][gy] == CELL_EMPTY {
+                            grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
                         }
                     }
-                    if overlaps {
-                        break;
-                    }
-                }
-                if overlaps {
-                    continue;
-                }
-                for xx in rx..(rx + rw) {
-                    for yy in ry..(ry + rh) {
-                        grid[xx][yy] = cell_val;
-                    }
                 }
 
-                let rid = next_id();
+                // Create room
                 ctx.db.room().insert(Room {
-                    id: rid,
-                    node_id: rr.node_id,
-                    name: format!("{} D{}", rr.name, deck + 1),
-                    room_type: rr.room_type,
+                    id: room_id,
+                    node_id: req.node_id,
+                    name: req.name.clone(),
+                    room_type: req.room_type,
                     deck,
-                    x: rx as f32 + rw as f32 / 2.0,
-                    y: ry as f32 + rh as f32 / 2.0,
-                    width: rw as f32,
-                    height: rh as f32,
-                    capacity: rr.capacity,
+                    x: *rx as f32,
+                    y: *ry as f32,
+                    width: *rw as f32,
+                    height: *rh as f32,
+                    capacity: req.capacity,
                 });
 
-                placed_rooms.push(PlacedRoom {
-                    room_id: rid,
-                    node_id: rr.node_id,
-                    x: rx,
-                    y: ry,
-                    w: rw,
-                    h: rh,
-                    room_type: rr.room_type,
+                // Create door to adjacent corridor (atomically)
+                let (door_x, door_y, wall_room, wall_corr) =
+                    compute_door_position(*rx, *ry, *rw, *rh, &strip);
+                ctx.db.door().insert(Door {
+                    id: 0,
+                    room_a: room_id,
+                    room_b: strip.corridor_room_id,
+                    wall_a: wall_room,
+                    wall_b: wall_corr,
+                    position_along_wall: 0.5,
+                    width: 3.0_f32.min(*rw as f32).min(*rh as f32),
+                    access_level: access_levels::PUBLIC,
+                    door_x,
+                    door_y,
                 });
+
+                placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
+                request_idx += 1;
             }
         }
 
-        // ---- Step 6: Generate doors ----
-        // Scan ALL cells along each room wall for adjacent corridor cells
-        // (not just midpoint) to ensure every room that borders a corridor gets a door.
-        let mut door_set: Vec<(u32, u32, u8)> = Vec::new();
-
-        for pr in &placed_rooms {
-            let room_center_y = pr.y as f32 + pr.h as f32 / 2.0;
-            let room_center_x = pr.x as f32 + pr.w as f32 / 2.0;
-
-            // Helper: find first corridor cell along a wall edge
-            // WEST edge
-            if pr.x > 0 {
-                let test_x = pr.x - 1;
-                let boundary_x = pr.x as f32;
-                for scan_y in pr.y..(pr.y + pr.h) {
-                    if scan_y >= hull_length || test_x >= hull_width {
-                        continue;
-                    }
-                    let cell = grid[test_x][scan_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(scan_y) {
-                            let key = (pr.room_id, seg.room_id, wall_sides::WEST);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: seg.room_id,
-                                    wall_a: wall_sides::WEST,
-                                    wall_b: wall_sides::EAST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: boundary_x,
-                                    door_y: room_center_y,
-                                });
-                                door_set.push(key);
-                            }
-                        } else if let Some(cr) = find_cross_room(scan_y) {
-                            let key = (pr.room_id, cr.room_id, wall_sides::WEST);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: cr.room_id,
-                                    wall_a: wall_sides::WEST,
-                                    wall_b: wall_sides::EAST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: boundary_x,
-                                    door_y: room_center_y,
-                                });
-                                door_set.push(key);
-                            }
-                        }
-                        break; // one door per wall per corridor is enough
-                    } else if cell == CELL_SERVICE_CORRIDOR {
-                        let key = (pr.room_id, svc_rid, wall_sides::WEST);
-                        if !door_set.contains(&key) {
-                            ctx.db.door().insert(Door {
-                                id: 0,
-                                room_a: pr.room_id,
-                                room_b: svc_rid,
-                                wall_a: wall_sides::WEST,
-                                wall_b: wall_sides::EAST,
-                                position_along_wall: 0.5,
-                                width: 2.0,
-                                access_level: access_levels::CREW_ONLY,
-                                door_x: boundary_x,
-                                door_y: room_center_y,
-                            });
-                            door_set.push(key);
-                        }
-                        break;
-                    }
-                }
-            }
-            // EAST edge
-            {
-                let test_x = pr.x + pr.w;
-                let boundary_x = (pr.x + pr.w) as f32;
-                for scan_y in pr.y..(pr.y + pr.h) {
-                    if test_x >= hull_width || scan_y >= hull_length {
-                        continue;
-                    }
-                    let cell = grid[test_x][scan_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(scan_y) {
-                            let key = (pr.room_id, seg.room_id, wall_sides::EAST);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: seg.room_id,
-                                    wall_a: wall_sides::EAST,
-                                    wall_b: wall_sides::WEST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: boundary_x,
-                                    door_y: room_center_y,
-                                });
-                                door_set.push(key);
-                            }
-                        } else if let Some(cr) = find_cross_room(scan_y) {
-                            let key = (pr.room_id, cr.room_id, wall_sides::EAST);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: cr.room_id,
-                                    wall_a: wall_sides::EAST,
-                                    wall_b: wall_sides::WEST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: boundary_x,
-                                    door_y: room_center_y,
-                                });
-                                door_set.push(key);
-                            }
-                        }
-                        break;
-                    } else if cell == CELL_SERVICE_CORRIDOR {
-                        let key = (pr.room_id, svc_rid, wall_sides::EAST);
-                        if !door_set.contains(&key) {
-                            ctx.db.door().insert(Door {
-                                id: 0,
-                                room_a: pr.room_id,
-                                room_b: svc_rid,
-                                wall_a: wall_sides::EAST,
-                                wall_b: wall_sides::WEST,
-                                position_along_wall: 0.5,
-                                width: 2.0,
-                                access_level: access_levels::CREW_ONLY,
-                                door_x: boundary_x,
-                                door_y: room_center_y,
-                            });
-                            door_set.push(key);
-                        }
-                        break;
-                    }
-                }
-            }
-            // NORTH edge
-            if pr.y > 0 {
-                let test_y = pr.y - 1;
-                let boundary_y = pr.y as f32;
-                for scan_x in pr.x..(pr.x + pr.w) {
-                    if scan_x >= hull_width || test_y >= hull_length {
-                        continue;
-                    }
-                    let cell = grid[scan_x][test_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(test_y) {
-                            let key = (pr.room_id, seg.room_id, wall_sides::NORTH);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: seg.room_id,
-                                    wall_a: wall_sides::NORTH,
-                                    wall_b: wall_sides::SOUTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: room_center_x,
-                                    door_y: boundary_y,
-                                });
-                                door_set.push(key);
-                            }
-                        } else if let Some(cr) = find_cross_room(test_y) {
-                            let key = (pr.room_id, cr.room_id, wall_sides::NORTH);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: cr.room_id,
-                                    wall_a: wall_sides::NORTH,
-                                    wall_b: wall_sides::SOUTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: room_center_x,
-                                    door_y: boundary_y,
-                                });
-                                door_set.push(key);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-            // SOUTH edge
-            {
-                let test_y = pr.y + pr.h;
-                let boundary_y = (pr.y + pr.h) as f32;
-                for scan_x in pr.x..(pr.x + pr.w) {
-                    if test_y >= hull_length || scan_x >= hull_width {
-                        continue;
-                    }
-                    let cell = grid[scan_x][test_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        if let Some(seg) = find_spine_segment(test_y) {
-                            let key = (pr.room_id, seg.room_id, wall_sides::SOUTH);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: seg.room_id,
-                                    wall_a: wall_sides::SOUTH,
-                                    wall_b: wall_sides::NORTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: room_center_x,
-                                    door_y: boundary_y,
-                                });
-                                door_set.push(key);
-                            }
-                        } else if let Some(cr) = find_cross_room(test_y) {
-                            let key = (pr.room_id, cr.room_id, wall_sides::SOUTH);
-                            if !door_set.contains(&key) {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: cr.room_id,
-                                    wall_a: wall_sides::SOUTH,
-                                    wall_b: wall_sides::NORTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: room_center_x,
-                                    door_y: boundary_y,
-                                });
-                                door_set.push(key);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Room-to-room doors: only for specific adjacent pairings that make logical sense
-        // (e.g., galley↔mess hall, surgery↔hospital). Most rooms connect via corridors only.
+        // ---- Phase 6: Room-to-room doors (adjacent logical pairs) ----
         for i in 0..placed_rooms.len() {
             for j in (i + 1)..placed_rooms.len() {
-                let a = &placed_rooms[i];
-                let b = &placed_rooms[j];
-
-                // Only connect rooms that should have direct internal doors
-                if !should_have_room_door(a.room_type, b.room_type) {
+                let (id_a, ax, ay, aw, ah, rt_a) = placed_rooms[i];
+                let (id_b, bx, by, bw, bh, rt_b) = placed_rooms[j];
+                if !should_have_room_door(rt_a, rt_b) {
                     continue;
                 }
-
-                // A's east edge touches B's west edge
-                let boundary_x_ab = a.x + a.w;
-                if boundary_x_ab == b.x
-                    && boundary_x_ab > 0
-                    && boundary_x_ab < hull_width
-                    && a.y < b.y + b.h
-                    && b.y < a.y + a.h
+                // Check adjacency (shared edge)
+                if let Some((dx, dy, wa, wb)) =
+                    find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh)
                 {
-                    let overlap_y0 = core::cmp::max(a.y, b.y);
-                    let overlap_y1 = core::cmp::min(a.y + a.h, b.y + b.h);
-                    if overlap_y1 > overlap_y0 {
-                        let boundary_x = (a.x + a.w) as f32;
-                        let mid_y = (overlap_y0 + overlap_y1) as f32 / 2.0;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: a.room_id,
-                            room_b: b.room_id,
-                            wall_a: wall_sides::EAST,
-                            wall_b: wall_sides::WEST,
-                            position_along_wall: 0.5,
-                            width: 2.0,
-                            access_level: access_levels::CREW_ONLY,
-                            door_x: boundary_x,
-                            door_y: mid_y,
-                        });
-                    }
-                } else if b.x + b.w == a.x
-                    && a.x > 0
-                    && a.x < hull_width
-                    && a.y < b.y + b.h
-                    && b.y < a.y + a.h
-                {
-                    let overlap_y0 = core::cmp::max(a.y, b.y);
-                    let overlap_y1 = core::cmp::min(a.y + a.h, b.y + b.h);
-                    if overlap_y1 > overlap_y0 {
-                        let boundary_x = a.x as f32;
-                        let mid_y = (overlap_y0 + overlap_y1) as f32 / 2.0;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: a.room_id,
-                            room_b: b.room_id,
-                            wall_a: wall_sides::WEST,
-                            wall_b: wall_sides::EAST,
-                            position_along_wall: 0.5,
-                            width: 2.0,
-                            access_level: access_levels::CREW_ONLY,
-                            door_x: boundary_x,
-                            door_y: mid_y,
-                        });
-                    }
-                }
-                // A's south edge touches B's north edge
-                let boundary_y_ab = a.y + a.h;
-                if boundary_y_ab == b.y
-                    && boundary_y_ab > 0
-                    && boundary_y_ab < hull_length
-                    && a.x < b.x + b.w
-                    && b.x < a.x + a.w
-                {
-                    let overlap_x0 = core::cmp::max(a.x, b.x);
-                    let overlap_x1 = core::cmp::min(a.x + a.w, b.x + b.w);
-                    if overlap_x1 > overlap_x0 {
-                        let boundary_y = (a.y + a.h) as f32;
-                        let mid_x = (overlap_x0 + overlap_x1) as f32 / 2.0;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: a.room_id,
-                            room_b: b.room_id,
-                            wall_a: wall_sides::SOUTH,
-                            wall_b: wall_sides::NORTH,
-                            position_along_wall: 0.5,
-                            width: 2.0,
-                            access_level: access_levels::CREW_ONLY,
-                            door_x: mid_x,
-                            door_y: boundary_y,
-                        });
-                    }
-                } else if b.y + b.h == a.y
-                    && a.y > 0
-                    && a.y < hull_length
-                    && a.x < b.x + b.w
-                    && b.x < a.x + a.w
-                {
-                    let overlap_x0 = core::cmp::max(a.x, b.x);
-                    let overlap_x1 = core::cmp::min(a.x + a.w, b.x + b.w);
-                    if overlap_x1 > overlap_x0 {
-                        let boundary_y = a.y as f32;
-                        let mid_x = (overlap_x0 + overlap_x1) as f32 / 2.0;
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: a.room_id,
-                            room_b: b.room_id,
-                            wall_a: wall_sides::NORTH,
-                            wall_b: wall_sides::SOUTH,
-                            position_along_wall: 0.5,
-                            width: 2.0,
-                            access_level: access_levels::CREW_ONLY,
-                            door_x: mid_x,
-                            door_y: boundary_y,
-                        });
-                    }
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: id_a,
+                        room_b: id_b,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: 3.0,
+                        access_level: access_levels::PUBLIC,
+                        door_x: dx,
+                        door_y: dy,
+                    });
                 }
             }
         }
 
-        // Force-connect orphan rooms: only if room actually borders a corridor cell
-        for pr in &placed_rooms {
-            let has_door = door_set.iter().any(|&(a, _, _)| a == pr.room_id);
-            if has_door {
-                continue;
-            }
-
-            // Check all 4 edges for adjacent corridor cells
-            let mut connected = false;
-
-            // West edge: check cell at (pr.x - 1, mid_y)
-            if pr.x > 0 {
-                let test_x = pr.x - 1;
-                let mid_y = pr.y + pr.h / 2;
-                if test_x < hull_width && mid_y < hull_length {
-                    let cell = grid[test_x][mid_y];
-                    if cell == CELL_MAIN_CORRIDOR || cell == CELL_SERVICE_CORRIDOR {
-                        let target = if cell == CELL_MAIN_CORRIDOR {
-                            find_spine_segment(mid_y)
-                                .map(|s| s.room_id)
-                                .or_else(|| find_cross_room(mid_y).map(|c| c.room_id))
-                        } else {
-                            Some(svc_rid)
-                        };
-                        if let Some(tid) = target {
-                            let bx = pr.x as f32;
-                            if bx > 0.5 && (bx as usize) < hull_width {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: tid,
-                                    wall_a: wall_sides::WEST,
-                                    wall_b: wall_sides::EAST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: bx,
-                                    door_y: pr.y as f32 + pr.h as f32 / 2.0,
-                                });
-                                connected = true;
-                            }
-                        }
+        // ---- Grid dump (debug) ----
+        let max_rows = 60;
+        let mut dump = format!(
+            "Deck {} grid ({}x{}, {} rooms, {} strips, {} cross-corridors):\n",
+            deck + 1,
+            hw,
+            hl,
+            placed_rooms.len(),
+            strips.len(),
+            cross_ys.len(),
+        );
+        for y in 0..hl.min(max_rows) {
+            for x in 0..hw {
+                let ch = match grid[x][y] {
+                    CELL_EMPTY => '.',
+                    CELL_MAIN_CORRIDOR => '=',
+                    CELL_SERVICE_CORRIDOR => '-',
+                    CELL_SHAFT => '#',
+                    v => {
+                        let idx = (v - CELL_ROOM_BASE) as usize;
+                        (b'A' + (idx % 26) as u8) as char
                     }
-                }
+                };
+                dump.push(ch);
             }
-            // East edge
-            if !connected {
-                let test_x = pr.x + pr.w;
-                let mid_y = pr.y + pr.h / 2;
-                if test_x < hull_width && mid_y < hull_length {
-                    let cell = grid[test_x][mid_y];
-                    if cell == CELL_MAIN_CORRIDOR || cell == CELL_SERVICE_CORRIDOR {
-                        let target = if cell == CELL_MAIN_CORRIDOR {
-                            find_spine_segment(mid_y)
-                                .map(|s| s.room_id)
-                                .or_else(|| find_cross_room(mid_y).map(|c| c.room_id))
-                        } else {
-                            Some(svc_rid)
-                        };
-                        if let Some(tid) = target {
-                            let bx = (pr.x + pr.w) as f32;
-                            if bx > 0.5 && (bx as usize) < hull_width {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: tid,
-                                    wall_a: wall_sides::EAST,
-                                    wall_b: wall_sides::WEST,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: bx,
-                                    door_y: pr.y as f32 + pr.h as f32 / 2.0,
-                                });
-                                connected = true;
-                            }
-                        }
-                    }
-                }
-            }
-            // North edge
-            if !connected && pr.y > 0 {
-                let test_y = pr.y - 1;
-                let mid_x = pr.x + pr.w / 2;
-                if mid_x < hull_width && test_y < hull_length {
-                    let cell = grid[mid_x][test_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        let target = find_spine_segment(test_y)
-                            .map(|s| s.room_id)
-                            .or_else(|| find_cross_room(test_y).map(|c| c.room_id));
-                        if let Some(tid) = target {
-                            let by = pr.y as f32;
-                            if by > 0.5 {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: tid,
-                                    wall_a: wall_sides::NORTH,
-                                    wall_b: wall_sides::SOUTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: pr.x as f32 + pr.w as f32 / 2.0,
-                                    door_y: by,
-                                });
-                                connected = true;
-                            }
-                        }
-                    }
-                }
-            }
-            // South edge
-            if !connected {
-                let test_y = pr.y + pr.h;
-                let mid_x = pr.x + pr.w / 2;
-                if test_y < hull_length && mid_x < hull_width {
-                    let cell = grid[mid_x][test_y];
-                    if cell == CELL_MAIN_CORRIDOR {
-                        let target = find_spine_segment(test_y)
-                            .map(|s| s.room_id)
-                            .or_else(|| find_cross_room(test_y).map(|c| c.room_id));
-                        if let Some(tid) = target {
-                            let by = (pr.y + pr.h) as f32;
-                            if (by as usize) < hull_length {
-                                ctx.db.door().insert(Door {
-                                    id: 0,
-                                    room_a: pr.room_id,
-                                    room_b: tid,
-                                    wall_a: wall_sides::SOUTH,
-                                    wall_b: wall_sides::NORTH,
-                                    position_along_wall: 0.5,
-                                    width: 2.0,
-                                    access_level: access_levels::PUBLIC,
-                                    door_x: pr.x as f32 + pr.w as f32 / 2.0,
-                                    door_y: by,
-                                });
-                                connected = true;
-                            }
-                        }
-                    }
-                }
-            }
-            // If still not connected, this room is truly isolated — skip it
-            let _ = connected;
+            dump.push('\n');
         }
-
-        // ASCII dump for debugging
-        {
-            let mut dump = format!(
-                "Deck {} grid ({}x{}, {} rooms, {} spine segs, {} cross-corridors):\n",
-                deck + 1,
-                hull_width,
-                hull_length,
-                placed_rooms.len(),
-                spine_segments.len(),
-                cross_rooms.len()
-            );
-            let max_rows = hull_length.min(60);
-            for y in 0..max_rows {
-                for x in 0..hull_width {
-                    let ch = match grid[x][y] {
-                        CELL_EMPTY => '.',
-                        CELL_MAIN_CORRIDOR => '=',
-                        CELL_SERVICE_CORRIDOR => '-',
-                        CELL_SHAFT => '#',
-                        v if v >= CELL_ROOM_BASE => {
-                            let idx = (v - CELL_ROOM_BASE) % 26;
-                            (b'A' + idx) as char
-                        }
-                        _ => '.',
-                    };
-                    dump.push(ch);
-                }
-                dump.push('\n');
-            }
-            if hull_length > max_rows {
-                dump.push_str(&format!("... ({} more rows)\n", hull_length - max_rows));
-            }
-            log::info!("{}", dump);
+        if hl > max_rows {
+            dump.push_str(&format!("... ({} more rows)\n", hl - max_rows));
         }
-    }
+        log::info!("{}", dump);
 
-    // ---- Step 7: Create VerticalShaft entries and cross-deck doors ----
+        log::info!(
+            "Deck {}: placed {}/{} rooms ({:.0}/{:.0}m² area, {} strip area available)",
+            deck + 1,
+            request_idx.min(deck_requests.len()),
+            deck_requests.len(),
+            deck_requests.iter().take(request_idx).map(|r| r.target_area).sum::<f32>(),
+            total_request_area,
+            total_strip_area,
+        );
+    } // end per-deck loop
+
+    // ---- VerticalShaft table entries + cross-deck doors ----
     let decks_str = (0..deck_count)
         .map(|d| d.to_string())
         .collect::<Vec<_>>()
         .join(",");
 
-    // Use standard-deck positions for VerticalShaft entries (visual markers)
-    let std_spine_cx = ship_beam / 2;
-    struct ShaftDef {
-        x: usize,
-        y: usize,
-        w: usize,
-        h: usize,
-        shaft_type: u8,
-        name: &'static str,
-        is_main: bool,
+    for si in &shaft_infos {
+        ctx.db.vertical_shaft().insert(VerticalShaft {
+            id: 0,
+            shaft_type: si.shaft_type,
+            name: si.name.to_string(),
+            x: si.ref_x,
+            y: si.ref_y,
+            decks_served: decks_str.clone(),
+            width: si.ref_w,
+            height: si.ref_h,
+        });
+
+        // Cross-deck doors between consecutive shaft rooms
+        let access = if si.is_main {
+            access_levels::PUBLIC
+        } else {
+            access_levels::CREW_ONLY
+        };
+        for d in 0..deck_count.saturating_sub(1) {
+            if let (Some(room_a), Some(room_b)) = (
+                si.deck_room_ids[d as usize],
+                si.deck_room_ids[(d + 1) as usize],
+            ) {
+                if let (Some(ra), Some(rb)) = (
+                    ctx.db.room().id().find(room_a),
+                    ctx.db.room().id().find(room_b),
+                ) {
+                    let mid_x = (ra.x + ra.width / 2.0 + rb.x + rb.width / 2.0) / 2.0;
+                    let mid_y = (ra.y + ra.height / 2.0 + rb.y + rb.height / 2.0) / 2.0;
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a,
+                        room_b,
+                        wall_a: wall_sides::SOUTH,
+                        wall_b: wall_sides::NORTH,
+                        position_along_wall: 0.5,
+                        width: 3.0,
+                        access_level: access,
+                        door_x: mid_x,
+                        door_y: mid_y,
+                    });
+                }
+            }
+        }
     }
-    let shaft_defs = [
-        ShaftDef {
-            x: std_spine_cx + 2,
-            y: 10,
+
+    // Log final stats
+    let total_rooms: usize = ctx.db.room().iter().count();
+    let total_doors: usize = ctx.db.door().iter().count();
+    log::info!(
+        "Layout complete: {} rooms, {} doors across {} decks",
+        total_rooms,
+        total_doors,
+        deck_count
+    );
+}
+
+// ---- Helper functions ----
+
+/// Compute shaft placements at corridor intersections.
+fn compute_shaft_placements(
+    spine_right: usize,
+    svc_left: usize,
+    cross_ys: &[usize],
+    hw: usize,
+    hl: usize,
+) -> Vec<ShaftPlacement> {
+    let mut placements = Vec::new();
+
+    if cross_ys.is_empty() {
+        // Minimal deck: place one elevator next to spine
+        placements.push(ShaftPlacement {
+            x: spine_right,
+            y: hl / 4,
             w: 3,
             h: 3,
             shaft_type: shaft_types::ELEVATOR,
             name: "Fore Elevator",
             is_main: true,
-        },
-        ShaftDef {
-            x: std_spine_cx + 2,
-            y: ship_length.saturating_sub(14),
-            w: 3,
-            h: 3,
-            shaft_type: shaft_types::ELEVATOR,
-            name: "Aft Elevator",
-            is_main: true,
-        },
-        ShaftDef {
-            x: ship_beam.saturating_sub(5),
-            y: ship_length / 4,
+        });
+        return placements;
+    }
+
+    // Fore elevator: at first cross-corridor intersection, starboard of spine
+    placements.push(ShaftPlacement {
+        x: spine_right,
+        y: cross_ys[0],
+        w: 3,
+        h: 3,
+        shaft_type: shaft_types::ELEVATOR,
+        name: "Fore Elevator",
+        is_main: true,
+    });
+
+    // Aft elevator: at last cross-corridor intersection
+    let last_cy = *cross_ys.last().unwrap();
+    placements.push(ShaftPlacement {
+        x: spine_right,
+        y: last_cy,
+        w: 3,
+        h: 3,
+        shaft_type: shaft_types::ELEVATOR,
+        name: "Aft Elevator",
+        is_main: true,
+    });
+
+    // Service elevator: at first cross-corridor × service corridor intersection
+    if svc_left >= 2 {
+        let svc_elev_y = cross_ys[cross_ys.len() / 2]; // middle cross-corridor
+        placements.push(ShaftPlacement {
+            x: svc_left - 2,
+            y: svc_elev_y,
             w: 2,
             h: 2,
             shaft_type: shaft_types::SERVICE_ELEVATOR,
             name: "Service Elevator",
             is_main: false,
-        },
-        ShaftDef {
-            x: ship_beam.saturating_sub(4),
-            y: ship_length / 8,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::LADDER,
-            name: "Ladder A",
-            is_main: false,
-        },
-        ShaftDef {
-            x: ship_beam.saturating_sub(4),
-            y: ship_length * 3 / 8,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::LADDER,
-            name: "Ladder B",
-            is_main: false,
-        },
-        ShaftDef {
-            x: ship_beam.saturating_sub(4),
-            y: ship_length * 5 / 8,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::LADDER,
-            name: "Ladder C",
-            is_main: false,
-        },
-        ShaftDef {
-            x: ship_beam.saturating_sub(4),
-            y: ship_length * 7 / 8,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::LADDER,
-            name: "Ladder D",
-            is_main: false,
-        },
-    ];
-
-    for sd in &shaft_defs {
-        ctx.db.vertical_shaft().insert(VerticalShaft {
-            id: 0,
-            shaft_type: sd.shaft_type,
-            name: sd.name.to_string(),
-            x: sd.x as f32 + sd.w as f32 / 2.0,
-            y: sd.y as f32 + sd.h as f32 / 2.0,
-            decks_served: decks_str.clone(),
-            width: sd.w as f32,
-            height: sd.h as f32,
         });
+    }
 
-        // Cross-deck doors between consecutive deck shaft rooms
-        // Find shaft rooms by name pattern across decks
-        let mut shaft_rooms_across_decks: Vec<u32> = Vec::new();
-        for d in 0..deck_count {
-            let search_name = format!("{} D{}", sd.name, d + 1);
-            // Look up room by name match
-            for room in ctx.db.room().iter() {
-                if room.name == search_name {
-                    shaft_rooms_across_decks.push(room.id);
-                    break;
-                }
-            }
+    // Ladders at intermediate cross-corridor intersections (port side of spine)
+    let spine_left_edge = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
+    let ladder_positions: Vec<usize> = cross_ys
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i > 0 && *i < cross_ys.len() - 1)
+        .map(|(_, cy)| *cy)
+        .take(2)
+        .collect();
+
+    for (li, &cy) in ladder_positions.iter().enumerate() {
+        let name = if li == 0 { "Ladder A" } else { "Ladder B" };
+        placements.push(ShaftPlacement {
+            x: spine_left_edge.saturating_sub(2),
+            y: cy,
+            w: 2,
+            h: 2,
+            shaft_type: shaft_types::LADDER,
+            name,
+            is_main: false,
+        });
+    }
+
+    placements
+}
+
+/// Find attachment strips: empty rectangular areas directly adjacent to corridor walls.
+fn find_attachment_strips(
+    grid: &[Vec<u8>],
+    _hw: usize,
+    hl: usize,
+    spine_left: usize,
+    spine_right: usize,
+    svc_left: usize,
+    cross_ys: &[usize],
+    spine_segments: &[(u32, usize, usize)],
+    cross_rooms: &[(u32, usize)],
+) -> Vec<AttachmentStrip> {
+    let mut strips = Vec::new();
+
+    // Port side of spine (x < spine_left)
+    // Between consecutive cross-corridors (and before first / after last)
+    let mut y_boundaries: Vec<usize> = vec![0];
+    for &cy in cross_ys {
+        y_boundaries.push(cy);
+        y_boundaries.push(cy + CROSS_CORRIDOR_WIDTH);
+    }
+    y_boundaries.push(hl);
+
+    for chunk in y_boundaries.chunks(2) {
+        if chunk.len() < 2 || chunk[0] >= chunk[1] {
+            continue;
         }
+        let y0 = chunk[0];
+        let y1 = chunk[1];
+        let strip_h = y1 - y0;
+        let strip_w = spine_left; // port side width
 
-        for i in 0..shaft_rooms_across_decks.len().saturating_sub(1) {
-            let access = if sd.is_main {
-                access_levels::PUBLIC
-            } else {
-                access_levels::CREW_ONLY
-            };
-            // Use actual room positions (they vary per deck due to hull taper)
-            let room_a_id = shaft_rooms_across_decks[i];
-            let room_b_id = shaft_rooms_across_decks[i + 1];
-            if let (Some(ra), Some(rb)) = (
-                ctx.db.room().id().find(room_a_id),
-                ctx.db.room().id().find(room_b_id),
-            ) {
-                // Cross-deck door: midpoint between the two rooms' centers
-                let mid_x = (ra.x + rb.x) / 2.0;
-                let mid_y = (ra.y + rb.y) / 2.0;
-                ctx.db.door().insert(Door {
-                    id: 0,
-                    room_a: room_a_id,
-                    room_b: room_b_id,
-                    wall_a: wall_sides::SOUTH,
-                    wall_b: wall_sides::NORTH,
-                    position_along_wall: 0.5,
-                    width: 2.0,
-                    access_level: access,
-                    door_x: mid_x,
-                    door_y: mid_y,
+        if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
+            // Find which corridor this strip connects to
+            let corridor_id = find_corridor_for_strip(
+                spine_left, y0, y1, spine_segments, cross_rooms,
+            );
+            strips.push(AttachmentStrip {
+                corridor_room_id: corridor_id,
+                x: 0,
+                y: y0,
+                w: strip_w,
+                h: strip_h,
+                wall_side: wall_sides::WEST,
+                door_x: spine_left,
+                door_y: y0 + strip_h / 2,
+            });
+        }
+    }
+
+    // Starboard side of spine (spine_right..svc_left)
+    for chunk in y_boundaries.chunks(2) {
+        if chunk.len() < 2 || chunk[0] >= chunk[1] {
+            continue;
+        }
+        let y0 = chunk[0];
+        let y1 = chunk[1];
+        let strip_h = y1 - y0;
+        let strip_x = spine_right;
+        let strip_w = svc_left.saturating_sub(spine_right);
+
+        if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
+            // Exclude shaft areas — scan for actual empty width
+            let actual_w = scan_empty_width(grid, strip_x, y0, strip_w, strip_h);
+            if actual_w >= MIN_ROOM_DIM {
+                let corridor_id = find_corridor_for_strip(
+                    spine_right, y0, y1, spine_segments, cross_rooms,
+                );
+                strips.push(AttachmentStrip {
+                    corridor_room_id: corridor_id,
+                    x: strip_x,
+                    y: y0,
+                    w: actual_w,
+                    h: strip_h,
+                    wall_side: wall_sides::EAST,
+                    door_x: spine_right,
+                    door_y: y0 + strip_h / 2,
                 });
             }
         }
     }
 
-    // ---- Step 8: Remove disconnected rooms ----
-    // BFS from first corridor on deck 0 through doors to find all reachable rooms.
-    // Delete any rooms (and their doors) that aren't reachable.
-    let all_rooms: Vec<Room> = ctx.db.room().iter().collect();
-    let all_doors: Vec<Door> = ctx.db.door().iter().collect();
+    // Sort strips largest-first for better room placement
+    strips.sort_by(|a, b| (b.w * b.h).cmp(&(a.w * a.h)));
+    strips
+}
 
-    // Find spawn room (first corridor on deck 0)
-    let start_room = all_rooms
-        .iter()
-        .find(|r| r.deck == 0 && r.room_type == room_types::CORRIDOR);
-    if let Some(start) = start_room {
-        let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        let mut queue: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
-        queue.push_back(start.id);
-        visited.insert(start.id);
-
-        while let Some(room_id) = queue.pop_front() {
-            for door in &all_doors {
-                let neighbor = if door.room_a == room_id {
-                    Some(door.room_b)
-                } else if door.room_b == room_id {
-                    Some(door.room_a)
-                } else {
-                    None
-                };
-                if let Some(nid) = neighbor {
-                    if visited.insert(nid) {
-                        queue.push_back(nid);
-                    }
-                }
-            }
+/// Scan how many empty columns exist starting from x in the given y range.
+fn scan_empty_width(grid: &[Vec<u8>], start_x: usize, y: usize, max_w: usize, h: usize) -> usize {
+    let hw = grid.len();
+    for dx in 0..max_w {
+        let x = start_x + dx;
+        if x >= hw {
+            return dx;
         }
-
-        // Delete unreachable rooms and their doors
-        let mut removed = 0u32;
-        for room in &all_rooms {
-            if !visited.contains(&room.id) {
-                ctx.db.room().id().delete(room.id);
-                removed += 1;
+        // Check if this column is fully empty in the y range
+        for dy in 0..h {
+            if y + dy >= grid[x].len() || grid[x][y + dy] != CELL_EMPTY {
+                return dx;
             }
-        }
-        for door in &all_doors {
-            if !visited.contains(&door.room_a) || !visited.contains(&door.room_b) {
-                ctx.db.door().id().delete(door.id);
-            }
-        }
-        if removed > 0 {
-            log::info!("Removed {} disconnected rooms", removed);
         }
     }
+    max_w
+}
+
+/// Find which corridor room a strip connects to (spine segment or cross-corridor).
+fn find_corridor_for_strip(
+    _edge_x: usize,
+    y0: usize,
+    y1: usize,
+    spine_segments: &[(u32, usize, usize)],
+    _cross_rooms: &[(u32, usize)],
+) -> u32 {
+    let mid_y = (y0 + y1) / 2;
+    // Find spine segment containing mid_y
+    for &(seg_id, seg_y0, seg_y1) in spine_segments {
+        if mid_y >= seg_y0 && mid_y < seg_y1 {
+            return seg_id;
+        }
+    }
+    // Fallback: first spine segment
+    spine_segments.first().map(|s| s.0).unwrap_or(0)
+}
+
+/// BSP subdivision of a rectangular area into sub-rectangles for room placement.
+fn bsp_subdivide(
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    requests: &[RoomRequest],
+    out: &mut Vec<(usize, usize, usize, usize)>,
+) {
+    if requests.is_empty() || w < MIN_ROOM_DIM || h < MIN_ROOM_DIM {
+        return;
+    }
+
+    if requests.len() == 1 {
+        // Single room fills the rectangle (capped at 1.5× target area)
+        let target = requests[0].target_area;
+        let max_area = target * 1.5;
+        let actual_area = (w * h) as f32;
+        if actual_area <= max_area || (w <= MIN_ROOM_DIM + 1 && h <= MIN_ROOM_DIM + 1) {
+            out.push((x, y, w, h));
+        } else {
+            // Shrink to fit — split off excess
+            if w > h {
+                let new_w = ((target / h as f32) as usize).max(MIN_ROOM_DIM).min(w);
+                out.push((x, y, new_w, h));
+            } else {
+                let new_h = ((target / w as f32) as usize).max(MIN_ROOM_DIM).min(h);
+                out.push((x, y, w, new_h));
+            }
+        }
+        return;
+    }
+
+    // Split the rectangle and distribute requests
+    let split_at = requests.len() / 2;
+    let area_ratio = requests[..split_at]
+        .iter()
+        .map(|r| r.target_area)
+        .sum::<f32>()
+        / requests.iter().map(|r| r.target_area).sum::<f32>();
+
+    if w >= h {
+        // Vertical split (split along X)
+        let split_x = (w as f32 * area_ratio).round() as usize;
+        let split_x = split_x.max(MIN_ROOM_DIM).min(w.saturating_sub(MIN_ROOM_DIM));
+        if split_x >= MIN_ROOM_DIM && w - split_x >= MIN_ROOM_DIM {
+            bsp_subdivide(x, y, split_x, h, &requests[..split_at], out);
+            bsp_subdivide(x + split_x, y, w - split_x, h, &requests[split_at..], out);
+        } else {
+            // Can't split further — assign first request
+            out.push((x, y, w, h));
+        }
+    } else {
+        // Horizontal split (split along Y)
+        let split_y = (h as f32 * area_ratio).round() as usize;
+        let split_y = split_y.max(MIN_ROOM_DIM).min(h.saturating_sub(MIN_ROOM_DIM));
+        if split_y >= MIN_ROOM_DIM && h - split_y >= MIN_ROOM_DIM {
+            bsp_subdivide(x, y, w, split_y, &requests[..split_at], out);
+            bsp_subdivide(x, y + split_y, w, h - split_y, &requests[split_at..], out);
+        } else {
+            out.push((x, y, w, h));
+        }
+    }
+}
+
+/// Compute door position for a room adjacent to a corridor via an attachment strip.
+fn compute_door_position(
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+    strip: &AttachmentStrip,
+) -> (f32, f32, u8, u8) {
+    match strip.wall_side {
+        wall_sides::WEST => {
+            // Room is west of corridor (port side) — door on room's east wall
+            let dx = (rx + rw) as f32;
+            let dy = ry as f32 + rh as f32 / 2.0;
+            (dx, dy, wall_sides::EAST, wall_sides::WEST)
+        }
+        wall_sides::EAST => {
+            // Room is east of corridor (starboard side) — door on room's west wall
+            let dx = rx as f32;
+            let dy = ry as f32 + rh as f32 / 2.0;
+            (dx, dy, wall_sides::WEST, wall_sides::EAST)
+        }
+        wall_sides::NORTH => {
+            let dx = rx as f32 + rw as f32 / 2.0;
+            let dy = (ry + rh) as f32;
+            (dx, dy, wall_sides::SOUTH, wall_sides::NORTH)
+        }
+        wall_sides::SOUTH => {
+            let dx = rx as f32 + rw as f32 / 2.0;
+            let dy = ry as f32;
+            (dx, dy, wall_sides::NORTH, wall_sides::SOUTH)
+        }
+        _ => {
+            let dx = rx as f32 + rw as f32 / 2.0;
+            let dy = ry as f32 + rh as f32 / 2.0;
+            (dx, dy, wall_sides::EAST, wall_sides::WEST)
+        }
+    }
+}
+
+/// Connect a shaft room to its adjacent corridor.
+fn connect_shaft_to_corridor(
+    ctx: &ReducerContext,
+    shaft_room_id: u32,
+    sp: &ShaftPlacement,
+    spine_segments: &[(u32, usize, usize)],
+    cross_rooms: &[(u32, usize)],
+    svc_id: u32,
+    spine_left: usize,
+    spine_right: usize,
+    svc_left: usize,
+    access: u8,
+) {
+    // Check if shaft overlaps a cross-corridor (same Y range)
+    for &(cc_id, cy) in cross_rooms {
+        if sp.y < cy + CROSS_CORRIDOR_WIDTH && sp.y + sp.h > cy {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: shaft_room_id,
+                room_b: cc_id,
+                wall_a: wall_sides::SOUTH,
+                wall_b: wall_sides::NORTH,
+                position_along_wall: 0.5,
+                width: sp.w.min(sp.h) as f32,
+                access_level: access,
+                door_x: sp.x as f32 + sp.w as f32 / 2.0,
+                door_y: sp.y as f32 + sp.h as f32 / 2.0,
+            });
+            return;
+        }
+    }
+
+    // Check if adjacent to spine
+    if sp.x == spine_right || sp.x + sp.w == spine_left {
+        let mid_y = sp.y + sp.h / 2;
+        for &(seg_id, seg_y0, seg_y1) in spine_segments {
+            if mid_y >= seg_y0 && mid_y < seg_y1 {
+                let dx = if sp.x == spine_right {
+                    spine_right as f32
+                } else {
+                    spine_left as f32
+                };
+                ctx.db.door().insert(Door {
+                    id: 0,
+                    room_a: shaft_room_id,
+                    room_b: seg_id,
+                    wall_a: if sp.x == spine_right {
+                        wall_sides::WEST
+                    } else {
+                        wall_sides::EAST
+                    },
+                    wall_b: if sp.x == spine_right {
+                        wall_sides::EAST
+                    } else {
+                        wall_sides::WEST
+                    },
+                    position_along_wall: 0.5,
+                    width: sp.h.min(sp.w) as f32,
+                    access_level: access,
+                    door_x: dx,
+                    door_y: mid_y as f32,
+                });
+                return;
+            }
+        }
+    }
+
+    // Check if adjacent to service corridor
+    if sp.x + sp.w >= svc_left {
+        ctx.db.door().insert(Door {
+            id: 0,
+            room_a: shaft_room_id,
+            room_b: svc_id,
+            wall_a: wall_sides::EAST,
+            wall_b: wall_sides::WEST,
+            position_along_wall: 0.5,
+            width: sp.h.min(sp.w) as f32,
+            access_level: access,
+            door_x: svc_left as f32,
+            door_y: sp.y as f32 + sp.h as f32 / 2.0,
+        });
+    }
+}
+
+/// Find a shared edge between two adjacent rooms. Returns (door_x, door_y, wall_a, wall_b).
+fn find_shared_edge(
+    ax: usize,
+    ay: usize,
+    aw: usize,
+    ah: usize,
+    bx: usize,
+    by: usize,
+    bw: usize,
+    bh: usize,
+) -> Option<(f32, f32, u8, u8)> {
+    // A's east wall touches B's west wall
+    if ax + aw == bx {
+        let overlap_y0 = ay.max(by);
+        let overlap_y1 = (ay + ah).min(by + bh);
+        if overlap_y1 > overlap_y0 {
+            let dy = (overlap_y0 + overlap_y1) as f32 / 2.0;
+            return Some(((ax + aw) as f32, dy, wall_sides::EAST, wall_sides::WEST));
+        }
+    }
+    // A's west wall touches B's east wall
+    if bx + bw == ax {
+        let overlap_y0 = ay.max(by);
+        let overlap_y1 = (ay + ah).min(by + bh);
+        if overlap_y1 > overlap_y0 {
+            let dy = (overlap_y0 + overlap_y1) as f32 / 2.0;
+            return Some((ax as f32, dy, wall_sides::WEST, wall_sides::EAST));
+        }
+    }
+    // A's south wall touches B's north wall
+    if ay + ah == by {
+        let overlap_x0 = ax.max(bx);
+        let overlap_x1 = (ax + aw).min(bx + bw);
+        if overlap_x1 > overlap_x0 {
+            let dx = (overlap_x0 + overlap_x1) as f32 / 2.0;
+            return Some((dx, (ay + ah) as f32, wall_sides::SOUTH, wall_sides::NORTH));
+        }
+    }
+    // A's north wall touches B's south wall
+    if by + bh == ay {
+        let overlap_x0 = ax.max(bx);
+        let overlap_x1 = (ax + aw).min(bx + bw);
+        if overlap_x1 > overlap_x0 {
+            let dx = (overlap_x0 + overlap_x1) as f32 / 2.0;
+            return Some((dx, ay as f32, wall_sides::NORTH, wall_sides::SOUTH));
+        }
+    }
+    None
 }
