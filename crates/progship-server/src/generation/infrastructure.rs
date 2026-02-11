@@ -131,6 +131,27 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         })
         .collect();
 
+    // ---- Compute global shaft positions from midship deck ----
+    // Shafts must be at identical positions across all decks for vertical alignment.
+    let mid_deck = deck_count / 2;
+    let mid_hw = hull_width(mid_deck, deck_count, ship_beam);
+    let mid_hl = hull_length(mid_deck, deck_count, ship_length);
+    let mid_spine_left = mid_hw / 2 - SPINE_WIDTH / 2;
+    let mid_spine_right = mid_spine_left + SPINE_WIDTH;
+    let mid_svc_left = mid_hw - SVC_CORRIDOR_WIDTH;
+    let mid_num_cross = ((mid_hl as f32 / 35.0).round() as usize).max(1);
+    let mid_cross_spacing = mid_hl / (mid_num_cross + 1);
+    let mut mid_cross_ys: Vec<usize> = Vec::new();
+    for i in 1..=mid_num_cross {
+        let cy = i * mid_cross_spacing;
+        if cy + CROSS_CORRIDOR_WIDTH <= mid_hl {
+            mid_cross_ys.push(cy);
+        }
+    }
+    let global_shaft_placements = compute_shaft_placements(
+        mid_spine_right, mid_svc_left, &mid_cross_ys, mid_hw, mid_hl,
+    );
+
     // ---- Per-deck generation ----
     for deck in 0..deck_count as i32 {
         let hw: usize = hull_width(deck as u32, deck_count, ship_beam);
@@ -186,12 +207,19 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             }
         }
 
-        // ---- Phase 2: Shafts at corridor intersections ----
-        let shaft_placements = compute_shaft_placements(
-            spine_right, svc_left, &cross_ys, hw, hl,
-        );
+        // ---- Phase 2: Stamp global shafts that fit within this deck's hull ----
+        // Filter out shafts that would overlap the spine or service corridor on this deck
+        let deck_shaft_placements: Vec<&ShaftPlacement> = global_shaft_placements
+            .iter()
+            .filter(|sp| {
+                sp.x + sp.w <= hw
+                    && sp.y + sp.h <= hl
+                    && (sp.x + sp.w <= spine_left || sp.x >= spine_right) // no spine overlap
+                    && sp.x + sp.w <= svc_left // no service corridor overlap
+            })
+            .collect();
 
-        for sp in &shaft_placements {
+        for sp in &deck_shaft_placements {
             for sx in sp.x..((sp.x + sp.w).min(hw)) {
                 for sy in sp.y..((sp.y + sp.h).min(hl)) {
                     grid[sx][sy] = CELL_SHAFT;
@@ -387,7 +415,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         }
 
         // ---- Shaft Room entries + doors to corridors ----
-        for (si, sp) in shaft_placements.iter().enumerate() {
+        for (si, sp) in deck_shaft_placements.iter().enumerate() {
             let shaft_room_id = next_id();
             let srt = if sp.shaft_type == shaft_types::ELEVATOR
                 || sp.shaft_type == shaft_types::SERVICE_ELEVATOR
@@ -412,12 +440,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             // Record in shaft_infos for cross-deck doors
             if si < shaft_infos.len() {
                 shaft_infos[si].deck_room_ids[deck as usize] = Some(shaft_room_id);
-                if deck == deck_count as i32 / 2 {
-                    shaft_infos[si].ref_x = sp.x as f32 + sp.w as f32 / 2.0;
-                    shaft_infos[si].ref_y = sp.y as f32 + sp.h as f32 / 2.0;
-                    shaft_infos[si].ref_w = sp.w as f32;
-                    shaft_infos[si].ref_h = sp.h as f32;
-                }
+                // Always use global position as reference
+                shaft_infos[si].ref_x = sp.x as f32 + sp.w as f32 / 2.0;
+                shaft_infos[si].ref_y = sp.y as f32 + sp.h as f32 / 2.0;
+                shaft_infos[si].ref_w = sp.w as f32;
+                shaft_infos[si].ref_h = sp.h as f32;
             }
 
             // Connect shaft to adjacent corridor
@@ -942,7 +969,10 @@ fn bsp_subdivide(
         return;
     }
 
-    // Split the rectangle and distribute requests
+    // Split the rectangle and distribute requests.
+    // ONLY split along Y (horizontal rows) so every room spans the full strip width
+    // and maintains contact with the corridor wall. Vertical X-splits create inner
+    // rooms that are hidden behind outer rooms with no corridor access.
     let split_at = requests.len() / 2;
     let area_ratio = requests[..split_at]
         .iter()
@@ -950,27 +980,14 @@ fn bsp_subdivide(
         .sum::<f32>()
         / requests.iter().map(|r| r.target_area).sum::<f32>();
 
-    if w >= h {
-        // Vertical split (split along X)
-        let split_x = (w as f32 * area_ratio).round() as usize;
-        let split_x = split_x.max(MIN_ROOM_DIM).min(w.saturating_sub(MIN_ROOM_DIM));
-        if split_x >= MIN_ROOM_DIM && w - split_x >= MIN_ROOM_DIM {
-            bsp_subdivide(x, y, split_x, h, &requests[..split_at], out);
-            bsp_subdivide(x + split_x, y, w - split_x, h, &requests[split_at..], out);
-        } else {
-            // Can't split further — assign first request
-            out.push((x, y, w, h));
-        }
+    // Horizontal split (split along Y) — creates rows, all full-width
+    let split_y = (h as f32 * area_ratio).round() as usize;
+    let split_y = split_y.max(MIN_ROOM_DIM).min(h.saturating_sub(MIN_ROOM_DIM));
+    if split_y >= MIN_ROOM_DIM && h - split_y >= MIN_ROOM_DIM {
+        bsp_subdivide(x, y, w, split_y, &requests[..split_at], out);
+        bsp_subdivide(x, y + split_y, w, h - split_y, &requests[split_at..], out);
     } else {
-        // Horizontal split (split along Y)
-        let split_y = (h as f32 * area_ratio).round() as usize;
-        let split_y = split_y.max(MIN_ROOM_DIM).min(h.saturating_sub(MIN_ROOM_DIM));
-        if split_y >= MIN_ROOM_DIM && h - split_y >= MIN_ROOM_DIM {
-            bsp_subdivide(x, y, w, split_y, &requests[..split_at], out);
-            bsp_subdivide(x, y + split_y, w, h - split_y, &requests[split_at..], out);
-        } else {
-            out.push((x, y, w, h));
-        }
+        out.push((x, y, w, h));
     }
 }
 
