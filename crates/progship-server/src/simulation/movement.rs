@@ -1,7 +1,7 @@
 //! Movement and pathfinding system - moves people through rooms via doors.
 
-use progship_logic::pathfinding::{DoorEdge, NavGraph};
 use crate::tables::*;
+use progship_logic::pathfinding::{DoorEdge, NavGraph};
 use spacetimedb::{ReducerContext, Table};
 
 /// Move people toward their destinations, following door waypoints.

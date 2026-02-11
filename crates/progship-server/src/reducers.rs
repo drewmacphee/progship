@@ -1,9 +1,9 @@
 //! Client-facing reducers for game interaction and simulation ticking.
 
-use progship_logic::actions::{apply_needs_deltas, compute_action_effect, NeedsValues};
-use progship_logic::movement::{compute_move, DoorInfo, MoveInput, MoveResult, RoomBounds};
 use crate::simulation;
 use crate::tables::*;
+use progship_logic::actions::{apply_needs_deltas, compute_action_effect, NeedsValues};
+use progship_logic::movement::{compute_move, DoorInfo, MoveInput, MoveResult, RoomBounds};
 use spacetimedb::{reducer, ReducerContext, Table};
 
 // ============================================================================
@@ -61,17 +61,25 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
         })
         .id;
 
-    // Start in the first corridor on deck 0
+    // Start on the lowest deck that has an elevator shaft, so the player
+    // can immediately use elevators to reach other decks.
+    let spawn_deck = ctx
+        .db
+        .room()
+        .iter()
+        .filter(|r| r.room_type == room_types::ELEVATOR_SHAFT)
+        .map(|r| r.deck)
+        .min()
+        .unwrap_or(0);
     let start_room = ctx
         .db
         .room()
         .iter()
-        .find(|r| r.deck == 0 && r.room_type == crate::tables::room_types::CORRIDOR);
+        .find(|r| r.deck == spawn_deck && r.room_type == room_types::CORRIDOR);
     let (start_room_id, start_x, start_y) = if let Some(r) = &start_room {
         (r.id, r.x, r.y)
     } else {
-        // Fallback: just use the first room on deck 0
-        let fallback = ctx.db.room().iter().find(|r| r.deck == 0);
+        let fallback = ctx.db.room().iter().find(|r| r.deck == spawn_deck);
         if let Some(r) = fallback {
             (r.id, r.x, r.y)
         } else {
@@ -177,8 +185,16 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             .iter()
             .filter(|d| d.room_a == pos.room_id || d.room_b == pos.room_id)
             .filter(|d| {
-                let other_id = if d.room_a == pos.room_id { d.room_b } else { d.room_a };
-                ctx.db.room().id().find(other_id).is_some_and(|r| r.deck == room.deck)
+                let other_id = if d.room_a == pos.room_id {
+                    d.room_b
+                } else {
+                    d.room_a
+                };
+                ctx.db
+                    .room()
+                    .id()
+                    .find(other_id)
+                    .is_some_and(|r| r.deck == room.deck)
             })
             .map(|d| DoorInfo {
                 room_a: d.room_a,
@@ -211,12 +227,8 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
         );
 
         let (mut final_x, mut final_y, new_room) = match result {
-            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
-                (x, y, pos.room_id)
-            }
-            MoveResult::DoorTraversal { room_id, x, y } => {
-                (x, y, room_id)
-            }
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => (x, y, pos.room_id),
+            MoveResult::DoorTraversal { room_id, x, y } => (x, y, room_id),
         };
 
         // Push away from NPCs — only when fully inside a room (not in a door zone)
@@ -225,7 +237,7 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
             current.contains(final_x, final_y, player_radius)
         } else {
             let dest = room_lookup(new_room);
-            dest.map_or(false, |d| d.contains(final_x, final_y, player_radius))
+            dest.is_some_and(|d| d.contains(final_x, final_y, player_radius))
         };
 
         if inside_bounds {

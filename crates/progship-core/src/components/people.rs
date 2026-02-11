@@ -37,9 +37,9 @@ impl Needs {
     /// Apply decay over time (needs increase)
     pub fn decay(&mut self, hours: f32) {
         // Rates: how many hours until need reaches 1.0 from 0.0
-        self.hunger = (self.hunger + hours / 8.0).clamp(0.0, 1.0);   // Hungry after 8 hours
+        self.hunger = (self.hunger + hours / 8.0).clamp(0.0, 1.0); // Hungry after 8 hours
         self.fatigue = (self.fatigue + hours / 16.0).clamp(0.0, 1.0); // Tired after 16 hours
-        self.social = (self.social + hours / 48.0).clamp(0.0, 1.0);   // Lonely after 48 hours
+        self.social = (self.social + hours / 48.0).clamp(0.0, 1.0); // Lonely after 48 hours
         self.comfort = (self.comfort + hours / 24.0).clamp(0.0, 1.0); // Uncomfortable after 24 hours
         self.hygiene = (self.hygiene + hours / 12.0).clamp(0.0, 1.0); // Needs shower after 12 hours
     }
@@ -306,7 +306,7 @@ impl ActivityType {
             _ => None,
         }
     }
-    
+
     /// Returns true if this activity can be interrupted for duty
     pub fn interruptible_for_duty(&self) -> bool {
         match self {
@@ -354,7 +354,7 @@ impl Faction {
             Department::Civilian => Faction::Operations,
         }
     }
-    
+
     /// Convert from CabinClass to Faction
     pub fn from_cabin_class(class: CabinClass) -> Self {
         match class {
@@ -363,40 +363,50 @@ impl Faction {
             CabinClass::Steerage => Faction::PassengersSteerage,
         }
     }
-    
+
     /// Base affinity between factions (-1.0 to 1.0)
     /// Positive = friendly, Negative = rivalry
     pub fn affinity_with(&self, other: &Faction) -> f32 {
         if self == other {
             return 1.0; // Same faction = high affinity
         }
-        
+
         match (self, other) {
             // Crew departments generally get along
             (Faction::Command, Faction::Security) => 0.5,
             (Faction::Engineering, Faction::Science) => 0.4,
             (Faction::Medical, _) if other.is_crew() => 0.3,
-            
+
             // Passenger classes have some tension
             (Faction::PassengersFirst, Faction::PassengersSteerage) => -0.2,
             (Faction::PassengersSteerage, Faction::PassengersFirst) => -0.2,
-            
+
             // Crew and passengers are neutral to slightly wary
             _ if self.is_crew() && other.is_passenger() => 0.0,
             _ if self.is_passenger() && other.is_crew() => 0.1,
-            
+
             // Default neutral
             _ => 0.1,
         }
     }
-    
+
     pub fn is_crew(&self) -> bool {
-        matches!(self, Faction::Command | Faction::Engineering | Faction::Medical 
-            | Faction::Science | Faction::Security | Faction::Operations)
+        matches!(
+            self,
+            Faction::Command
+                | Faction::Engineering
+                | Faction::Medical
+                | Faction::Science
+                | Faction::Security
+                | Faction::Operations
+        )
     }
-    
+
     pub fn is_passenger(&self) -> bool {
-        matches!(self, Faction::PassengersFirst | Faction::PassengersStandard | Faction::PassengersSteerage)
+        matches!(
+            self,
+            Faction::PassengersFirst | Faction::PassengersStandard | Faction::PassengersSteerage
+        )
     }
 }
 
@@ -417,7 +427,7 @@ mod tests {
         let mut needs = Needs::default();
         needs.hunger = 0.9;
         needs.fatigue = 0.5;
-        
+
         assert_eq!(needs.most_urgent(0.3), Some(NeedType::Hunger));
         assert_eq!(needs.most_urgent(0.95), None);
     }

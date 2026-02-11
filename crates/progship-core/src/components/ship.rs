@@ -1,7 +1,7 @@
 //! Ship structure components: Room, Deck, ShipSystem, etc.
 
-use serde::{Deserialize, Serialize};
 use super::common::{BoundingBox, Vec3};
+use serde::{Deserialize, Serialize};
 
 /// Room component - represents a physical space on the ship
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,20 +85,22 @@ impl Room {
         if self.deck_level != other.deck_level {
             return false;
         }
-        
+
         let (ax1, ay1, ax2, ay2) = self.world_bounds();
         let (bx1, by1, bx2, by2) = other.world_bounds();
-        
+
         // Check if rooms are within 1 meter of each other
         let gap = 1.0;
         let _x_adjacent = ax2 >= bx1 - gap && ax1 <= bx2 + gap;
         let _y_adjacent = ay2 >= by1 - gap && ay1 <= by2 + gap;
         let x_overlap = ax2 > bx1 && ax1 < bx2;
         let y_overlap = ay2 > by1 && ay1 < by2;
-        
+
         // Adjacent means sharing an edge (overlap in one dimension, touching in other)
-        (x_overlap && (ay2 >= by1 - gap && ay2 <= by1 + gap || ay1 >= by2 - gap && ay1 <= by2 + gap)) ||
-        (y_overlap && (ax2 >= bx1 - gap && ax2 <= bx1 + gap || ax1 >= bx2 - gap && ax1 <= bx2 + gap))
+        (x_overlap
+            && (ay2 >= by1 - gap && ay2 <= by1 + gap || ay1 >= by2 - gap && ay1 <= by2 + gap))
+            || (y_overlap
+                && (ax2 >= bx1 - gap && ax2 <= bx1 + gap || ax1 >= bx2 - gap && ax1 <= bx2 + gap))
     }
 
     /// Get a random position inside this room (local coordinates)
@@ -119,22 +121,22 @@ impl Room {
             local.z,
         )
     }
-    
+
     /// Get the door position (local coords) for entering/exiting this room
     /// Doors are typically at the edge closest to the corridor (y=0)
     pub fn door_position(&self) -> Vec3 {
         // Door is centered on x, at the edge closest to corridor (y=0 in world coords)
         let door_y = if self.world_y > 0.0 {
             // Room is on starboard (positive y), door at min y edge
-            0.5  // Just inside the min y edge
+            0.5 // Just inside the min y edge
         } else {
             // Room is on port (negative y) or center, door at max y edge
-            self.depth() - 0.5  // Just inside the max y edge
+            self.depth() - 0.5 // Just inside the max y edge
         };
-        
+
         Vec3::new(self.width() / 2.0, door_y, 0.0)
     }
-    
+
     /// Get the door position in world coordinates
     pub fn door_world_position(&self) -> Vec3 {
         self.local_to_world(self.door_position())
@@ -146,36 +148,36 @@ pub enum RoomType {
     // Command
     Bridge,
     ConferenceRoom,
-    
+
     // Engineering
     Engineering,
     ReactorRoom,
     MaintenanceBay,
-    
+
     // Living
     Quarters,
     QuartersCrew,
     QuartersOfficer,
     QuartersPassenger,
-    
+
     // Services
     Mess,
     Galley,
     Medical,
     Recreation,
     Gym,
-    
+
     // Utility
     Cargo,
     Storage,
     Airlock,
     Corridor,
     Elevator,
-    
+
     // Science
     Laboratory,
     Observatory,
-    
+
     // Life Support
     LifeSupport,
     Hydroponics,
@@ -190,8 +192,15 @@ impl RoomType {
             RoomType::Bridge | RoomType::Engineering | RoomType::ReactorRoom => {
                 vec![ActivityType::Working]
             }
-            RoomType::Quarters | RoomType::QuartersCrew | RoomType::QuartersOfficer | RoomType::QuartersPassenger => {
-                vec![ActivityType::Sleeping, ActivityType::Relaxing, ActivityType::Hygiene]
+            RoomType::Quarters
+            | RoomType::QuartersCrew
+            | RoomType::QuartersOfficer
+            | RoomType::QuartersPassenger => {
+                vec![
+                    ActivityType::Sleeping,
+                    ActivityType::Relaxing,
+                    ActivityType::Hygiene,
+                ]
             }
             RoomType::Mess | RoomType::Galley => {
                 vec![ActivityType::Eating, ActivityType::Socializing]
@@ -446,11 +455,11 @@ impl MaintenanceTask {
             created_at,
         }
     }
-    
+
     pub fn is_complete(&self) -> bool {
         self.progress >= 1.0
     }
-    
+
     pub fn assign(&mut self, crew_id: u32) {
         self.assigned_crew_id = Some(crew_id);
     }
@@ -470,10 +479,10 @@ mod tests {
     fn test_ship_system_degradation() {
         let mut system = ShipSystem::new("Reactor", SystemType::Power);
         assert_eq!(system.status, SystemStatus::Nominal);
-        
+
         system.degrade(10.0, 0.05); // 50% degradation
         assert_eq!(system.status, SystemStatus::Degraded);
-        
+
         system.repair(0.5);
         assert_eq!(system.status, SystemStatus::Nominal);
     }

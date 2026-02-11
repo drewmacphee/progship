@@ -1,9 +1,9 @@
 //! Generation - procedural creation of ships, crew, etc.
 
-mod ship;
 mod crew;
 mod names;
+mod ship;
 
-pub use ship::*;
 pub use crew::*;
 pub use names::*;
+pub use ship::*;

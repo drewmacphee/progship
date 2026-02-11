@@ -28,10 +28,10 @@
 //! ```
 
 pub mod components;
-pub mod systems;
-pub mod generation;
 pub mod engine;
+pub mod generation;
 pub mod persistence;
+pub mod systems;
 
 /// Commonly used types for convenient importing
 pub mod prelude {

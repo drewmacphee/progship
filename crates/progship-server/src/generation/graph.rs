@@ -9,7 +9,12 @@ use spacetimedb::{ReducerContext, Table};
 
 /// Scale room counts based on actual population.
 /// The manifest counts are baselined for ~5000 people.
-fn scale_room_count(spec: &FacilitySpec, total_pop: u32, crew_count: u32, passenger_count: u32) -> u32 {
+fn scale_room_count(
+    spec: &FacilitySpec,
+    total_pop: u32,
+    crew_count: u32,
+    passenger_count: u32,
+) -> u32 {
     let base_pop = 5000.0f32;
     let pop_ratio = total_pop as f32 / base_pop;
 
@@ -65,7 +70,12 @@ fn scale_room_count(spec: &FacilitySpec, total_pop: u32, crew_count: u32, passen
     }
 }
 
-pub(super) fn build_ship_graph(ctx: &ReducerContext, _deck_count: u32, crew_count: u32, passenger_count: u32) {
+pub(super) fn build_ship_graph(
+    ctx: &ReducerContext,
+    _deck_count: u32,
+    crew_count: u32,
+    passenger_count: u32,
+) {
     let facility_manifest = get_facility_manifest();
     let total_pop = crew_count + passenger_count;
 

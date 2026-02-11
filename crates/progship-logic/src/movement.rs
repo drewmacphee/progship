@@ -163,17 +163,19 @@ pub fn compute_move(
             // and perpendicular axis to the door width (already done in pass_x/pass_y).
             let (cx, cy) = current_room.clamp(pass_x, pass_y, input.player_radius);
             let (final_x, final_y) = if on_vertical_wall {
-                let min_x = (current_room.cx - current_room.half_w)
-                    .min(dest.cx - dest.half_w);
-                let max_x = (current_room.cx + current_room.half_w)
-                    .max(dest.cx + dest.half_w);
-                (pass_x.clamp(min_x + input.player_radius, max_x - input.player_radius), cy)
+                let min_x = (current_room.cx - current_room.half_w).min(dest.cx - dest.half_w);
+                let max_x = (current_room.cx + current_room.half_w).max(dest.cx + dest.half_w);
+                (
+                    pass_x.clamp(min_x + input.player_radius, max_x - input.player_radius),
+                    cy,
+                )
             } else {
-                let min_y = (current_room.cy - current_room.half_h)
-                    .min(dest.cy - dest.half_h);
-                let max_y = (current_room.cy + current_room.half_h)
-                    .max(dest.cy + dest.half_h);
-                (cx, pass_y.clamp(min_y + input.player_radius, max_y - input.player_radius))
+                let min_y = (current_room.cy - current_room.half_h).min(dest.cy - dest.half_h);
+                let max_y = (current_room.cy + current_room.half_h).max(dest.cy + dest.half_h);
+                (
+                    cx,
+                    pass_y.clamp(min_y + input.player_radius, max_y - input.player_radius),
+                )
             };
             return MoveResult::InRoom {
                 x: final_x,
@@ -329,7 +331,10 @@ mod tests {
                 // Still in doorway but Y should advance toward spine1, not snap back
                 assert!(y > 52.8, "Y should advance, got {}", y);
             }
-            other => panic!("Expected DoorTraversal or advancing InRoom, got {:?}", other),
+            other => panic!(
+                "Expected DoorTraversal or advancing InRoom, got {:?}",
+                other
+            ),
         }
     }
 }

@@ -12,7 +12,11 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0, z: 0.0 };
+    pub const ZERO: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
 
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
@@ -239,7 +243,7 @@ mod tests {
     fn test_vec3_operations() {
         let a = Vec3::new(1.0, 2.0, 3.0);
         let b = Vec3::new(4.0, 5.0, 6.0);
-        
+
         let sum = a + b;
         assert_eq!(sum.x, 5.0);
         assert_eq!(sum.y, 7.0);
@@ -247,7 +251,7 @@ mod tests {
 
         let diff = b - a;
         assert_eq!(diff.x, 3.0);
-        
+
         let scaled = a * 2.0;
         assert_eq!(scaled.x, 2.0);
         assert_eq!(scaled.y, 4.0);

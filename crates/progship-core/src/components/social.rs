@@ -46,13 +46,13 @@ impl Relationship {
         // Strength decays toward neutral, familiarity decays slowly
         let decay_rate = 0.001; // per hour
         let hours = hours_since_interaction as f32;
-        
+
         if self.strength > 0.0 {
             self.strength = (self.strength - hours * decay_rate).max(0.0);
         } else if self.strength < 0.0 {
             self.strength = (self.strength + hours * decay_rate).min(0.0);
         }
-        
+
         self.familiarity = (self.familiarity - hours * decay_rate * 0.1).max(0.0);
         self.update_type();
     }
@@ -240,12 +240,12 @@ mod tests {
     fn test_relationship_interaction() {
         let mut rel = Relationship::new(1, 2);
         assert_eq!(rel.relationship_type, RelationshipType::Stranger);
-        
+
         // Positive interactions
         for i in 0..10 {
             rel.interact(i as f64, 0.5);
         }
-        
+
         assert!(rel.familiarity > 0.3);
         assert!(rel.strength > 0.3);
         assert_eq!(rel.relationship_type, RelationshipType::Friend);
@@ -257,7 +257,7 @@ mod tests {
         rel.strength = 0.5;
         rel.familiarity = 0.5;
         rel.update_type();
-        
+
         rel.decay(100.0); // 100 hours without interaction
         assert!(rel.strength < 0.5);
     }
@@ -266,7 +266,7 @@ mod tests {
     fn test_memory_decay() {
         let mut memory = Memory::new(1, MemoryType::Conversation, 0.0, 0.3);
         assert!(memory.is_significant());
-        
+
         // With impact=0.3, rate = 0.001/(1+0.3) ≈ 0.00077/hr
         // Need ~1040 hours to reach decay=0.8
         memory.apply_decay(1500.0);

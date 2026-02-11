@@ -348,17 +348,19 @@ fn spawn_wall_with_gaps(
     });
 
     if door_positions.is_empty() {
-        // No doors — solid wall
+        // No doors — solid wall, extended by wall_thickness/2 at each end
+        // to overlap with perpendicular walls at corners
+        let extended_len = wall_length + wall_thickness;
         if horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_length, wall_height, wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(extended_len, wall_height, wall_thickness))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_length))),
+                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, extended_len))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
@@ -384,11 +386,14 @@ fn spawn_wall_with_gaps(
     gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     let half_len = wall_length / 2.0;
-    let mut cursor = -half_len;
+    let ext = wall_thickness / 2.0;
+    // Extend wall ends by half wall thickness to overlap at corners
+    let mut cursor = -half_len - ext;
+    let wall_end = half_len + ext;
 
     for (gap_start, gap_end) in &gaps {
         let seg_len = gap_start - cursor;
-        if seg_len > 0.1 {
+        if seg_len > wall_thickness {
             let seg_center = cursor + seg_len / 2.0;
             if horizontal {
                 commands.spawn((
@@ -409,9 +414,9 @@ fn spawn_wall_with_gaps(
         cursor = *gap_end;
     }
 
-    // Final segment after last gap
-    let seg_len = half_len - cursor;
-    if seg_len > 0.1 {
+    // Final segment after last gap (extended to wall end)
+    let seg_len = wall_end - cursor;
+    if seg_len > wall_thickness {
         let seg_center = cursor + seg_len / 2.0;
         if horizontal {
             commands.spawn((
