@@ -1,9 +1,12 @@
 //! Corridor-first ship layout generation.
 //!
 //! Pipeline: hull sizing → corridor skeleton → shafts at intersections →
-//! attachment strip scanning → BSP room packing → room-to-room doors.
+//! attachment strip scanning → BSP room packing → perimeter service corridor
+//! → room-to-room doors.
 //! Rooms are ONLY placed adjacent to corridors, guaranteeing connectivity
 //! by construction (no BFS cleanup needed).
+//! The service corridor wraps around the perimeter of all placed content
+//! rather than occupying a fixed starboard strip.
 
 use super::doors::should_have_room_door;
 use super::facilities::deck_range_for_zone;
@@ -145,7 +148,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     let mid_hl = hull_length(mid_deck, deck_count, ship_length);
     let mid_spine_left = mid_hw / 2 - SPINE_WIDTH / 2;
     let mid_spine_right = mid_spine_left + SPINE_WIDTH;
-    let mid_svc_left = mid_hw - SVC_CORRIDOR_WIDTH;
     let mid_num_cross = ((mid_hl as f32 / 35.0).round() as usize).max(1);
     let mid_cross_spacing = mid_hl / (mid_num_cross + 1);
     let mut mid_cross_ys: Vec<usize> = Vec::new();
@@ -158,7 +160,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     let global_shaft_placements = compute_shaft_placements(
         &shaft_templates,
         mid_spine_right,
-        mid_svc_left,
+        mid_spine_left,
         &mid_cross_ys,
         mid_hw,
         mid_hl,
@@ -170,7 +172,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     // outside their hull boundary as CELL_HULL.
     let spine_left = mid_spine_left;
     let spine_right = mid_spine_right;
-    let svc_left = mid_svc_left;
 
     for deck in 0..deck_count as i32 {
         let deck_hw: usize = hull_width(deck as u32, deck_count, ship_beam);
@@ -214,23 +215,14 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
-        // Cross-corridors: use midship positions (only within hull)
+        // Cross-corridors: use midship positions, span full hull width (only within hull)
         let cross_ys = &mid_cross_ys;
         for &cy in cross_ys.iter() {
-            for x in 0..svc_left.min(hw) {
+            for x in 0..hw {
                 for y in cy..cy + CROSS_CORRIDOR_WIDTH {
                     if y < hl && grid[x][y] == CELL_EMPTY {
                         grid[x][y] = CELL_MAIN_CORRIDOR;
                     }
-                }
-            }
-        }
-
-        // Service corridor: starboard edge, full length (only within hull)
-        for x in svc_left..hw {
-            for y in 0..hl {
-                if grid[x][y] != CELL_HULL && grid[x][y] == CELL_EMPTY {
-                    grid[x][y] = CELL_SERVICE_CORRIDOR;
                 }
             }
         }
@@ -306,14 +298,14 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             carries: carries_flags::CREW_PATH | carries_flags::POWER | carries_flags::DATA,
         });
 
-        // Cross-corridor Room entries (only those within hull)
+        // Cross-corridor Room entries (only those within hull, span full width)
         let mut cross_rooms: Vec<(u32, usize)> = Vec::new(); // (room_id, y_start)
         for &cy in cross_ys.iter() {
             if cy < y_margin || cy + CROSS_CORRIDOR_WIDTH > hl - y_margin {
                 continue;
             }
             let cc_x0 = x_margin;
-            let cc_x1 = (hw - x_margin).min(svc_left);
+            let cc_x1 = hw - x_margin;
             let cc_w = cc_x1.saturating_sub(cc_x0);
             if cc_w < MIN_ROOM_DIM {
                 continue;
@@ -344,44 +336,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             });
             cross_rooms.push((cc_id, cy));
         }
-
-        // Service corridor Room entry (clipped to hull)
-        let svc_y0 = y_margin;
-        let svc_y1 = hl - y_margin;
-        let svc_h = svc_y1.saturating_sub(svc_y0);
-        let has_svc = svc_left < hw - x_margin && svc_h >= MIN_ROOM_DIM;
-        let svc_id = if has_svc {
-            let sid = next_id();
-            ctx.db.room().insert(Room {
-                id: sid,
-                node_id: 0,
-                name: format!("Service Corridor D{}", deck + 1),
-                room_type: room_types::SERVICE_CORRIDOR,
-                deck,
-                x: svc_left as f32 + SVC_CORRIDOR_WIDTH as f32 / 2.0,
-                y: svc_y0 as f32 + svc_h as f32 / 2.0,
-                width: SVC_CORRIDOR_WIDTH as f32,
-                height: svc_h as f32,
-                capacity: 0,
-            });
-            ctx.db.corridor().insert(Corridor {
-                id: 0,
-                deck,
-                corridor_type: corridor_types::SERVICE,
-                x: svc_left as f32,
-                y: svc_y0 as f32,
-                width: SVC_CORRIDOR_WIDTH as f32,
-                length: svc_h as f32,
-                orientation: 1,
-                carries: carries_flags::POWER
-                    | carries_flags::WATER
-                    | carries_flags::HVAC
-                    | carries_flags::COOLANT,
-            });
-            Some(sid)
-        } else {
-            None
-        };
 
         // ---- Corridor-to-corridor doors ----
 
@@ -423,23 +377,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         door_y: dy,
                     });
                 }
-            }
-            // Cross-corridor ↔ service corridor (only if service corridor exists)
-            if let Some(sid) = svc_id {
-                let dx = svc_left as f32;
-                let dy = cy as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0;
-                ctx.db.door().insert(Door {
-                    id: 0,
-                    room_a: cc_id,
-                    room_b: sid,
-                    wall_a: wall_sides::EAST,
-                    wall_b: wall_sides::WEST,
-                    position_along_wall: 0.5,
-                    width: CROSS_CORRIDOR_WIDTH as f32,
-                    access_level: access_levels::CREW_ONLY,
-                    door_x: dx,
-                    door_y: dy,
-                });
             }
         }
 
@@ -511,10 +448,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 sp,
                 &spine_segments,
                 &cross_rooms,
-                svc_id,
                 spine_left,
                 spine_right,
-                svc_left,
                 access,
             );
         }
@@ -526,7 +461,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             hl,
             spine_left,
             spine_right,
-            svc_left,
             cross_ys,
             &spine_segments,
             &cross_rooms,
@@ -648,7 +582,23 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
-        // ---- Phase 6: Room-to-room doors (adjacent logical pairs) ----
+        // ---- Phase 6: Perimeter service corridor ----
+        // Wrap a 2-cell-wide corridor ring around the outermost placed content.
+        let _perimeter_rooms = wrap_perimeter_corridor(
+            ctx,
+            &mut grid,
+            hw,
+            hl,
+            x_margin,
+            y_margin,
+            deck,
+            &mut next_id,
+            &placed_rooms,
+            &spine_segments,
+            &cross_rooms,
+        );
+
+        // ---- Phase 7: Room-to-room doors (adjacent logical pairs) ----
         for i in 0..placed_rooms.len() {
             for j in (i + 1)..placed_rooms.len() {
                 let (id_a, ax, ay, aw, ah, rt_a) = placed_rooms[i];
@@ -692,10 +642,12 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     CELL_MAIN_CORRIDOR => '=',
                     CELL_SERVICE_CORRIDOR => '-',
                     CELL_SHAFT => '#',
-                    v => {
+                    CELL_HULL => ' ',
+                    v if v >= CELL_ROOM_BASE => {
                         let idx = (v - CELL_ROOM_BASE) as usize;
                         (b'A' + (idx % 26) as u8) as char
                     }
+                    _ => '?',
                 };
                 dump.push(ch);
             }
@@ -792,18 +744,18 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 // ---- Helper functions ----
 
 /// Compute shaft placements by distributing templates across cross-corridor intersections.
-/// Main elevators go starboard of spine, service elevators near service corridor,
+/// Main elevators go starboard of spine, service elevators near hull edge,
 /// ladders go port of spine. Shafts are distributed evenly along the deck length.
 fn compute_shaft_placements(
     templates: &[(&'static str, u8, bool, usize, usize)],
     spine_right: usize,
-    svc_left: usize,
+    spine_left: usize,
     cross_ys: &[usize],
     hw: usize,
     hl: usize,
 ) -> Vec<ShaftPlacement> {
     let mut placements = Vec::new();
-    let spine_left_edge = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
+    let spine_left_edge = spine_left;
     let cross_end_offset = CROSS_CORRIDOR_WIDTH;
 
     if cross_ys.is_empty() {
@@ -863,8 +815,9 @@ fn compute_shaft_placements(
         });
     }
 
-    // Service elevators: near service corridor, distributed evenly
-    if svc_left >= 2 {
+    // Service elevators: near starboard hull edge, distributed evenly
+    let svc_x = hw.saturating_sub(SVC_CORRIDOR_WIDTH + 2); // leave room for perimeter corridor
+    if svc_x > spine_right {
         for (i, (name, st, is_main, w, h)) in service_elevators.iter().enumerate() {
             let cross_idx = if service_elevators.len() <= num_positions {
                 (i * num_positions / service_elevators.len().max(1)).min(num_positions - 1)
@@ -873,7 +826,7 @@ fn compute_shaft_placements(
             };
             let cy = cross_ys[cross_idx];
             placements.push(ShaftPlacement {
-                x: svc_left.saturating_sub(*w),
+                x: svc_x.saturating_sub(*w),
                 y: cy + cross_end_offset,
                 w: *w,
                 h: *h,
@@ -910,11 +863,10 @@ fn compute_shaft_placements(
 #[allow(clippy::too_many_arguments)]
 fn find_attachment_strips(
     grid: &[Vec<u8>],
-    _hw: usize,
+    hw: usize,
     hl: usize,
     spine_left: usize,
     spine_right: usize,
-    svc_left: usize,
     cross_ys: &[usize],
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
@@ -923,11 +875,14 @@ fn find_attachment_strips(
 ) -> Vec<AttachmentStrip> {
     let mut strips = Vec::new();
 
-    // Y boundaries clipped to hull
-    let y_lo = y_margin;
-    let y_hi = hl - y_margin;
+    // Reserve space for perimeter service corridor ring
+    let ring_margin = SVC_CORRIDOR_WIDTH;
 
-    // Port side of spine (x_margin..spine_left)
+    // Y boundaries clipped to hull + ring margin
+    let y_lo = y_margin + ring_margin;
+    let y_hi = hl.saturating_sub(y_margin + ring_margin);
+
+    // Port side of spine (x_margin+ring..spine_left)
     // Between consecutive cross-corridors (and before first / after last)
     let mut y_boundaries: Vec<usize> = vec![y_lo];
     for &cy in cross_ys {
@@ -938,6 +893,7 @@ fn find_attachment_strips(
     }
     y_boundaries.push(y_hi);
 
+    let port_x = x_margin + ring_margin;
     for chunk in y_boundaries.chunks(2) {
         if chunk.len() < 2 || chunk[0] >= chunk[1] {
             continue;
@@ -945,8 +901,8 @@ fn find_attachment_strips(
         let y0 = chunk[0];
         let y1 = chunk[1];
         let strip_h = y1 - y0;
-        let strip_x = x_margin;
-        let strip_w = spine_left.saturating_sub(x_margin);
+        let strip_x = port_x;
+        let strip_w = spine_left.saturating_sub(port_x);
 
         if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
             // Find which corridor this strip connects to
@@ -965,7 +921,7 @@ fn find_attachment_strips(
         }
     }
 
-    // Starboard side of spine (spine_right..svc_left)
+    // Starboard side of spine (spine_right..hull edge - ring margin)
     for chunk in y_boundaries.chunks(2) {
         if chunk.len() < 2 || chunk[0] >= chunk[1] {
             continue;
@@ -974,11 +930,11 @@ fn find_attachment_strips(
         let y1 = chunk[1];
         let strip_h = y1 - y0;
         let strip_x = spine_right;
-        let strip_w = svc_left.saturating_sub(spine_right);
+        let strip_max_w = (hw - x_margin - ring_margin).saturating_sub(spine_right);
 
-        if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
+        if strip_max_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
             // Exclude shaft areas — scan for actual empty width
-            let actual_w = scan_empty_width(grid, strip_x, y0, strip_w, strip_h);
+            let actual_w = scan_empty_width(grid, strip_x, y0, strip_max_w, strip_h);
             if actual_w >= MIN_ROOM_DIM {
                 let corridor_id =
                     find_corridor_for_strip(spine_right, y0, y1, spine_segments, cross_rooms);
@@ -1150,10 +1106,8 @@ fn connect_shaft_to_corridor(
     sp: &ShaftPlacement,
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
-    svc_id: Option<u32>,
     spine_left: usize,
     spine_right: usize,
-    svc_left: usize,
     access: u8,
 ) {
     // Check if shaft overlaps a cross-corridor (same Y range)
@@ -1209,24 +1163,252 @@ fn connect_shaft_to_corridor(
             }
         }
     }
+}
 
-    // Check if adjacent to service corridor
-    if let Some(sid) = svc_id {
-        if sp.x + sp.w >= svc_left {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: shaft_room_id,
-                room_b: sid,
-                wall_a: wall_sides::EAST,
-                wall_b: wall_sides::WEST,
-                position_along_wall: 0.5,
-                width: sp.h.min(sp.w) as f32,
-                access_level: access,
-                door_x: svc_left as f32,
-                door_y: sp.y as f32 + sp.h as f32 / 2.0,
-            });
+/// Wrap a perimeter service corridor around placed content on a deck.
+/// Places a SVC_CORRIDOR_WIDTH ring at a fixed offset from the hull boundary.
+#[allow(clippy::too_many_arguments)]
+fn wrap_perimeter_corridor(
+    ctx: &ReducerContext,
+    grid: &mut [Vec<u8>],
+    hw: usize,
+    hl: usize,
+    x_margin: usize,
+    y_margin: usize,
+    deck: i32,
+    next_id: &mut impl FnMut() -> u32,
+    placed_rooms: &[(u32, usize, usize, usize, usize, u8)],
+    spine_segments: &[(u32, usize, usize)],
+    cross_rooms: &[(u32, usize)],
+) -> Vec<u32> {
+    // The ring sits just inside the hull boundary
+    let ring_x0 = x_margin;
+    let ring_x1 = hw.saturating_sub(x_margin);
+    let ring_y0 = y_margin;
+    let ring_y1 = hl.saturating_sub(y_margin);
+
+    if ring_x1 <= ring_x0 + 2 * SVC_CORRIDOR_WIDTH + SPINE_WIDTH
+        || ring_y1 <= ring_y0 + 2 * SVC_CORRIDOR_WIDTH
+    {
+        return Vec::new();
+    }
+
+    // Inner boundary = where rooms/corridors live
+    let inner_x0 = ring_x0 + SVC_CORRIDOR_WIDTH;
+    let inner_x1 = ring_x1.saturating_sub(SVC_CORRIDOR_WIDTH);
+    let inner_y0 = ring_y0 + SVC_CORRIDOR_WIDTH;
+    let inner_y1 = ring_y1.saturating_sub(SVC_CORRIDOR_WIDTH);
+
+    // Stamp ring cells: everything between hull edge and inner boundary
+    for x in ring_x0..ring_x1 {
+        for y in ring_y0..ring_y1 {
+            let in_interior = x >= inner_x0 && x < inner_x1 && y >= inner_y0 && y < inner_y1;
+            if !in_interior && grid[x][y] == CELL_EMPTY {
+                grid[x][y] = CELL_SERVICE_CORRIDOR;
+            }
         }
     }
+
+    let mut perimeter_ids = Vec::new();
+
+    // North (fore) side: ring_x0..ring_x1, ring_y0..inner_y0
+    let north_w = ring_x1 - ring_x0;
+    let north_h = inner_y0 - ring_y0;
+    if north_h >= 1 && north_w >= 1 {
+        let id = next_id();
+        ctx.db.room().insert(Room {
+            id,
+            node_id: 0,
+            name: format!("Service Ring North D{}", deck + 1),
+            room_type: room_types::SERVICE_CORRIDOR,
+            deck,
+            x: ring_x0 as f32 + north_w as f32 / 2.0,
+            y: ring_y0 as f32 + north_h as f32 / 2.0,
+            width: north_w as f32,
+            height: north_h as f32,
+            capacity: 0,
+        });
+        perimeter_ids.push(id);
+    }
+
+    // South (aft) side: ring_x0..ring_x1, inner_y1..ring_y1
+    let south_h = ring_y1 - inner_y1;
+    if south_h >= 1 && north_w >= 1 {
+        let id = next_id();
+        ctx.db.room().insert(Room {
+            id,
+            node_id: 0,
+            name: format!("Service Ring South D{}", deck + 1),
+            room_type: room_types::SERVICE_CORRIDOR,
+            deck,
+            x: ring_x0 as f32 + north_w as f32 / 2.0,
+            y: inner_y1 as f32 + south_h as f32 / 2.0,
+            width: north_w as f32,
+            height: south_h as f32,
+            capacity: 0,
+        });
+        perimeter_ids.push(id);
+    }
+
+    // West (port) side: ring_x0..inner_x0, inner_y0..inner_y1
+    let west_w = inner_x0 - ring_x0;
+    let side_h = inner_y1 - inner_y0;
+    if west_w >= 1 && side_h >= 1 {
+        let id = next_id();
+        ctx.db.room().insert(Room {
+            id,
+            node_id: 0,
+            name: format!("Service Ring West D{}", deck + 1),
+            room_type: room_types::SERVICE_CORRIDOR,
+            deck,
+            x: ring_x0 as f32 + west_w as f32 / 2.0,
+            y: inner_y0 as f32 + side_h as f32 / 2.0,
+            width: west_w as f32,
+            height: side_h as f32,
+            capacity: 0,
+        });
+        perimeter_ids.push(id);
+    }
+
+    // East (starboard) side: inner_x1..ring_x1, inner_y0..inner_y1
+    let east_w = ring_x1 - inner_x1;
+    if east_w >= 1 && side_h >= 1 {
+        let id = next_id();
+        ctx.db.room().insert(Room {
+            id,
+            node_id: 0,
+            name: format!("Service Ring East D{}", deck + 1),
+            room_type: room_types::SERVICE_CORRIDOR,
+            deck,
+            x: inner_x1 as f32 + east_w as f32 / 2.0,
+            y: inner_y0 as f32 + side_h as f32 / 2.0,
+            width: east_w as f32,
+            height: side_h as f32,
+            capacity: 0,
+        });
+        perimeter_ids.push(id);
+    }
+
+    // Create Corridor table entry for perimeter
+    ctx.db.corridor().insert(Corridor {
+        id: 0,
+        deck,
+        corridor_type: corridor_types::SERVICE,
+        x: ring_x0 as f32,
+        y: ring_y0 as f32,
+        width: (ring_x1 - ring_x0) as f32,
+        length: (ring_y1 - ring_y0) as f32,
+        orientation: 0,
+        carries: carries_flags::POWER
+            | carries_flags::WATER
+            | carries_flags::HVAC
+            | carries_flags::COOLANT,
+    });
+
+    // Connect ring segments to each other at corners
+    for i in 0..perimeter_ids.len() {
+        for j in (i + 1)..perimeter_ids.len() {
+            let ra = ctx.db.room().id().find(perimeter_ids[i]);
+            let rb = ctx.db.room().id().find(perimeter_ids[j]);
+            if let (Some(a), Some(b)) = (ra, rb) {
+                let ax = (a.x - a.width / 2.0) as usize;
+                let ay = (a.y - a.height / 2.0) as usize;
+                let aw = a.width as usize;
+                let ah = a.height as usize;
+                let bx = (b.x - b.width / 2.0) as usize;
+                let by = (b.y - b.height / 2.0) as usize;
+                let bw = b.width as usize;
+                let bh = b.height as usize;
+                if let Some((dx, dy, wa, wb)) = find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh) {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: perimeter_ids[i],
+                        room_b: perimeter_ids[j],
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SVC_CORRIDOR_WIDTH as f32,
+                        access_level: access_levels::CREW_ONLY,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+        }
+    }
+
+    // Connect ring to adjacent spine/cross-corridor/rooms
+    for &pid in &perimeter_ids {
+        if let Some(pr) = ctx.db.room().id().find(pid) {
+            let px = (pr.x - pr.width / 2.0) as usize;
+            let py = (pr.y - pr.height / 2.0) as usize;
+            let pw = pr.width as usize;
+            let ph = pr.height as usize;
+
+            // Spine segments
+            for &(seg_id, seg_y0, seg_y1) in spine_segments {
+                let sx = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
+                if let Some((dx, dy, wa, wb)) =
+                    find_shared_edge(px, py, pw, ph, sx, seg_y0, SPINE_WIDTH, seg_y1 - seg_y0)
+                {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: pid,
+                        room_b: seg_id,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SVC_CORRIDOR_WIDTH as f32,
+                        access_level: access_levels::CREW_ONLY,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+
+            // Cross-corridors
+            for &(cc_id, cy) in cross_rooms {
+                let cc_x0 = x_margin;
+                let cc_w = (hw - x_margin).saturating_sub(cc_x0);
+                if let Some((dx, dy, wa, wb)) =
+                    find_shared_edge(px, py, pw, ph, cc_x0, cy, cc_w, CROSS_CORRIDOR_WIDTH)
+                {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: pid,
+                        room_b: cc_id,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SVC_CORRIDOR_WIDTH as f32,
+                        access_level: access_levels::CREW_ONLY,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+
+            // Placed rooms
+            for &(room_id, rx, ry, rw, rh, _rt) in placed_rooms {
+                if let Some((dx, dy, wa, wb)) = find_shared_edge(px, py, pw, ph, rx, ry, rw, rh) {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: pid,
+                        room_b: room_id,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SVC_CORRIDOR_WIDTH as f32,
+                        access_level: access_levels::CREW_ONLY,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+        }
+    }
+
+    perimeter_ids
 }
 
 /// Find a shared edge between two adjacent rooms. Returns (door_x, door_y, wall_a, wall_b).
@@ -1359,7 +1541,7 @@ fn compute_shaft_templates(total_pop: u32) -> Vec<(&'static str, u8, bool, usize
 }
 
 /// Compute hull dimensions using iterative overhead calculation.
-/// Replaces fixed 1.4× multiplier with computed corridor + shaft overhead.
+/// Uses perimeter service corridor estimate instead of fixed starboard strip.
 fn compute_hull_dimensions(room_area_per_deck: f32, shaft_area_per_deck: f32) -> (usize, usize) {
     let aspect_ratio = 3.5f32;
     let mut mult = 1.4f32;
@@ -1370,8 +1552,10 @@ fn compute_hull_dimensions(room_area_per_deck: f32, shaft_area_per_deck: f32) ->
         let l = (apd / b).max(100.0);
 
         let num_cross = (l / 35.0).round().max(1.0);
-        let corridor_area = (SPINE_WIDTH as f32 + SVC_CORRIDOR_WIDTH as f32) * l
-            + num_cross * CROSS_CORRIDOR_WIDTH as f32 * (b - SVC_CORRIDOR_WIDTH as f32);
+        // Spine + cross-corridors (full width now) + perimeter corridor ring
+        let corridor_area = SPINE_WIDTH as f32 * l
+            + num_cross * CROSS_CORRIDOR_WIDTH as f32 * b
+            + 2.0 * (b + l) * SVC_CORRIDOR_WIDTH as f32;
 
         let actual_need = room_area_per_deck + corridor_area + shaft_area_per_deck;
         let new_mult = actual_need / room_area_per_deck;
