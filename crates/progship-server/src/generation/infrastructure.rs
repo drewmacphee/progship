@@ -702,10 +702,14 @@ fn compute_shaft_placements(
         return placements;
     }
 
-    // Fore elevator: at first cross-corridor intersection, starboard of spine
+    // Place shafts BESIDE cross-corridor intersections, not ON them.
+    // Offset below the cross-corridor so they don't block corridor traffic.
+    let cross_end_offset = CROSS_CORRIDOR_WIDTH; // place just below cross-corridor
+
+    // Fore elevator: starboard of spine, just below first cross-corridor
     placements.push(ShaftPlacement {
         x: spine_right,
-        y: cross_ys[0],
+        y: cross_ys[0] + cross_end_offset,
         w: 3,
         h: 3,
         shaft_type: shaft_types::ELEVATOR,
@@ -713,11 +717,11 @@ fn compute_shaft_placements(
         is_main: true,
     });
 
-    // Aft elevator: at last cross-corridor intersection
+    // Aft elevator: starboard of spine, just below last cross-corridor
     let last_cy = *cross_ys.last().unwrap();
     placements.push(ShaftPlacement {
         x: spine_right,
-        y: last_cy,
+        y: last_cy + cross_end_offset,
         w: 3,
         h: 3,
         shaft_type: shaft_types::ELEVATOR,
@@ -725,12 +729,12 @@ fn compute_shaft_placements(
         is_main: true,
     });
 
-    // Service elevator: at first cross-corridor × service corridor intersection
+    // Service elevator: beside service corridor, just below middle cross-corridor
     if svc_left >= 2 {
-        let svc_elev_y = cross_ys[cross_ys.len() / 2]; // middle cross-corridor
+        let svc_elev_y = cross_ys[cross_ys.len() / 2];
         placements.push(ShaftPlacement {
             x: svc_left - 2,
-            y: svc_elev_y,
+            y: svc_elev_y + cross_end_offset,
             w: 2,
             h: 2,
             shaft_type: shaft_types::SERVICE_ELEVATOR,
@@ -739,7 +743,7 @@ fn compute_shaft_placements(
         });
     }
 
-    // Ladders at intermediate cross-corridor intersections (port side of spine)
+    // Ladders: port side of spine, just below intermediate cross-corridors
     let spine_left_edge = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
     let ladder_positions: Vec<usize> = cross_ys
         .iter()
@@ -753,7 +757,7 @@ fn compute_shaft_placements(
         let name = if li == 0 { "Ladder A" } else { "Ladder B" };
         placements.push(ShaftPlacement {
             x: spine_left_edge.saturating_sub(2),
-            y: cy,
+            y: cy + cross_end_offset,
             w: 2,
             h: 2,
             shaft_type: shaft_types::LADDER,
