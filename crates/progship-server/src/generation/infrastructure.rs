@@ -205,19 +205,21 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         }
 
         // ---- Phase 1: Corridor skeleton ----
+        let ring_margin = SVC_CORRIDOR_WIDTH;
+        let inner_y0 = y_margin + ring_margin;
+        let inner_y1 = hl.saturating_sub(y_margin + ring_margin);
 
-        // Spine: centered, full deck length (only within hull)
+        // Spine: centered, clipped to inner boundary (inside ring margin)
         for x in spine_left..spine_right.min(hw) {
-            for y in 0..hl {
+            for y in inner_y0..inner_y1 {
                 if grid[x][y] != CELL_HULL {
                     grid[x][y] = CELL_MAIN_CORRIDOR;
                 }
             }
         }
 
-        // Cross-corridors: use midship positions, span hull width minus ring margins
+        // Cross-corridors: use midship positions, clipped to inner boundary
         let cross_ys = &mid_cross_ys;
-        let ring_margin = SVC_CORRIDOR_WIDTH;
         let cc_x0 = x_margin + ring_margin;
         let cc_x1 = hw.saturating_sub(x_margin + ring_margin);
         for &cy in cross_ys.iter() {
@@ -249,14 +251,14 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // Spine segments (between cross-corridors), clipped to hull boundary
         let mut spine_segments: Vec<(u32, usize, usize)> = Vec::new(); // (room_id, y_start, y_end)
         {
-            let mut seg_boundaries: Vec<usize> = vec![y_margin];
+            let mut seg_boundaries: Vec<usize> = vec![inner_y0];
             for &cy in cross_ys.iter() {
-                if cy >= y_margin && cy + CROSS_CORRIDOR_WIDTH <= hl - y_margin {
+                if cy >= inner_y0 && cy + CROSS_CORRIDOR_WIDTH <= inner_y1 {
                     seg_boundaries.push(cy);
                     seg_boundaries.push(cy + CROSS_CORRIDOR_WIDTH);
                 }
             }
-            seg_boundaries.push(hl - y_margin);
+            seg_boundaries.push(inner_y1);
 
             for chunk in seg_boundaries.chunks(2) {
                 if chunk.len() < 2 || chunk[0] >= chunk[1] {
@@ -287,9 +289,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             deck,
             corridor_type: corridor_types::MAIN,
             x: spine_left as f32,
-            y: y_margin as f32,
+            y: inner_y0 as f32,
             width: SPINE_WIDTH as f32,
-            length: (hl - 2 * y_margin) as f32,
+            length: (inner_y1 - inner_y0) as f32,
             orientation: 1,
             carries: carries_flags::CREW_PATH | carries_flags::POWER | carries_flags::DATA,
         });
@@ -297,7 +299,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // Cross-corridor Room entries (clipped to ring margins)
         let mut cross_rooms: Vec<(u32, usize)> = Vec::new(); // (room_id, y_start)
         for &cy in cross_ys.iter() {
-            if cy < y_margin || cy + CROSS_CORRIDOR_WIDTH > hl - y_margin {
+            if cy < inner_y0 || cy + CROSS_CORRIDOR_WIDTH > inner_y1 {
                 continue;
             }
             let cc_room_x0 = x_margin + ring_margin;
