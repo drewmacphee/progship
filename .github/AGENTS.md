@@ -19,12 +19,27 @@ spacetime build --project-path crates/progship-server
 # Client (Bevy)
 cargo build --package progship-client
 
-# All tests
-cargo test --all
+# All tests (exclude WASM-only server and client)
+cargo test --workspace --exclude progship-server --exclude progship-client
 
 # Lint
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
+```
+
+## Running the Server
+SpacetimeDB must run as an independent background process that survives session cleanup.
+```powershell
+# Start server as a detached Windows process (REQUIRED — do NOT use async/sync shell modes)
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "spacetime start" -WindowStyle Hidden
+
+# Publish module (clear old data)
+spacetime publish --project-path crates/progship-server progship --clear-database -s http://localhost:3000 -y
+
+# Initialize ship
+spacetime call -s http://localhost:3000 progship init_ship -- '"ISV Prometheus"' 12 200 800
+
+# ALWAYS specify -s http://localhost:3000 for all spacetime commands
 ```
 
 ## MANDATORY for Every PR
