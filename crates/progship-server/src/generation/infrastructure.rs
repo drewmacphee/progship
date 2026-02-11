@@ -657,19 +657,24 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
     } // end per-deck loop
 
     // ---- VerticalShaft table entries + cross-deck doors ----
-    let decks_str = (0..deck_count)
-        .map(|d| d.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-
     for si in &shaft_infos {
+        // Only create shaft entry if it was placed on at least one deck
+        let placed_decks: Vec<String> = si
+            .deck_room_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(d, rid)| rid.map(|_| d.to_string()))
+            .collect();
+        if placed_decks.is_empty() {
+            continue;
+        }
         ctx.db.vertical_shaft().insert(VerticalShaft {
             id: 0,
             shaft_type: si.shaft_type,
             name: si.name.to_string(),
             x: si.ref_x,
             y: si.ref_y,
-            decks_served: decks_str.clone(),
+            decks_served: placed_decks.join(","),
             width: si.ref_w,
             height: si.ref_h,
         });
