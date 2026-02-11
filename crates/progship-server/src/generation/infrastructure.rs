@@ -223,8 +223,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     name: format!("Spine D{} Y{}-{}", deck + 1, y0, y1),
                     room_type: room_types::CORRIDOR,
                     deck,
-                    x: spine_left as f32,
-                    y: y0 as f32,
+                    x: spine_left as f32 + SPINE_WIDTH as f32 / 2.0,
+                    y: y0 as f32 + (y1 - y0) as f32 / 2.0,
                     width: SPINE_WIDTH as f32,
                     height: (y1 - y0) as f32,
                     capacity: 0,
@@ -256,8 +256,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 name: format!("Cross-Corridor D{} Y{}", deck + 1, cy),
                 room_type: room_types::CROSS_CORRIDOR,
                 deck,
-                x: 0.0,
-                y: cy as f32,
+                x: svc_left as f32 / 2.0,
+                y: cy as f32 + CROSS_CORRIDOR_WIDTH as f32 / 2.0,
                 width: svc_left as f32,
                 height: CROSS_CORRIDOR_WIDTH as f32,
                 capacity: 0,
@@ -284,8 +284,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             name: format!("Service Corridor D{}", deck + 1),
             room_type: room_types::SERVICE_CORRIDOR,
             deck,
-            x: svc_left as f32,
-            y: 0.0,
+            x: svc_left as f32 + SVC_CORRIDOR_WIDTH as f32 / 2.0,
+            y: hl as f32 / 2.0,
             width: SVC_CORRIDOR_WIDTH as f32,
             height: hl as f32,
             capacity: 0,
@@ -402,8 +402,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 name: format!("{} D{}", sp.name, deck + 1),
                 room_type: srt,
                 deck,
-                x: sp.x as f32,
-                y: sp.y as f32,
+                x: sp.x as f32 + sp.w as f32 / 2.0,
+                y: sp.y as f32 + sp.h as f32 / 2.0,
                 width: sp.w as f32,
                 height: sp.h as f32,
                 capacity: 0,
@@ -495,6 +495,22 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                 if request_idx >= deck_requests.len() {
                     break;
                 }
+
+                // Skip if any cell overlaps a shaft or corridor
+                let mut has_conflict = false;
+                for gx in *rx..(*rx + *rw).min(hw) {
+                    for gy in *ry..(*ry + *rh).min(hl) {
+                        if grid[gx][gy] != CELL_EMPTY {
+                            has_conflict = true;
+                            break;
+                        }
+                    }
+                    if has_conflict { break; }
+                }
+                if has_conflict {
+                    continue;
+                }
+
                 let req = &deck_requests[request_idx];
                 let room_id = next_id();
 
@@ -514,8 +530,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     name: req.name.clone(),
                     room_type: req.room_type,
                     deck,
-                    x: *rx as f32,
-                    y: *ry as f32,
+                    x: *rx as f32 + *rw as f32 / 2.0,
+                    y: *ry as f32 + *rh as f32 / 2.0,
                     width: *rw as f32,
                     height: *rh as f32,
                     capacity: req.capacity,
