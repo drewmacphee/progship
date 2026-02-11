@@ -1,7 +1,7 @@
 //! Ship systems simulation - resource flow, subsystem degradation, economy loop.
 
-use progship_logic::economy;
 use crate::tables::*;
+use progship_logic::economy;
 use spacetimedb::{ReducerContext, Table};
 
 // Resource consumption rates (per person per hour)

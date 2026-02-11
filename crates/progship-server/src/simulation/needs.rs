@@ -1,7 +1,7 @@
 //! Need decay system - hunger, fatigue, social, comfort, hygiene.
 
-use progship_logic::health;
 use crate::tables::*;
+use progship_logic::health;
 use spacetimedb::{ReducerContext, Table};
 
 /// Decay needs over time, with rates modified by current activity.

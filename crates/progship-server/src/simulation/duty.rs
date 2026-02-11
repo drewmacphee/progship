@@ -1,7 +1,7 @@
 //! Duty system - crew shift management.
 
-use progship_logic::duty as duty_logic;
 use crate::tables::*;
+use progship_logic::duty as duty_logic;
 use spacetimedb::{ReducerContext, Table};
 
 /// Update crew on/off duty status based on shift, time, and fitness.
