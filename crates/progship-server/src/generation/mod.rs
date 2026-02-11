@@ -127,15 +127,9 @@ pub fn init_ship(
     let mission = progship_logic::mission::MissionConfig::default();
     let overrides = progship_logic::config::SystemOverrides::default();
     let systems = progship_logic::config::select_systems(&mission, &overrides);
-    let population = progship_logic::population::compute_population(
-        &mission,
-        &systems,
-    );
-    let supplies = progship_logic::supplies::compute_supply_manifest(
-        &mission,
-        &systems,
-        &population,
-    );
+    let population = progship_logic::population::compute_population(&mission, &systems);
+    let supplies =
+        progship_logic::supplies::compute_supply_manifest(&mission, &systems, &population);
 
     // Scale supplies to game units (tons → game units, roughly 1:1000)
     let scale = 1000.0;
@@ -173,7 +167,7 @@ pub fn init_ship(
     });
 
     build_ship_graph(ctx, deck_count, crew_count, passenger_count);
-    layout_ship(ctx, deck_count);
+    layout_ship(ctx, deck_count, crew_count + passenger_count);
     generate_ship_systems(ctx);
     generate_atmospheres(ctx, deck_count);
     generate_crew(ctx, crew_count);

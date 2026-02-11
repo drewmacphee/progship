@@ -52,18 +52,32 @@ struct ShaftPlacement {
     is_main: bool,
 }
 
-pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
+pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32) {
     let nodes: Vec<GraphNode> = ctx.db.graph_node().iter().collect();
+
+    // ---- Compute shaft requirements from population ----
+    let shaft_templates = compute_shaft_templates(total_pop);
 
     // ---- Hull sizing from total room area ----
     let total_area: f32 = nodes.iter().map(|n| n.required_area).sum();
-    let gross_area = total_area * 1.4; // 40% overhead for corridors/walls
-    let area_per_deck = gross_area / deck_count as f32;
-    let ship_beam = (area_per_deck.sqrt() / 2.45).max(30.0) as usize;
-    let ship_length = (area_per_deck / ship_beam as f32).max(100.0) as usize;
+    let shaft_area_per_deck: f32 = shaft_templates
+        .iter()
+        .map(|(_, _, _, w, h)| (*w * *h) as f32)
+        .sum();
+
+    // Auto-compute deck count if 0, otherwise use provided value
+    let deck_count = if deck_count == 0 {
+        compute_optimal_deck_count(total_area, shaft_area_per_deck, &shaft_templates)
+    } else {
+        deck_count
+    };
+
+    // Iterative hull sizing: compute actual overhead instead of fixed 1.4×
+    let room_area_per_deck = total_area / deck_count as f32;
+    let (ship_beam, ship_length) = compute_hull_dimensions(room_area_per_deck, shaft_area_per_deck);
     log::info!(
-        "Hull sizing: {:.0}m² total room area, {:.0}m² gross, {}×{} hull ({} decks)",
-        total_area, gross_area, ship_beam, ship_length, deck_count
+        "Hull sizing: {:.0}m² total room area, {}×{} hull ({} decks, {} shafts, {:.0}m² shaft overhead/deck)",
+        total_area, ship_beam, ship_length, deck_count, shaft_templates.len(), shaft_area_per_deck
     );
 
     // ---- Build per-zone room request lists ----
@@ -109,25 +123,17 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         ref_h: f32,
     }
 
-    // We'll define shaft templates and fill per-deck room IDs
-    let shaft_templates: Vec<(&str, u8, bool)> = vec![
-        ("Fore Elevator", shaft_types::ELEVATOR, true),
-        ("Aft Elevator", shaft_types::ELEVATOR, true),
-        ("Service Elevator", shaft_types::SERVICE_ELEVATOR, false),
-        ("Ladder A", shaft_types::LADDER, false),
-        ("Ladder B", shaft_types::LADDER, false),
-    ];
     let mut shaft_infos: Vec<ShaftInfo> = shaft_templates
         .iter()
-        .map(|(name, st, is_main)| ShaftInfo {
+        .map(|(name, st, is_main, w, h)| ShaftInfo {
             name,
             shaft_type: *st,
             is_main: *is_main,
             deck_room_ids: vec![None; deck_count as usize],
             ref_x: 0.0,
             ref_y: 0.0,
-            ref_w: 3.0,
-            ref_h: 3.0,
+            ref_w: *w as f32,
+            ref_h: *h as f32,
         })
         .collect();
 
@@ -149,7 +155,12 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
         }
     }
     let global_shaft_placements = compute_shaft_placements(
-        mid_spine_right, mid_svc_left, &mid_cross_ys, mid_hw, mid_hl,
+        &shaft_templates,
+        mid_spine_right,
+        mid_svc_left,
+        &mid_cross_ys,
+        mid_hw,
+        mid_hl,
     );
 
     // ---- Per-deck generation ----
@@ -516,7 +527,14 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             }
             // BSP subdivide this strip and pack rooms
             let mut sub_rects: Vec<(usize, usize, usize, usize)> = Vec::new();
-            bsp_subdivide(strip.x, strip.y, strip.w, strip.h, &deck_requests[request_idx..], &mut sub_rects);
+            bsp_subdivide(
+                strip.x,
+                strip.y,
+                strip.w,
+                strip.h,
+                &deck_requests[request_idx..],
+                &mut sub_rects,
+            );
 
             for (rx, ry, rw, rh) in &sub_rects {
                 if request_idx >= deck_requests.len() {
@@ -532,7 +550,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                             break;
                         }
                     }
-                    if has_conflict { break; }
+                    if has_conflict {
+                        break;
+                    }
                 }
                 if has_conflict {
                     continue;
@@ -566,7 +586,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
                 // Create door to adjacent corridor (atomically)
                 let (door_x, door_y, wall_room, wall_corr) =
-                    compute_door_position(*rx, *ry, *rw, *rh, &strip);
+                    compute_door_position(*rx, *ry, *rw, *rh, strip);
                 ctx.db.door().insert(Door {
                     id: 0,
                     room_a: room_id,
@@ -594,9 +614,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
                     continue;
                 }
                 // Check adjacency (shared edge)
-                if let Some((dx, dy, wa, wb)) =
-                    find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh)
-                {
+                if let Some((dx, dy, wa, wb)) = find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh) {
                     ctx.db.door().insert(Door {
                         id: 0,
                         room_a: id_a,
@@ -650,7 +668,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
             deck + 1,
             request_idx.min(deck_requests.len()),
             deck_requests.len(),
-            deck_requests.iter().take(request_idx).map(|r| r.target_area).sum::<f32>(),
+            deck_requests
+                .iter()
+                .take(request_idx)
+                .map(|r| r.target_area)
+                .sum::<f32>(),
             total_request_area,
             total_strip_area,
         );
@@ -726,8 +748,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32) {
 
 // ---- Helper functions ----
 
-/// Compute shaft placements at corridor intersections.
+/// Compute shaft placements by distributing templates across cross-corridor intersections.
+/// Main elevators go starboard of spine, service elevators near service corridor,
+/// ladders go port of spine. Shafts are distributed evenly along the deck length.
 fn compute_shaft_placements(
+    templates: &[(&'static str, u8, bool, usize, usize)],
     spine_right: usize,
     svc_left: usize,
     cross_ys: &[usize],
@@ -735,82 +760,103 @@ fn compute_shaft_placements(
     hl: usize,
 ) -> Vec<ShaftPlacement> {
     let mut placements = Vec::new();
+    let spine_left_edge = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
+    let cross_end_offset = CROSS_CORRIDOR_WIDTH;
 
     if cross_ys.is_empty() {
-        // Minimal deck: place one elevator next to spine
-        placements.push(ShaftPlacement {
-            x: spine_right,
-            y: hl / 4,
-            w: 3,
-            h: 3,
-            shaft_type: shaft_types::ELEVATOR,
-            name: "Fore Elevator",
-            is_main: true,
-        });
+        // Minimal deck: place first elevator next to spine
+        if let Some((name, st, is_main, w, h)) = templates.first() {
+            placements.push(ShaftPlacement {
+                x: spine_right,
+                y: hl / 4,
+                w: *w,
+                h: *h,
+                shaft_type: *st,
+                name,
+                is_main: *is_main,
+            });
+        }
         return placements;
     }
 
-    // Place shafts BESIDE cross-corridor intersections, not ON them.
-    // Offset below the cross-corridor so they don't block corridor traffic.
-    let cross_end_offset = CROSS_CORRIDOR_WIDTH; // place just below cross-corridor
+    // Separate templates by type for placement strategy
+    let main_elevators: Vec<_> = templates
+        .iter()
+        .filter(|(_, st, _, _, _)| *st == shaft_types::ELEVATOR)
+        .collect();
+    let service_elevators: Vec<_> = templates
+        .iter()
+        .filter(|(_, st, _, _, _)| *st == shaft_types::SERVICE_ELEVATOR)
+        .collect();
+    let ladders: Vec<_> = templates
+        .iter()
+        .filter(|(_, st, _, _, _)| *st == shaft_types::LADDER)
+        .collect();
 
-    // Fore elevator: starboard of spine, just below first cross-corridor
-    placements.push(ShaftPlacement {
-        x: spine_right,
-        y: cross_ys[0] + cross_end_offset,
-        w: 3,
-        h: 3,
-        shaft_type: shaft_types::ELEVATOR,
-        name: "Fore Elevator",
-        is_main: true,
-    });
-
-    // Aft elevator: starboard of spine, just below last cross-corridor
-    let last_cy = *cross_ys.last().unwrap();
-    placements.push(ShaftPlacement {
-        x: spine_right,
-        y: last_cy + cross_end_offset,
-        w: 3,
-        h: 3,
-        shaft_type: shaft_types::ELEVATOR,
-        name: "Aft Elevator",
-        is_main: true,
-    });
-
-    // Service elevator: beside service corridor, just below middle cross-corridor
-    if svc_left >= 2 {
-        let svc_elev_y = cross_ys[cross_ys.len() / 2];
+    // Distribute main elevators evenly across cross-corridor positions (starboard of spine)
+    let num_positions = cross_ys.len();
+    for (i, (name, st, is_main, w, h)) in main_elevators.iter().enumerate() {
+        let cross_idx = if main_elevators.len() <= num_positions {
+            // Distribute evenly: map i to a cross-corridor index
+            i * num_positions / main_elevators.len()
+        } else {
+            i % num_positions
+        };
+        let cy = cross_ys[cross_idx.min(num_positions - 1)];
+        // Stack multiple elevators at same intersection by offsetting Y
+        let stack_offset = if main_elevators.len() > num_positions {
+            (i / num_positions) * *h
+        } else {
+            0
+        };
         placements.push(ShaftPlacement {
-            x: svc_left - 2,
-            y: svc_elev_y + cross_end_offset,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::SERVICE_ELEVATOR,
-            name: "Service Elevator",
-            is_main: false,
+            x: spine_right,
+            y: cy + cross_end_offset + stack_offset,
+            w: *w,
+            h: *h,
+            shaft_type: *st,
+            name,
+            is_main: *is_main,
         });
     }
 
-    // Ladders: port side of spine, just below intermediate cross-corridors
-    let spine_left_edge = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
-    let ladder_positions: Vec<usize> = cross_ys
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i > 0 && *i < cross_ys.len() - 1)
-        .map(|(_, cy)| *cy)
-        .take(2)
-        .collect();
+    // Service elevators: near service corridor, distributed evenly
+    if svc_left >= 2 {
+        for (i, (name, st, is_main, w, h)) in service_elevators.iter().enumerate() {
+            let cross_idx = if service_elevators.len() <= num_positions {
+                (i * num_positions / service_elevators.len().max(1)).min(num_positions - 1)
+            } else {
+                i % num_positions
+            };
+            let cy = cross_ys[cross_idx];
+            placements.push(ShaftPlacement {
+                x: svc_left.saturating_sub(*w),
+                y: cy + cross_end_offset,
+                w: *w,
+                h: *h,
+                shaft_type: *st,
+                name,
+                is_main: *is_main,
+            });
+        }
+    }
 
-    for (li, &cy) in ladder_positions.iter().enumerate() {
-        let name = if li == 0 { "Ladder A" } else { "Ladder B" };
+    // Ladders: port side of spine, distributed evenly
+    for (i, (name, st, is_main, w, h)) in ladders.iter().enumerate() {
+        let cross_idx = if ladders.len() <= num_positions {
+            (i * num_positions / ladders.len().max(1)).min(num_positions - 1)
+        } else {
+            i % num_positions
+        };
+        let cy = cross_ys[cross_idx];
         placements.push(ShaftPlacement {
-            x: spine_left_edge.saturating_sub(2),
+            x: spine_left_edge.saturating_sub(*w),
             y: cy + cross_end_offset,
-            w: 2,
-            h: 2,
-            shaft_type: shaft_types::LADDER,
+            w: *w,
+            h: *h,
+            shaft_type: *st,
             name,
-            is_main: false,
+            is_main: *is_main,
         });
     }
 
@@ -818,6 +864,7 @@ fn compute_shaft_placements(
 }
 
 /// Find attachment strips: empty rectangular areas directly adjacent to corridor walls.
+#[allow(clippy::too_many_arguments)]
 fn find_attachment_strips(
     grid: &[Vec<u8>],
     _hw: usize,
@@ -851,9 +898,8 @@ fn find_attachment_strips(
 
         if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
             // Find which corridor this strip connects to
-            let corridor_id = find_corridor_for_strip(
-                spine_left, y0, y1, spine_segments, cross_rooms,
-            );
+            let corridor_id =
+                find_corridor_for_strip(spine_left, y0, y1, spine_segments, cross_rooms);
             strips.push(AttachmentStrip {
                 corridor_room_id: corridor_id,
                 x: 0,
@@ -882,9 +928,8 @@ fn find_attachment_strips(
             // Exclude shaft areas — scan for actual empty width
             let actual_w = scan_empty_width(grid, strip_x, y0, strip_w, strip_h);
             if actual_w >= MIN_ROOM_DIM {
-                let corridor_id = find_corridor_for_strip(
-                    spine_right, y0, y1, spine_segments, cross_rooms,
-                );
+                let corridor_id =
+                    find_corridor_for_strip(spine_right, y0, y1, spine_segments, cross_rooms);
                 strips.push(AttachmentStrip {
                     corridor_room_id: corridor_id,
                     x: strip_x,
@@ -899,8 +944,16 @@ fn find_attachment_strips(
         }
     }
 
-    // Sort strips largest-first for better room placement
-    strips.sort_by(|a, b| (b.w * b.h).cmp(&(a.w * a.h)));
+    // Interleave port and starboard strips for balanced filling.
+    // Pair up strips by Y position, alternating port/starboard.
+    strips.sort_by(|a, b| {
+        let y_cmp = a.y.cmp(&b.y);
+        if y_cmp != core::cmp::Ordering::Equal {
+            return y_cmp;
+        }
+        // Same Y: alternate sides (WEST=port first, then EAST=starboard)
+        a.wall_side.cmp(&b.wall_side)
+    });
     strips
 }
 
@@ -987,7 +1040,9 @@ fn bsp_subdivide(
 
     // Horizontal split (split along Y) — creates rows, all full-width
     let split_y = (h as f32 * area_ratio).round() as usize;
-    let split_y = split_y.max(MIN_ROOM_DIM).min(h.saturating_sub(MIN_ROOM_DIM));
+    let split_y = split_y
+        .max(MIN_ROOM_DIM)
+        .min(h.saturating_sub(MIN_ROOM_DIM));
     if split_y >= MIN_ROOM_DIM && h - split_y >= MIN_ROOM_DIM {
         bsp_subdivide(x, y, w, split_y, &requests[..split_at], out);
         bsp_subdivide(x, y + split_y, w, h - split_y, &requests[split_at..], out);
@@ -1036,6 +1091,7 @@ fn compute_door_position(
 }
 
 /// Connect a shaft room to its adjacent corridor.
+#[allow(clippy::too_many_arguments)]
 fn connect_shaft_to_corridor(
     ctx: &ReducerContext,
     shaft_room_id: u32,
@@ -1120,6 +1176,7 @@ fn connect_shaft_to_corridor(
 }
 
 /// Find a shared edge between two adjacent rooms. Returns (door_x, door_y, wall_a, wall_b).
+#[allow(clippy::too_many_arguments)]
 fn find_shared_edge(
     ax: usize,
     ay: usize,
@@ -1167,4 +1224,162 @@ fn find_shared_edge(
         }
     }
     None
+}
+
+/// Compute shaft templates scaled to population.
+/// Returns: Vec of (name, shaft_type, is_main, width, height)
+fn compute_shaft_templates(total_pop: u32) -> Vec<(&'static str, u8, bool, usize, usize)> {
+    let main_count = (total_pop as f32 / 200.0).ceil().max(2.0) as usize;
+    let svc_count = (total_pop as f32 / 500.0).ceil().max(1.0) as usize;
+    let ladder_count = (total_pop as f32 / 500.0).ceil().max(2.0) as usize;
+
+    // Name pools for generated shafts
+    const MAIN_NAMES: &[&str] = &[
+        "Fore Elevator",
+        "Aft Elevator",
+        "Midship Elevator",
+        "Elevator 4",
+        "Elevator 5",
+        "Elevator 6",
+        "Elevator 7",
+        "Elevator 8",
+        "Elevator 9",
+        "Elevator 10",
+        "Elevator 11",
+        "Elevator 12",
+        "Elevator 13",
+        "Elevator 14",
+        "Elevator 15",
+        "Elevator 16",
+        "Elevator 17",
+        "Elevator 18",
+        "Elevator 19",
+        "Elevator 20",
+        "Elevator 21",
+        "Elevator 22",
+        "Elevator 23",
+        "Elevator 24",
+        "Elevator 25",
+        "Elevator 26",
+        "Elevator 27",
+        "Elevator 28",
+    ];
+    const SVC_NAMES: &[&str] = &[
+        "Service Elevator A",
+        "Service Elevator B",
+        "Service Elevator C",
+        "Service Elevator D",
+        "Service Elevator E",
+        "Service Elevator F",
+        "Service Elevator G",
+        "Service Elevator H",
+        "Service Elevator I",
+        "Service Elevator J",
+    ];
+    const LADDER_NAMES: &[&str] = &[
+        "Ladder A", "Ladder B", "Ladder C", "Ladder D", "Ladder E", "Ladder F", "Ladder G",
+        "Ladder H", "Ladder I", "Ladder J",
+    ];
+
+    let mut templates = Vec::new();
+
+    for i in 0..main_count.min(MAIN_NAMES.len()) {
+        templates.push((MAIN_NAMES[i], shaft_types::ELEVATOR, true, 3, 3));
+    }
+    for i in 0..svc_count.min(SVC_NAMES.len()) {
+        templates.push((SVC_NAMES[i], shaft_types::SERVICE_ELEVATOR, false, 2, 2));
+    }
+    for i in 0..ladder_count.min(LADDER_NAMES.len()) {
+        templates.push((LADDER_NAMES[i], shaft_types::LADDER, false, 2, 2));
+    }
+
+    log::info!(
+        "Shaft templates for {} people: {} main elevators, {} service, {} ladders",
+        total_pop,
+        main_count,
+        svc_count,
+        ladder_count
+    );
+
+    templates
+}
+
+/// Compute hull dimensions using iterative overhead calculation.
+/// Replaces fixed 1.4× multiplier with computed corridor + shaft overhead.
+fn compute_hull_dimensions(room_area_per_deck: f32, shaft_area_per_deck: f32) -> (usize, usize) {
+    let aspect_ratio = 3.5f32;
+    let mut mult = 1.4f32;
+
+    for _ in 0..5 {
+        let apd = room_area_per_deck * mult;
+        let b = (apd.sqrt() / aspect_ratio.sqrt()).max(30.0);
+        let l = (apd / b).max(100.0);
+
+        let num_cross = (l / 35.0).round().max(1.0);
+        let corridor_area = (SPINE_WIDTH as f32 + SVC_CORRIDOR_WIDTH as f32) * l
+            + num_cross * CROSS_CORRIDOR_WIDTH as f32 * (b - SVC_CORRIDOR_WIDTH as f32);
+
+        let actual_need = room_area_per_deck + corridor_area + shaft_area_per_deck;
+        let new_mult = actual_need / room_area_per_deck;
+
+        if (new_mult - mult).abs() < 0.01 {
+            break;
+        }
+        mult = new_mult;
+    }
+
+    let apd = room_area_per_deck * mult;
+    let b = (apd.sqrt() / aspect_ratio.sqrt()).max(30.0) as usize;
+    let l = (apd / b as f32).max(100.0) as usize;
+    (b, l)
+}
+
+/// Auto-compute optimal deck count from room area and population constraints.
+/// Finds the smallest deck count where fill ratio is ≤ 85% and max walking
+/// distance to an elevator is ≤ 50m.
+fn compute_optimal_deck_count(
+    total_room_area: f32,
+    shaft_area_per_deck: f32,
+    shaft_templates: &[(&'static str, u8, bool, usize, usize)],
+) -> u32 {
+    let num_banks = shaft_templates
+        .iter()
+        .filter(|(_, st, _, _, _)| *st == shaft_types::ELEVATOR)
+        .count()
+        .max(1);
+
+    let mut best = 4u32;
+    for d in 4..=25u32 {
+        let room_per_deck = total_room_area / d as f32;
+        let (b, l) = compute_hull_dimensions(room_per_deck, shaft_area_per_deck);
+
+        let num_cross = (l as f32 / 35.0).round().max(1.0) as usize;
+        let strip_area = (b.saturating_sub(5)) as f32
+            * (l as f32 - num_cross as f32 * CROSS_CORRIDOR_WIDTH as f32)
+            - shaft_area_per_deck;
+
+        let fill = if strip_area > 0.0 {
+            room_per_deck / strip_area
+        } else {
+            99.0
+        };
+
+        // Walking distance: elevators distributed along spine length
+        let max_walk = l as f32 / (2.0 * num_banks as f32) + b as f32 / 2.0;
+
+        if fill <= 0.85 && max_walk <= 50.0 {
+            best = d;
+            log::info!(
+                "Auto deck count: {} decks ({}x{}, fill {:.0}%, walk {:.0}m)",
+                d,
+                b,
+                l,
+                fill * 100.0,
+                max_walk
+            );
+            break;
+        }
+        best = d;
+    }
+    best
 }
