@@ -322,27 +322,7 @@ pub fn sync_rooms(
 
     // Corridor floors already rendered by their Room entries (type 17/24)
     // The Corridor table is for data only (carries flags, connectivity), not rendering.
-
-    // Render vertical shafts (elevators/ladders)
-    for shaft in conn.db.vertical_shaft().iter() {
-        let color = if shaft.shaft_type == 0 {
-            Color::srgb(0.35, 0.35, 0.4) // Elevator
-        } else {
-            Color::srgb(0.3, 0.3, 0.35) // Ladder
-        };
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(shaft.width, 0.25, shaft.height))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                ..default()
-            })),
-            Transform::from_xyz(shaft.x, 0.0, -shaft.y),
-            RoomEntity {
-                room_id: u32::MAX,
-                deck: view.current_deck,
-            },
-        ));
-    }
+    // Shaft rooms (110/111) are also rendered via their Room table entries per-deck.
 }
 
 fn spawn_wall_with_gaps(
