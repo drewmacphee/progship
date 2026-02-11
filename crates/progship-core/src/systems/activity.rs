@@ -1,7 +1,7 @@
 //! Activity system - manages what people are doing
 
+use crate::components::{Activity, ActivityType, NeedType, Needs, Person};
 use hecs::World;
-use crate::components::{Person, Activity, Needs, NeedType, ActivityType};
 
 /// Update activities - check for completion, apply effects
 pub fn activity_system(world: &mut World, sim_time: f64, _delta_hours: f32) {
@@ -18,7 +18,7 @@ pub fn activity_system(world: &mut World, sim_time: f64, _delta_hours: f32) {
     for entity in completed {
         if let Ok(activity) = world.get::<&Activity>(entity) {
             let activity_type = activity.activity_type;
-            
+
             // Apply need satisfaction
             if let Some(need_type) = activity_type.satisfies() {
                 if let Ok(mut needs) = world.get::<&mut Needs>(entity) {
@@ -27,7 +27,7 @@ pub fn activity_system(world: &mut World, sim_time: f64, _delta_hours: f32) {
                 }
             }
         }
-        
+
         // Remove completed activity
         let _ = world.remove_one::<Activity>(entity);
     }
@@ -61,7 +61,10 @@ pub fn select_activity(needs: &Needs, current_hour: f32) -> ActivityType {
     let hour = current_hour % 24.0;
     if hour >= 22.0 || hour < 6.0 {
         ActivityType::Sleeping
-    } else if (7.0..8.0).contains(&hour) || (12.0..13.0).contains(&hour) || (18.0..19.0).contains(&hour) {
+    } else if (7.0..8.0).contains(&hour)
+        || (12.0..13.0).contains(&hour)
+        || (18.0..19.0).contains(&hour)
+    {
         ActivityType::Eating
     } else {
         ActivityType::Idle
@@ -94,7 +97,7 @@ mod tests {
     fn test_select_activity_hungry() {
         let mut needs = Needs::default();
         needs.hunger = 0.9;
-        
+
         let activity = select_activity(&needs, 12.0);
         assert_eq!(activity, ActivityType::Eating);
     }
@@ -109,19 +112,22 @@ mod tests {
     #[test]
     fn test_activity_completion() {
         let mut world = World::new();
-        
+
         let entity = world.spawn((
             Person,
-            Needs { hunger: 0.8, ..Default::default() },
+            Needs {
+                hunger: 0.8,
+                ..Default::default()
+            },
             Activity::new(ActivityType::Eating, 0.0, 0.5),
         ));
 
         // After activity completes
         activity_system(&mut world, 1.0, 0.5);
-        
+
         // Activity should be removed
         assert!(world.get::<&Activity>(entity).is_err());
-        
+
         // Hunger should be satisfied
         let needs = world.get::<&Needs>(entity).unwrap();
         assert!(needs.hunger < 0.8);

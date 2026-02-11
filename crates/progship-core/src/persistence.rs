@@ -3,13 +3,13 @@
 //! Uses bincode for efficient binary serialization of the entire simulation.
 //! Components are serialized individually then reconstructed on load.
 
-use std::io::{Read, Write};
-use serde::{Serialize, Deserialize};
 use hecs::World;
+use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 
 use crate::components::*;
 use crate::generation::ShipLayout;
-use crate::systems::{ShipResources, MaintenanceQueue, RelationshipGraph, ConversationManager};
+use crate::systems::{ConversationManager, MaintenanceQueue, RelationshipGraph, ShipResources};
 
 /// Version number for save file format (increment when format changes)
 const SAVE_VERSION: u32 = 1;
@@ -72,22 +72,22 @@ pub struct SerializableEntity {
     pub movement: Option<Movement>,
     pub needs: Option<Needs>,
     pub name: Option<Name>,
-    
+
     // Role
     pub crew: Option<Crew>,
     pub passenger: Option<Passenger>,
-    
+
     // Behavior
     pub activity: Option<Activity>,
     pub personality: Option<Personality>,
     pub skills: Option<Skills>,
     pub in_conversation: Option<InConversation>,
-    
+
     // Ship structure
     pub room: Option<Room>,
     pub room_connections: Option<RoomConnections>,
     pub deck: Option<Deck>,
-    
+
     // Systems
     pub ship_system: Option<ShipSystem>,
     pub resource_flow: Option<ResourceFlow>,
@@ -97,34 +97,68 @@ pub struct SerializableEntity {
 /// Extract all entities from a world into serializable form
 fn serialize_entities(world: &World) -> Vec<SerializableEntity> {
     let mut entities = Vec::new();
-    
+
     // Get all entities
     for entity in world.iter() {
         let mut se = SerializableEntity::default();
         let entity_ref = world.entity(entity.entity()).unwrap();
-        
+
         // Extract each component type (dereference Ref to clone)
-        if let Some(c) = entity_ref.get::<&Person>() { se.person = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Position>() { se.position = Some(*c); }
-        if let Some(c) = entity_ref.get::<&Movement>() { se.movement = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Needs>() { se.needs = Some(*c); }
-        if let Some(c) = entity_ref.get::<&Name>() { se.name = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Crew>() { se.crew = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Passenger>() { se.passenger = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Activity>() { se.activity = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Personality>() { se.personality = Some(*c); }
-        if let Some(c) = entity_ref.get::<&Skills>() { se.skills = Some(*c); }
-        if let Some(c) = entity_ref.get::<&InConversation>() { se.in_conversation = Some(*c); }
-        if let Some(c) = entity_ref.get::<&Room>() { se.room = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&RoomConnections>() { se.room_connections = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&Deck>() { se.deck = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&ShipSystem>() { se.ship_system = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&ResourceFlow>() { se.resource_flow = Some((*c).clone()); }
-        if let Some(c) = entity_ref.get::<&MaintenanceTask>() { se.maintenance_task = Some((*c).clone()); }
-        
+        if let Some(c) = entity_ref.get::<&Person>() {
+            se.person = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Position>() {
+            se.position = Some(*c);
+        }
+        if let Some(c) = entity_ref.get::<&Movement>() {
+            se.movement = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Needs>() {
+            se.needs = Some(*c);
+        }
+        if let Some(c) = entity_ref.get::<&Name>() {
+            se.name = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Crew>() {
+            se.crew = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Passenger>() {
+            se.passenger = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Activity>() {
+            se.activity = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Personality>() {
+            se.personality = Some(*c);
+        }
+        if let Some(c) = entity_ref.get::<&Skills>() {
+            se.skills = Some(*c);
+        }
+        if let Some(c) = entity_ref.get::<&InConversation>() {
+            se.in_conversation = Some(*c);
+        }
+        if let Some(c) = entity_ref.get::<&Room>() {
+            se.room = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&RoomConnections>() {
+            se.room_connections = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&Deck>() {
+            se.deck = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&ShipSystem>() {
+            se.ship_system = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&ResourceFlow>() {
+            se.resource_flow = Some((*c).clone());
+        }
+        if let Some(c) = entity_ref.get::<&MaintenanceTask>() {
+            se.maintenance_task = Some((*c).clone());
+        }
+
         entities.push(se);
     }
-    
+
     entities
 }
 
@@ -141,24 +175,58 @@ fn deserialize_entities(world: &mut World, entities: Vec<SerializableEntity>) {
 fn spawn_entity(world: &mut World, se: SerializableEntity) {
     // Start with a base entity and add components
     let entity = world.spawn(());
-    
-    if let Some(c) = se.person { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.position { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.movement { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.needs { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.name { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.crew { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.passenger { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.activity { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.personality { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.skills { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.in_conversation { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.room { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.room_connections { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.deck { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.ship_system { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.resource_flow { let _ = world.insert_one(entity, c); }
-    if let Some(c) = se.maintenance_task { let _ = world.insert_one(entity, c); }
+
+    if let Some(c) = se.person {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.position {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.movement {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.needs {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.name {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.crew {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.passenger {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.activity {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.personality {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.skills {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.in_conversation {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.room {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.room_connections {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.deck {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.ship_system {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.resource_flow {
+        let _ = world.insert_one(entity, c);
+    }
+    if let Some(c) = se.maintenance_task {
+        let _ = world.insert_one(entity, c);
+    }
 }
 
 /// Save the complete simulation to a writer
@@ -175,7 +243,7 @@ pub fn save_simulation<W: Write>(
     events: &crate::systems::EventManager,
 ) -> Result<(), SaveError> {
     let entities = serialize_entities(world);
-    
+
     let save_data = SaveData {
         version: SAVE_VERSION,
         sim_time,
@@ -188,7 +256,7 @@ pub fn save_simulation<W: Write>(
         events: events.clone(),
         entities,
     };
-    
+
     bincode::serialize_into(writer, &save_data)?;
     Ok(())
 }
@@ -196,17 +264,17 @@ pub fn save_simulation<W: Write>(
 /// Load a simulation from a reader
 pub fn load_simulation<R: Read>(reader: R) -> Result<LoadedSimulation, SaveError> {
     let save_data: SaveData = bincode::deserialize_from(reader)?;
-    
+
     if save_data.version != SAVE_VERSION {
         return Err(SaveError::VersionMismatch {
             expected: SAVE_VERSION,
             found: save_data.version,
         });
     }
-    
+
     let mut world = World::new();
     deserialize_entities(&mut world, save_data.entities);
-    
+
     Ok(LoadedSimulation {
         world,
         sim_time: save_data.sim_time,
@@ -259,7 +327,11 @@ impl std::fmt::Display for SaveError {
             SaveError::Io(e) => write!(f, "IO error: {}", e),
             SaveError::Bincode(e) => write!(f, "Serialization error: {}", e),
             SaveError::VersionMismatch { expected, found } => {
-                write!(f, "Save version mismatch: expected {}, found {}", expected, found)
+                write!(
+                    f,
+                    "Save version mismatch: expected {}, found {}",
+                    expected, found
+                )
             }
         }
     }
@@ -286,27 +358,30 @@ mod tests {
             ship_length: 100.0,
             ship_width: 20.0,
         });
-        
+
         // Run a few updates
         for _ in 0..10 {
             engine.update(1.0 / 60.0);
         }
-        
+
         let original_time = engine.sim_time;
         let original_people = engine.crew_count() + engine.passenger_count();
-        
+
         // Save
         let mut save_buffer = Vec::new();
         engine.save(&mut save_buffer).expect("Save failed");
-        
+
         println!("Save size: {} bytes", save_buffer.len());
-        
+
         // Load into new engine
         let mut loaded_engine = SimulationEngine::new();
         loaded_engine.load(&save_buffer[..]).expect("Load failed");
-        
+
         // Verify
         assert!((loaded_engine.sim_time - original_time).abs() < 0.001);
-        assert_eq!(loaded_engine.crew_count() + loaded_engine.passenger_count(), original_people);
+        assert_eq!(
+            loaded_engine.crew_count() + loaded_engine.passenger_count(),
+            original_people
+        );
     }
 }

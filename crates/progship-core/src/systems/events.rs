@@ -3,12 +3,12 @@
 //! Events add drama and challenge to the simulation. They can be emergencies
 //! that require crew response, celebrations, discoveries, or other occurrences.
 
+use crate::components::{
+    Activity, ActivityType, Crew, Person, Position, Room, RoomType, ShipSystem, SystemStatus,
+};
 use hecs::World;
 use rand::Rng;
-use serde::{Serialize, Deserialize};
-use crate::components::{
-    Person, Position, Crew, Activity, ActivityType, Room, RoomType, ShipSystem, SystemStatus
-};
+use serde::{Deserialize, Serialize};
 
 /// Types of events that can occur
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,12 +45,12 @@ impl EventType {
             EventType::Celebration => 1,
         }
     }
-    
+
     /// Does this event require emergency response?
     pub fn is_emergency(&self) -> bool {
         self.severity() >= 3
     }
-    
+
     /// Which department primarily responds to this event?
     pub fn responding_department(&self) -> Option<crate::components::Department> {
         use crate::components::Department;
@@ -116,7 +116,7 @@ impl EventManager {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Create a new event
     pub fn spawn_event(
         &mut self,
@@ -127,7 +127,7 @@ impl EventManager {
     ) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
-        
+
         let responders_needed = match event_type {
             EventType::HullBreach => 4,
             EventType::Fire => 3,
@@ -136,7 +136,7 @@ impl EventManager {
             EventType::Altercation => 2,
             _ => 0,
         };
-        
+
         let duration = match event_type {
             EventType::HullBreach => 2.0,
             EventType::Fire => 1.0,
@@ -146,7 +146,7 @@ impl EventManager {
             EventType::Discovery => 0.5,
             _ => 0.5,
         };
-        
+
         self.events.push(Event {
             id,
             event_type,
@@ -158,32 +158,35 @@ impl EventManager {
             responders_assigned: 0,
             description,
         });
-        
+
         id
     }
-    
+
     /// Get an active event by ID
     pub fn get(&self, id: u32) -> Option<&Event> {
         self.events.iter().find(|e| e.id == id)
     }
-    
+
     /// Get mutable event by ID
     pub fn get_mut(&mut self, id: u32) -> Option<&mut Event> {
         self.events.iter_mut().find(|e| e.id == id)
     }
-    
+
     /// Get all active (unresolved) events
     pub fn active_events(&self) -> impl Iterator<Item = &Event> {
-        self.events.iter().filter(|e| e.state != EventState::Resolved)
+        self.events
+            .iter()
+            .filter(|e| e.state != EventState::Resolved)
     }
-    
+
     /// Get highest priority unhandled event
     pub fn highest_priority_event(&self) -> Option<&Event> {
-        self.events.iter()
+        self.events
+            .iter()
             .filter(|e| e.state == EventState::Active)
             .max_by_key(|e| e.event_type.severity())
     }
-    
+
     /// Assign a responder to an event
     pub fn assign_responder(&mut self, event_id: u32) -> bool {
         if let Some(event) = self.get_mut(event_id) {
@@ -197,18 +200,18 @@ impl EventManager {
         }
         false
     }
-    
+
     /// Update events - check for resolution, escalation, etc.
     pub fn update(&mut self, sim_time: f64) -> Vec<u32> {
         let mut resolved = Vec::new();
-        
+
         for event in &mut self.events {
             if event.state == EventState::Resolved {
                 continue;
             }
-            
+
             let elapsed = sim_time - event.started_at;
-            
+
             // Check if being handled events are resolved
             if event.state == EventState::BeingHandled {
                 if elapsed >= event.duration as f64 {
@@ -225,13 +228,12 @@ impl EventManager {
                 }
             }
         }
-        
+
         // Clean up old resolved events
         self.events.retain(|e| {
-            e.state != EventState::Resolved || 
-            (sim_time - e.started_at) < 24.0 // Keep for 24 hours for history
+            e.state != EventState::Resolved || (sim_time - e.started_at) < 24.0 // Keep for 24 hours for history
         });
-        
+
         resolved
     }
 }
@@ -248,19 +250,20 @@ pub fn generate_random_events(
         return;
     }
     event_manager.last_check_time = sim_time;
-    
+
     // Don't spawn too many events at once
-    let active_emergencies = event_manager.active_events()
+    let active_emergencies = event_manager
+        .active_events()
         .filter(|e| e.event_type.is_emergency())
         .count();
-    
+
     if active_emergencies >= 2 {
         return;
     }
-    
+
     // Random chance for each event type
     // Probabilities are per check (roughly every 6 sim minutes)
-    
+
     // System failure: check systems with low health
     for (entity, system) in world.query::<&ShipSystem>().iter() {
         if system.status == SystemStatus::Critical && rng.gen_bool(0.02) {
@@ -269,12 +272,15 @@ pub fn generate_random_events(
                 EventType::SystemFailure,
                 room_id,
                 sim_time,
-                format!("{} malfunction - critical failure imminent", format!("{:?}", system.system_type)),
+                format!(
+                    "{} malfunction - critical failure imminent",
+                    format!("{:?}", system.system_type)
+                ),
             );
             break; // One event per check
         }
     }
-    
+
     // Medical emergency: random chance based on population
     let person_count = world.query::<&Person>().iter().count();
     if person_count > 0 && rng.gen_bool(0.001) {
@@ -288,7 +294,7 @@ pub fn generate_random_events(
             );
         }
     }
-    
+
     // Celebration: occasional morale boost
     if rng.gen_bool(0.0005) {
         // Find a recreation or mess room
@@ -304,7 +310,7 @@ pub fn generate_random_events(
             }
         }
     }
-    
+
     // Discovery: science labs occasionally make discoveries
     if rng.gen_bool(0.0002) {
         for (entity, room) in world.query::<&Room>().iter() {
@@ -332,26 +338,25 @@ pub fn dispatch_emergency_responders(
         .active_events()
         .filter(|e| e.state == EventState::Active && e.responders_needed > e.responders_assigned)
         .filter_map(|e| {
-            e.event_type.responding_department().map(|dept| (e.id, dept, e.room_id))
+            e.event_type
+                .responding_department()
+                .map(|dept| (e.id, dept, e.room_id))
         })
         .collect();
-    
+
     for (event_id, department, room_id) in events_needing_help {
         // Find available crew from the right department
         let mut available_crew: Vec<hecs::Entity> = Vec::new();
-        
-        for (entity, (_, crew, activity)) in world
-            .query::<(&Person, &Crew, &Activity)>()
-            .iter()
-        {
-            if crew.department == department 
+
+        for (entity, (_, crew, activity)) in world.query::<(&Person, &Crew, &Activity)>().iter() {
+            if crew.department == department
                 && activity.activity_type != ActivityType::Emergency
                 && activity.activity_type.interruptible_for_duty()
             {
                 available_crew.push(entity);
             }
         }
-        
+
         // Assign first available crew member
         if let Some(responder) = available_crew.first() {
             // Update their activity to emergency response
@@ -361,7 +366,7 @@ pub fn dispatch_emergency_responders(
                 activity.duration = 2.0;
                 activity.target_id = Some(room_id);
             }
-            
+
             // Mark responder as assigned
             event_manager.assign_responder(event_id);
         }
@@ -383,36 +388,36 @@ mod tests {
     #[test]
     fn test_event_manager() {
         let mut manager = EventManager::new();
-        
+
         let id = manager.spawn_event(
             EventType::SystemFailure,
             100,
             10.0,
             "Test event".to_string(),
         );
-        
+
         assert!(manager.get(id).is_some());
         assert_eq!(manager.active_events().count(), 1);
-        
+
         // Assign responders
         assert!(manager.assign_responder(id));
         assert!(manager.assign_responder(id));
-        
+
         let event = manager.get(id).unwrap();
         assert_eq!(event.state, EventState::BeingHandled);
     }
-    
+
     #[test]
     fn test_event_resolution() {
         let mut manager = EventManager::new();
-        
+
         let id = manager.spawn_event(
             EventType::Discovery,
             100,
             10.0,
             "Test discovery".to_string(),
         );
-        
+
         // Discoveries don't need responders, so we just update with enough time
         // Actually discoveries have 0 responders_needed, so state won't change
         // Let's test with a system failure instead
@@ -422,13 +427,13 @@ mod tests {
             10.0,
             "System failure".to_string(),
         );
-        
+
         manager.assign_responder(id2);
         manager.assign_responder(id2);
-        
+
         // Update with enough time passed
         let resolved = manager.update(12.0); // 2 hours later
-        
+
         assert!(resolved.contains(&id2));
     }
 }

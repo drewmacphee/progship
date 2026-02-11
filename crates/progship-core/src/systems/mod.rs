@@ -1,23 +1,23 @@
 //! Systems - logic that operates on components
 
-mod movement;
-mod needs;
 mod activity;
-mod wandering;
-mod ship_systems;
-mod maintenance;
-mod social;
+mod dialogue;
 mod duty;
 mod events;
-mod dialogue;
+mod maintenance;
+mod movement;
+mod needs;
+mod ship_systems;
+mod social;
+mod wandering;
 
-pub use movement::*;
-pub use needs::*;
 pub use activity::*;
-pub use wandering::*;
-pub use ship_systems::*;
-pub use maintenance::*;
-pub use social::*;
+pub use dialogue::*;
 pub use duty::*;
 pub use events::*;
-pub use dialogue::*;
+pub use maintenance::*;
+pub use movement::*;
+pub use needs::*;
+pub use ship_systems::*;
+pub use social::*;
+pub use wandering::*;

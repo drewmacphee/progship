@@ -157,8 +157,16 @@ pub fn render_hud(
             .and_then(|pid| conn.db.position().person_id().find(&pid))
             .and_then(|pos| conn.db.room().id().find(&pos.room_id))
             .map(|r| {
-                let total_decks = conn.db.ship_config().id().find(&0).map(|c| c.deck_count as i32);
-                (r.name.clone(), context_action_hint(r.room_type, Some(r.deck), total_decks))
+                let total_decks = conn
+                    .db
+                    .ship_config()
+                    .id()
+                    .find(&0)
+                    .map(|c| c.deck_count as i32);
+                (
+                    r.name.clone(),
+                    context_action_hint(r.room_type, Some(r.deck), total_decks),
+                )
             })
             .unwrap_or_default();
 

@@ -1,9 +1,11 @@
 //! Simulation engine - main entry point for running the simulation
 
-use hecs::World;
 use crate::components::*;
+use crate::generation::{
+    generate_crew, generate_passengers, generate_ship, ShipConfig, ShipLayout,
+};
 use crate::systems::*;
-use crate::generation::{ShipConfig, ShipLayout, generate_ship, generate_crew, generate_passengers};
+use hecs::World;
 
 /// Main simulation engine
 pub struct SimulationEngine {
@@ -23,7 +25,7 @@ pub struct SimulationEngine {
     pub conversations: ConversationManager,
     /// Random events system
     pub events: EventManager,
-    
+
     // Update timing
     last_needs_update: f64,
     last_systems_update: f64,
@@ -32,7 +34,7 @@ pub struct SimulationEngine {
     last_wandering_update: f64,
     last_duty_update: f64,
     last_events_update: f64,
-    
+
     // Configuration
     time_scale: f32,
 }
@@ -63,18 +65,13 @@ impl SimulationEngine {
     /// Generate a complete ship with crew and passengers
     pub fn generate(&mut self, config: ShipConfig) {
         let mut rng = rand::thread_rng();
-        
+
         // Generate ship structure
         let layout = generate_ship(&mut self.world, &config, &mut rng);
-        
+
         // Generate crew
-        let _crew = generate_crew(
-            &mut self.world,
-            config.crew_size,
-            &layout.rooms,
-            &mut rng,
-        );
-        
+        let _crew = generate_crew(&mut self.world, config.crew_size, &layout.rooms, &mut rng);
+
         // Generate passengers
         let _passengers = generate_passengers(
             &mut self.world,
@@ -82,7 +79,7 @@ impl SimulationEngine {
             &layout.rooms,
             &mut rng,
         );
-        
+
         self.ship_layout = Some(layout);
     }
 
@@ -97,11 +94,12 @@ impl SimulationEngine {
 
         // T1: Activity (every frame, but checks internal timing)
         activity_system(&mut self.world, self.sim_time, delta_hours as f32);
-        
+
         // T1: Wandering for idle people (throttled to 10Hz to reduce allocations)
         let wandering_interval = 0.1 / 3600.0; // 0.1 seconds in hours
         if self.sim_time - self.last_wandering_update >= wandering_interval {
-            let room_entities: &[hecs::Entity] = self.ship_layout
+            let room_entities: &[hecs::Entity] = self
+                .ship_layout
                 .as_ref()
                 .map(|l| l.rooms.as_slice())
                 .unwrap_or(&[]);
@@ -124,32 +122,34 @@ impl SimulationEngine {
             ship_systems_system(&mut self.world, &mut self.resources, elapsed);
             self.last_systems_update = self.sim_time;
         }
-        
+
         // T3: Maintenance (0.01 Hz - every 100 seconds, with ship systems)
         let maintenance_interval = 100.0 / 3600.0;
         if self.sim_time - self.last_maintenance_update >= maintenance_interval {
             let elapsed = (self.sim_time - self.last_maintenance_update) as f32;
-            
+
             // Generate tasks for damaged systems
             generate_maintenance_tasks(&self.world, &mut self.maintenance_queue, self.sim_time);
-            
+
             // Assign available crew
             assign_maintenance_crew(&self.world, &mut self.maintenance_queue);
-            
+
             // Progress repairs
             progress_maintenance(&mut self.world, &mut self.maintenance_queue, elapsed);
-            
+
             self.last_maintenance_update = self.sim_time;
         }
-        
+
         // T2: Social interactions (0.1 Hz - every 10 seconds)
         let social_interval = 10.0 / 3600.0;
         if self.sim_time - self.last_social_update >= social_interval {
             let elapsed = (self.sim_time - self.last_social_update) as f32;
-            let room_entities: &[hecs::Entity] = self.ship_layout.as_ref()
+            let room_entities: &[hecs::Entity] = self
+                .ship_layout
+                .as_ref()
                 .map(|l| l.rooms.as_slice())
                 .unwrap_or(&[]);
-            
+
             social_system(
                 &mut self.world,
                 &mut self.conversations,
@@ -158,25 +158,25 @@ impl SimulationEngine {
                 self.sim_time,
                 elapsed,
             );
-            
+
             self.last_social_update = self.sim_time;
         }
-        
+
         // T2: Crew duty schedules (0.1 Hz - every 10 seconds)
         let duty_interval = 10.0 / 3600.0;
         if self.sim_time - self.last_duty_update >= duty_interval {
             update_duty(&mut self.world, self.sim_time);
             self.last_duty_update = self.sim_time;
         }
-        
-        // T3: Random events (0.01 Hz - every 100 seconds)  
+
+        // T3: Random events (0.01 Hz - every 100 seconds)
         let events_interval = 100.0 / 3600.0;
         if self.sim_time - self.last_events_update >= events_interval {
             let mut rng = rand::thread_rng();
-            
+
             generate_random_events(&self.world, &mut self.events, self.sim_time, &mut rng);
             dispatch_emergency_responders(&mut self.world, &mut self.events, self.sim_time);
-            
+
             self.last_events_update = self.sim_time;
         }
     }
@@ -253,9 +253,12 @@ impl SimulationEngine {
     }
 
     /// Load simulation state from a reader
-    pub fn load<R: std::io::Read>(&mut self, reader: R) -> Result<(), crate::persistence::SaveError> {
+    pub fn load<R: std::io::Read>(
+        &mut self,
+        reader: R,
+    ) -> Result<(), crate::persistence::SaveError> {
         let loaded = crate::persistence::load_simulation(reader)?;
-        
+
         self.world = loaded.world;
         self.sim_time = loaded.sim_time;
         self.time_scale = loaded.time_scale;
@@ -264,19 +267,19 @@ impl SimulationEngine {
         self.relationships = loaded.relationships;
         self.conversations = loaded.conversations;
         self.events = loaded.events;
-        
+
         // Rebuild ship layout from loaded entities
         if let Some(layout_info) = loaded.ship_layout_info {
             self.rebuild_ship_layout(layout_info);
         }
-        
+
         // Reset update timers
         self.last_needs_update = self.sim_time;
         self.last_systems_update = self.sim_time;
         self.last_maintenance_update = self.sim_time;
         self.last_social_update = self.sim_time;
         self.last_wandering_update = self.sim_time;
-        
+
         Ok(())
     }
 
@@ -285,30 +288,31 @@ impl SimulationEngine {
         let mut rooms = Vec::new();
         let mut decks = Vec::new();
         let mut elevators = Vec::new();
-        
+
         // Collect room entities
         for (entity, _room) in self.world.query::<&Room>().iter() {
             rooms.push(entity);
         }
-        
+
         // Collect deck entities
         for (entity, _deck) in self.world.query::<&Deck>().iter() {
             decks.push(entity);
         }
-        
+
         // Sort rooms by deck level and position for consistent ordering
         rooms.sort_by(|a, b| {
             let room_a = self.world.get::<&Room>(*a).ok();
             let room_b = self.world.get::<&Room>(*b).ok();
             match (room_a, room_b) {
-                (Some(ra), Some(rb)) => {
-                    ra.deck_level.cmp(&rb.deck_level)
-                        .then(ra.world_x.partial_cmp(&rb.world_x).unwrap_or(std::cmp::Ordering::Equal))
-                }
+                (Some(ra), Some(rb)) => ra.deck_level.cmp(&rb.deck_level).then(
+                    ra.world_x
+                        .partial_cmp(&rb.world_x)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                ),
                 _ => std::cmp::Ordering::Equal,
             }
         });
-        
+
         // Collect elevator rooms (rooms that appear on multiple decks)
         // For simplicity, find rooms with room_type Elevator
         for (entity, room) in self.world.query::<&Room>().iter() {
@@ -316,7 +320,7 @@ impl SimulationEngine {
                 elevators.push(entity);
             }
         }
-        
+
         self.ship_layout = Some(crate::generation::ShipLayout {
             name: layout_info.name,
             rooms,
@@ -348,7 +352,7 @@ mod tests {
     #[test]
     fn test_engine_generation() {
         let mut engine = SimulationEngine::new();
-        
+
         let config = ShipConfig {
             num_decks: 2,
             rooms_per_deck: 3,
@@ -356,9 +360,9 @@ mod tests {
             passenger_capacity: 20,
             ..Default::default()
         };
-        
+
         engine.generate(config);
-        
+
         assert_eq!(engine.crew_count(), 10);
         assert_eq!(engine.passenger_count(), 20);
         assert_eq!(engine.person_count(), 30);
@@ -367,7 +371,7 @@ mod tests {
     #[test]
     fn test_engine_update() {
         let mut engine = SimulationEngine::new();
-        
+
         let config = ShipConfig {
             num_decks: 1,
             rooms_per_deck: 2,
@@ -375,14 +379,14 @@ mod tests {
             passenger_capacity: 5,
             ..Default::default()
         };
-        
+
         engine.generate(config);
-        
+
         // Simulate 1 hour
         for _ in 0..3600 {
             engine.update(1.0); // 1 second per frame
         }
-        
+
         assert!((engine.sim_time() - 1.0).abs() < 0.01);
     }
 
@@ -390,9 +394,9 @@ mod tests {
     fn test_time_scale() {
         let mut engine = SimulationEngine::new();
         engine.set_time_scale(2.0);
-        
+
         engine.update(1.0); // 1 real second = 2 sim seconds
-        
+
         let expected_hours = 2.0 / 3600.0;
         assert!((engine.sim_time() - expected_hours).abs() < 0.0001);
     }

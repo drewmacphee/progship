@@ -38,10 +38,7 @@ pub fn connect_to_server(
     } else {
         String::new()
     };
-    info!(
-        "Connecting to {}{}...",
-        config.server_url, attempt_msg
-    );
+    info!("Connecting to {}{}...", config.server_url, attempt_msg);
     *state = ConnectionState::Connecting;
 
     match DbConnection::builder()
@@ -93,7 +90,10 @@ pub fn connect_to_server(
             error!("Failed to connect: {:?}", e);
             config.advance_backoff();
             ui.toasts.push(Toast {
-                message: format!("Connection failed — retrying in {:.0}s", config.reconnect_delay),
+                message: format!(
+                    "Connection failed — retrying in {:.0}s",
+                    config.reconnect_delay
+                ),
                 color: bevy::color::Color::srgb(1.0, 0.3, 0.3),
                 timer: 5.0,
             });
