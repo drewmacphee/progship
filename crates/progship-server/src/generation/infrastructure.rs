@@ -1372,10 +1372,10 @@ fn wrap_perimeter_corridor(
                 }
             }
 
-            // Cross-corridors
+            // Cross-corridors (use inner bounds matching actual Room geometry)
             for &(cc_id, cy) in cross_rooms {
-                let cc_x0 = x_margin;
-                let cc_w = (hw - x_margin).saturating_sub(cc_x0);
+                let cc_x0 = inner_x0;
+                let cc_w = inner_x1.saturating_sub(inner_x0);
                 if let Some((dx, dy, wa, wb)) =
                     find_shared_edge(px, py, pw, ph, cc_x0, cy, cc_w, CROSS_CORRIDOR_WIDTH)
                 {
