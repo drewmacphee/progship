@@ -785,6 +785,9 @@ pub mod room_types {
     pub const ROBOTICS_BAY: u8 = 69;
     pub const MAINTENANCE_BAY: u8 = 70;
     pub const COOLING_PLANT: u8 = 71;
+    pub const WORKSHOP: u8 = 72;
+    pub const UTILITY: u8 = 73;
+    pub const EMERGENCY_SUPPLY: u8 = 74;
     // Life Support
     pub const HYDROPONICS: u8 = 80;
     pub const ATMOSPHERE_PROCESSING: u8 = 81;

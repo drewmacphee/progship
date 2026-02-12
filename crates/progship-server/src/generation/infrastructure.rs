@@ -9,7 +9,6 @@
 //! rather than occupying a fixed starboard strip.
 
 use super::doors::should_have_room_door;
-use super::facilities::deck_range_for_zone;
 use super::hull::{hull_length, hull_width};
 use super::treemap::RoomRequest;
 use crate::tables::*;
@@ -46,6 +45,17 @@ const CROSS_CORRIDOR_WIDTH: usize = 3;
 const SVC_CORRIDOR_WIDTH: usize = 2;
 const MIN_ROOM_DIM: usize = 4;
 
+/// Filler room pool: used to backfill empty deck space after zone rooms are placed.
+/// (room_type, name_prefix, target_area, capacity)
+const FILLER_POOL: &[(u8, &str, f32, u32)] = &[
+    (room_types::STORAGE, "Storage", 60.0, 0),
+    (room_types::MAINTENANCE_BAY, "Maintenance Bay", 40.0, 4),
+    (room_types::PARTS_STORAGE, "Parts Storage", 30.0, 0),
+    (room_types::WORKSHOP, "Workshop", 35.0, 6),
+    (room_types::UTILITY, "Utility Room", 20.0, 2),
+    (room_types::EMERGENCY_SUPPLY, "Emergency Supply", 25.0, 0),
+];
+
 /// An attachment strip: a rectangular area of empty cells directly adjacent to a corridor wall.
 /// Rooms can only be placed within attachment strips, guaranteeing corridor adjacency.
 struct AttachmentStrip {
@@ -81,6 +91,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
     // ---- Hull sizing from total room area ----
     let total_area: f32 = nodes.iter().map(|n| n.required_area).sum();
+    let max_room_area: f32 = nodes.iter().map(|n| n.required_area).fold(0.0f32, f32::max);
     let shaft_area_per_deck: f32 = shaft_templates
         .iter()
         .map(|(_, _, _, w, h)| (*w * *h) as f32)
@@ -88,14 +99,20 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
     // Auto-compute deck count if 0, otherwise use provided value
     let deck_count = if deck_count == 0 {
-        compute_optimal_deck_count(total_area, shaft_area_per_deck, &shaft_templates)
+        compute_optimal_deck_count(
+            total_area,
+            shaft_area_per_deck,
+            &shaft_templates,
+            max_room_area,
+        )
     } else {
         deck_count
     };
 
     // Iterative hull sizing: compute actual overhead instead of fixed 1.4×
     let room_area_per_deck = total_area / deck_count as f32;
-    let (ship_beam, ship_length) = compute_hull_dimensions(room_area_per_deck, shaft_area_per_deck);
+    let (ship_beam, ship_length) =
+        compute_hull_dimensions(room_area_per_deck, shaft_area_per_deck, max_room_area);
     log::info!(
         "Hull sizing: {:.0}m² total room area, {}×{} hull ({} decks, {} shafts, {:.0}m² shaft overhead/deck)",
         total_area, ship_beam, ship_length, deck_count, shaft_templates.len(), shaft_area_per_deck
@@ -122,6 +139,101 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 .unwrap_or(core::cmp::Ordering::Equal)
         });
     }
+
+    // ---- Demand-driven zone-to-deck assignment (outside-in) ----
+    // Compute usable strip area per deck for demand estimation
+    let est_strip_area = {
+        let uw = ship_beam.saturating_sub(SPINE_WIDTH + 2 * SVC_CORRIDOR_WIDTH);
+        let nc = ((ship_length as f32 / 35.0).round() as usize).max(1);
+        let ul = ship_length.saturating_sub(2 * SVC_CORRIDOR_WIDTH + nc * CROSS_CORRIDOR_WIDTH);
+        uw as f32 * ul as f32 * 0.8 - shaft_area_per_deck
+    };
+    let est_strip_area = est_strip_area.max(100.0);
+
+    // Zone areas and deck requirements
+    let zone_areas: Vec<f32> = zone_requests
+        .iter()
+        .map(|zr| zr.iter().map(|r| r.target_area).sum())
+        .collect();
+    let zone_decks_needed: Vec<u32> = zone_areas
+        .iter()
+        .map(|&a| {
+            if a > 0.0 {
+                (a / est_strip_area).ceil().max(1.0) as u32
+            } else {
+                0
+            }
+        })
+        .collect();
+
+    // Outside-in ordering: CMD=0 (top), ENG=6 (bottom), CARGO=5 (above eng),
+    // LIFE=4 (below cmd), REC=3 (above cargo), SVC=2 (middle), HAB=1 (fills remaining)
+    // Assign from extremes inward:
+    let mut deck_zone_map: Vec<u8> = vec![1; deck_count as usize]; // default: HAB
+    let dc = deck_count as usize;
+
+    // Top: COMMAND
+    let cmd_decks = zone_decks_needed[0].min(deck_count) as usize;
+    for d in 0..cmd_decks.min(dc) {
+        deck_zone_map[d] = 0;
+    }
+
+    // Bottom: ENGINEERING
+    let eng_decks = zone_decks_needed[6].min(deck_count) as usize;
+    for d in 0..eng_decks.min(dc) {
+        let idx = dc - 1 - d;
+        if deck_zone_map[idx] == 1 {
+            deck_zone_map[idx] = 6;
+        }
+    }
+
+    // Above engineering: CARGO
+    let cargo_start = dc.saturating_sub(eng_decks);
+    let cargo_decks = zone_decks_needed[5].min(deck_count) as usize;
+    for d in 0..cargo_decks {
+        let idx = cargo_start.saturating_sub(1 + d);
+        if idx < dc && deck_zone_map[idx] == 1 {
+            deck_zone_map[idx] = 5;
+        }
+    }
+
+    // Below command: LIFE_SUPPORT
+    let life_start = cmd_decks;
+    let life_decks = zone_decks_needed[4].min(deck_count) as usize;
+    for d in 0..life_decks {
+        let idx = life_start + d;
+        if idx < dc && deck_zone_map[idx] == 1 {
+            deck_zone_map[idx] = 4;
+        }
+    }
+
+    // Find remaining HAB slots, assign REC and SVC to middle
+    let hab_slots: Vec<usize> = (0..dc).filter(|&d| deck_zone_map[d] == 1).collect();
+    if !hab_slots.is_empty() {
+        // REC in the upper-middle of HAB region
+        let rec_decks = zone_decks_needed[3].min(hab_slots.len() as u32) as usize;
+        for d in 0..rec_decks {
+            let idx = hab_slots[hab_slots.len() / 2 + d.min(hab_slots.len() - 1)];
+            deck_zone_map[idx] = 3;
+        }
+        // SVC just below/above REC
+        let svc_decks = zone_decks_needed[2].min(hab_slots.len() as u32) as usize;
+        let hab_slots2: Vec<usize> = (0..dc).filter(|&d| deck_zone_map[d] == 1).collect();
+        for d in 0..svc_decks {
+            if let Some(&idx) = hab_slots2.get(hab_slots2.len() / 2 + d) {
+                deck_zone_map[idx] = 2;
+            }
+        }
+    }
+
+    // Log assignment
+    let zone_names = ["CMD", "HAB", "SVC", "REC", "LIFE", "CARGO", "ENG"];
+    for (d, &z) in deck_zone_map.iter().enumerate() {
+        log::info!("Deck {} → Zone {} ({})", d, z, zone_names[z as usize]);
+    }
+
+    // Build per-zone cursor for greedy fill
+    let mut zone_cursors: Vec<usize> = vec![0; 7];
 
     let mut room_id_counter: u32 = 0;
     let mut next_id = || {
@@ -491,24 +603,44 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             y_margin,
         );
 
-        // ---- Phase 4: Collect room requests for this deck ----
+        // ---- Phase 4: Collect room requests for this deck (greedy fill) ----
+        let primary_zone = deck_zone_map[deck as usize] as usize;
         let mut deck_requests: Vec<RoomRequest> = Vec::new();
-        for zone in 0..7u8 {
-            let (lo, hi) = deck_range_for_zone(zone, deck_count);
-            if (deck as u32) >= lo && (deck as u32) < hi {
-                // How many decks in this zone?
-                let zone_decks = hi.saturating_sub(lo).max(1);
-                let deck_index_in_zone = (deck as u32).saturating_sub(lo);
-                let requests = &zone_requests[zone as usize];
-                // Distribute requests round-robin across zone decks
-                for (i, req) in requests.iter().enumerate() {
-                    if (i as u32 % zone_decks) == deck_index_in_zone {
-                        deck_requests.push(req.clone());
-                    }
+        let total_strip_area: usize = strips.iter().map(|s| s.w * s.h).sum();
+        let mut filled_area = 0.0f32;
+        let area_budget = total_strip_area as f32 * 0.95; // leave 5% for packing waste
+
+        // Pull from primary zone first
+        let cursor = &mut zone_cursors[primary_zone];
+        while *cursor < zone_requests[primary_zone].len() && filled_area < area_budget {
+            let req = zone_requests[primary_zone][*cursor].clone();
+            filled_area += req.target_area;
+            deck_requests.push(req);
+            *cursor += 1;
+        }
+
+        // If space remains, pull from adjacent/overflow zones (HAB fills gaps)
+        if filled_area < area_budget * 0.7 {
+            // Try HAB overflow first, then other zones with remaining rooms
+            let overflow_order = [1u8, 2, 3, 4, 5, 0, 6];
+            for &oz in &overflow_order {
+                if oz as usize == primary_zone {
+                    continue;
+                }
+                let oc = &mut zone_cursors[oz as usize];
+                while *oc < zone_requests[oz as usize].len() && filled_area < area_budget {
+                    let req = zone_requests[oz as usize][*oc].clone();
+                    filled_area += req.target_area;
+                    deck_requests.push(req);
+                    *oc += 1;
+                }
+                if filled_area >= area_budget {
+                    break;
                 }
             }
         }
-        // Sort: largest first
+
+        // Sort: largest first for best BSP packing
         deck_requests.sort_by(|a, b| {
             b.target_area
                 .partial_cmp(&a.target_area)
@@ -518,7 +650,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // ---- Phase 5: BSP pack rooms into attachment strips ----
         let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
         let mut request_idx = 0;
-        let total_strip_area: usize = strips.iter().map(|s| s.w * s.h).sum();
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
 
         for strip in &strips {
@@ -816,6 +947,139 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     x += max_w.max(1);
                 }
                 y += 1;
+            }
+        }
+
+        // ---- Phase 5c: Filler room backfill ----
+        // Fill remaining empty space with utility rooms from the filler pool.
+        {
+            let ring_margin_of = SVC_CORRIDOR_WIDTH;
+            let fill_x0 = x_margin + ring_margin_of;
+            let fill_x1 = hw.saturating_sub(x_margin + ring_margin_of);
+            let fill_y0 = y_margin + ring_margin_of;
+            let fill_y1 = hl.saturating_sub(y_margin + ring_margin_of);
+            let mut filler_idx = 0usize;
+            let mut filler_count = 0u32;
+
+            let mut y = fill_y0;
+            while y < fill_y1 {
+                let mut x = fill_x0;
+                while x < fill_x1 {
+                    if grid[x][y] != CELL_EMPTY {
+                        x += 1;
+                        continue;
+                    }
+                    // Expand to largest empty rectangle
+                    let mut max_w = 0;
+                    for dx in 0..(fill_x1 - x) {
+                        if grid[x + dx][y] != CELL_EMPTY {
+                            break;
+                        }
+                        max_w = dx + 1;
+                    }
+                    let mut max_h = fill_y1 - y;
+                    for dy in 0..max_h {
+                        let row_clear = (0..max_w).all(|dx| grid[x + dx][y + dy] == CELL_EMPTY);
+                        if !row_clear {
+                            max_h = dy;
+                            break;
+                        }
+                    }
+
+                    if max_w >= MIN_ROOM_DIM && max_h >= MIN_ROOM_DIM {
+                        let (frt, fname, ftarget, fcap) =
+                            FILLER_POOL[filler_idx % FILLER_POOL.len()];
+                        filler_idx += 1;
+                        let target_side = (ftarget.sqrt() as usize).max(MIN_ROOM_DIM);
+                        let rw = max_w.min(target_side.max(MIN_ROOM_DIM));
+                        let rh = max_h.min(
+                            ((ftarget / rw as f32).ceil() as usize)
+                                .max(MIN_ROOM_DIM)
+                                .min(max_h),
+                        );
+
+                        if rw >= MIN_ROOM_DIM && rh >= MIN_ROOM_DIM {
+                            // Check adjacency before placing
+                            let mut has_adj = false;
+                            // Check spine
+                            for &(_seg_id, seg_y0, seg_y1) in &spine_segments {
+                                let sx = (hw / 2).saturating_sub(SPINE_WIDTH / 2);
+                                if find_shared_edge(
+                                    x,
+                                    y,
+                                    rw,
+                                    rh,
+                                    sx,
+                                    seg_y0,
+                                    SPINE_WIDTH,
+                                    seg_y1 - seg_y0,
+                                )
+                                .is_some()
+                                {
+                                    has_adj = true;
+                                    break;
+                                }
+                            }
+                            if !has_adj {
+                                for &(_, cy) in &cross_rooms {
+                                    let cc_x0 = x_margin + ring_margin_of;
+                                    let cc_w = hw.saturating_sub(x_margin + ring_margin_of) - cc_x0;
+                                    if find_shared_edge(
+                                        x,
+                                        y,
+                                        rw,
+                                        rh,
+                                        cc_x0,
+                                        cy,
+                                        cc_w,
+                                        CROSS_CORRIDOR_WIDTH,
+                                    )
+                                    .is_some()
+                                    {
+                                        has_adj = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !has_adj {
+                                for &(_, ax, ay, aw, ah, _) in placed_rooms.iter() {
+                                    if find_shared_edge(x, y, rw, rh, ax, ay, aw, ah).is_some() {
+                                        has_adj = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if has_adj {
+                                filler_count += 1;
+                                let room_id = next_id();
+                                for gx in x..(x + rw) {
+                                    for gy in y..(y + rh) {
+                                        grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                                    }
+                                }
+                                ctx.db.room().insert(Room {
+                                    id: room_id,
+                                    node_id: 0,
+                                    name: format!("{} {}", fname, filler_count),
+                                    room_type: frt,
+                                    deck,
+                                    x: x as f32 + rw as f32 / 2.0,
+                                    y: y as f32 + rh as f32 / 2.0,
+                                    width: rw as f32,
+                                    height: rh as f32,
+                                    capacity: fcap,
+                                });
+                                placed_rooms.push((room_id, x, y, rw, rh, frt));
+                            }
+                        }
+                    }
+                    x += max_w.max(1);
+                }
+                y += 1;
+            }
+            if filler_count > 0 {
+                log::info!("Deck {}: placed {} filler rooms", deck, filler_count);
             }
         }
 
@@ -2014,13 +2278,24 @@ fn compute_shaft_templates(total_pop: u32) -> Vec<(&'static str, u8, bool, usize
 
 /// Compute hull dimensions using iterative overhead calculation.
 /// Uses perimeter service corridor estimate instead of fixed starboard strip.
-fn compute_hull_dimensions(room_area_per_deck: f32, shaft_area_per_deck: f32) -> (usize, usize) {
+fn compute_hull_dimensions(
+    room_area_per_deck: f32,
+    shaft_area_per_deck: f32,
+    max_room_area: f32,
+) -> (usize, usize) {
     let aspect_ratio = 3.5f32;
     let mut mult = 1.4f32;
 
+    // Minimum beam: largest room must fit in one strip
+    // strip_width = (beam - SPINE_WIDTH - 2*SVC_CORRIDOR_WIDTH) / 2
+    // strip_width >= sqrt(max_room_area) for aspect-ratio-1 fit
+    let min_strip_w = (max_room_area.sqrt()).max(MIN_ROOM_DIM as f32);
+    let min_beam =
+        (min_strip_w * 2.0 + SPINE_WIDTH as f32 + 2.0 * SVC_CORRIDOR_WIDTH as f32).max(30.0);
+
     for _ in 0..5 {
         let apd = room_area_per_deck * mult;
-        let b = (apd.sqrt() / aspect_ratio.sqrt()).max(30.0);
+        let b = (apd.sqrt() / aspect_ratio.sqrt()).max(min_beam);
         let l = (apd / b).max(100.0);
 
         let num_cross = (l / 35.0).round().max(1.0);
@@ -2039,7 +2314,7 @@ fn compute_hull_dimensions(room_area_per_deck: f32, shaft_area_per_deck: f32) ->
     }
 
     let apd = room_area_per_deck * mult;
-    let b = (apd.sqrt() / aspect_ratio.sqrt()).max(30.0) as usize;
+    let b = (apd.sqrt() / aspect_ratio.sqrt()).max(min_beam) as usize;
     let l = (apd / b as f32).max(100.0) as usize;
     (b, l)
 }
@@ -2051,6 +2326,7 @@ fn compute_optimal_deck_count(
     total_room_area: f32,
     shaft_area_per_deck: f32,
     shaft_templates: &[(&'static str, u8, bool, usize, usize)],
+    max_room_area: f32,
 ) -> u32 {
     let num_banks = shaft_templates
         .iter()
@@ -2058,17 +2334,16 @@ fn compute_optimal_deck_count(
         .count()
         .max(1);
 
-    let mut best = 4u32;
-    for d in 4..=25u32 {
+    // Minimum 7 decks so every zone gets ≥1 deck
+    let mut best = 7u32;
+    for d in 7..=30u32 {
         let room_per_deck = total_room_area / d as f32;
-        let (b, l) = compute_hull_dimensions(room_per_deck, shaft_area_per_deck);
+        let (b, l) = compute_hull_dimensions(room_per_deck, shaft_area_per_deck, max_room_area);
 
         let num_cross = (l as f32 / 35.0).round().max(1.0) as usize;
-        // Strip area estimate: both sides of spine, minus ring margins, CCs, shafts
         let usable_width = b.saturating_sub(SPINE_WIDTH + 2 * SVC_CORRIDOR_WIDTH);
         let usable_length =
             l.saturating_sub(2 * SVC_CORRIDOR_WIDTH) - num_cross * CROSS_CORRIDOR_WIDTH;
-        // Apply 0.8 packing factor for shaft column blocking and BSP waste
         let strip_area = usable_width as f32 * usable_length as f32 * 0.8 - shaft_area_per_deck;
 
         let fill = if strip_area > 0.0 {
@@ -2077,10 +2352,9 @@ fn compute_optimal_deck_count(
             99.0
         };
 
-        // Walking distance: elevators distributed along spine length
         let max_walk = l as f32 / (2.0 * num_banks as f32) + b as f32 / 2.0;
 
-        if fill <= 0.85 && max_walk <= 50.0 {
+        if fill <= 0.90 && max_walk <= 50.0 {
             best = d;
             log::info!(
                 "Auto deck count: {} decks ({}x{}, fill {:.0}%, walk {:.0}m)",
