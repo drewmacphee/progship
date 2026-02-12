@@ -567,24 +567,99 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                 });
 
-                // Create door to adjacent corridor (atomically)
-                let (door_x, door_y, wall_room, wall_corr) =
-                    compute_door_position(*rx, *ry, *rw, *rh, strip);
-                ctx.db.door().insert(Door {
-                    id: 0,
-                    room_a: room_id,
-                    room_b: strip.corridor_room_id,
-                    wall_a: wall_room,
-                    wall_b: wall_corr,
-                    position_along_wall: 0.5,
-                    width: 3.0_f32.min(*rw as f32).min(*rh as f32),
-                    access_level: access_levels::PUBLIC,
-                    door_x,
-                    door_y,
-                });
+                // Create door to adjacent corridor (if strip touches a corridor)
+                if strip.corridor_room_id != 0 {
+                    let (door_x, door_y, wall_room, wall_corr) =
+                        compute_door_position(*rx, *ry, *rw, *rh, strip);
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: room_id,
+                        room_b: strip.corridor_room_id,
+                        wall_a: wall_room,
+                        wall_b: wall_corr,
+                        position_along_wall: 0.5,
+                        width: 3.0_f32.min(*rw as f32).min(*rh as f32),
+                        access_level: access_levels::PUBLIC,
+                        door_x,
+                        door_y,
+                    });
+                }
 
                 placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
                 request_idx += 1;
+            }
+        }
+
+        // ---- Phase 5b: Overflow filling ----
+        // Try to place remaining rooms in empty grid regions
+        if request_idx < deck_requests.len() {
+            let ring_margin_of = SVC_CORRIDOR_WIDTH;
+            let fill_x0 = x_margin + ring_margin_of;
+            let fill_x1 = hw.saturating_sub(x_margin + ring_margin_of);
+            let fill_y0 = y_margin + ring_margin_of;
+            let fill_y1 = hl.saturating_sub(y_margin + ring_margin_of);
+
+            let mut y = fill_y0;
+            while y < fill_y1 && request_idx < deck_requests.len() {
+                let mut x = fill_x0;
+                while x < fill_x1 && request_idx < deck_requests.len() {
+                    if grid[x][y] != CELL_EMPTY {
+                        x += 1;
+                        continue;
+                    }
+                    // Expand to largest empty rectangle from this cell
+                    let mut max_w = 0;
+                    for dx in 0..(fill_x1 - x) {
+                        if grid[x + dx][y] != CELL_EMPTY {
+                            break;
+                        }
+                        max_w = dx + 1;
+                    }
+                    let mut max_h = fill_y1 - y;
+                    for dy in 0..max_h {
+                        let row_clear = (0..max_w).all(|dx| grid[x + dx][y + dy] == CELL_EMPTY);
+                        if !row_clear {
+                            max_h = dy;
+                            break;
+                        }
+                    }
+
+                    if max_w >= MIN_ROOM_DIM && max_h >= MIN_ROOM_DIM {
+                        let req = &deck_requests[request_idx];
+                        let target_side = (req.target_area.sqrt() as usize).max(MIN_ROOM_DIM);
+                        let rw = max_w.min(target_side.max(MIN_ROOM_DIM));
+                        let rh = max_h.min(
+                            ((req.target_area / rw as f32).ceil() as usize)
+                                .max(MIN_ROOM_DIM)
+                                .min(max_h),
+                        );
+
+                        if rw >= MIN_ROOM_DIM && rh >= MIN_ROOM_DIM {
+                            let room_id = next_id();
+                            for gx in x..(x + rw) {
+                                for gy in y..(y + rh) {
+                                    grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                                }
+                            }
+                            ctx.db.room().insert(Room {
+                                id: room_id,
+                                node_id: req.node_id,
+                                name: req.name.clone(),
+                                room_type: req.room_type,
+                                deck,
+                                x: x as f32 + rw as f32 / 2.0,
+                                y: y as f32 + rh as f32 / 2.0,
+                                width: rw as f32,
+                                height: rh as f32,
+                                capacity: req.capacity,
+                            });
+                            placed_rooms.push((room_id, x, y, rw, rh, req.room_type));
+                            request_idx += 1;
+                        }
+                    }
+                    x += max_w.max(1);
+                }
+                y += 1;
             }
         }
 
@@ -888,8 +963,7 @@ fn find_attachment_strips(
     let y_lo = y_margin + ring_margin;
     let y_hi = hl.saturating_sub(y_margin + ring_margin);
 
-    // Port side of spine (x_margin+ring..spine_left)
-    // Between consecutive cross-corridors (and before first / after last)
+    // Build Y segment boundaries from cross-corridors
     let mut y_boundaries: Vec<usize> = vec![y_lo];
     for &cy in cross_ys {
         if cy >= y_lo && cy + CROSS_CORRIDOR_WIDTH <= y_hi {
@@ -900,59 +974,66 @@ fn find_attachment_strips(
     y_boundaries.push(y_hi);
 
     let port_x = x_margin + ring_margin;
+    let stbd_x_max = hw.saturating_sub(x_margin + ring_margin);
+
+    // For each Y segment (between cross-corridors), scan BOTH sides for
+    // clear rectangular regions, splitting around shaft obstacles in both
+    // X and Y dimensions.
     for chunk in y_boundaries.chunks(2) {
         if chunk.len() < 2 || chunk[0] >= chunk[1] {
             continue;
         }
-        let y0 = chunk[0];
-        let y1 = chunk[1];
-        let strip_h = y1 - y0;
-        let strip_x = port_x;
-        let strip_w = spine_left.saturating_sub(port_x);
+        let seg_y0 = chunk[0];
+        let seg_y1 = chunk[1];
 
-        if strip_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
-            // Find which corridor this strip connects to
-            let corridor_id =
-                find_corridor_for_strip(spine_left, y0, y1, spine_segments, cross_rooms);
-            strips.push(AttachmentStrip {
-                corridor_room_id: corridor_id,
-                x: strip_x,
-                y: y0,
-                w: strip_w,
-                h: strip_h,
-                wall_side: wall_sides::WEST,
-                door_x: spine_left,
-                door_y: y0 + strip_h / 2,
-            });
-        }
-    }
+        // Scan both port and starboard sides
+        let sides: [(usize, usize, u8); 2] = [
+            (port_x, spine_left, wall_sides::WEST),      // port
+            (spine_right, stbd_x_max, wall_sides::EAST), // starboard
+        ];
 
-    // Starboard side of spine (spine_right..hull edge - ring margin)
-    for chunk in y_boundaries.chunks(2) {
-        if chunk.len() < 2 || chunk[0] >= chunk[1] {
-            continue;
-        }
-        let y0 = chunk[0];
-        let y1 = chunk[1];
-        let strip_h = y1 - y0;
-        let strip_x = spine_right;
-        let strip_max_w = (hw - x_margin - ring_margin).saturating_sub(spine_right);
-
-        if strip_max_w >= MIN_ROOM_DIM && strip_h >= MIN_ROOM_DIM {
-            // Exclude shaft areas — scan for actual empty width
-            let actual_w = scan_empty_width(grid, strip_x, y0, strip_max_w, strip_h);
-            if actual_w >= MIN_ROOM_DIM {
-                let corridor_id =
-                    find_corridor_for_strip(spine_right, y0, y1, spine_segments, cross_rooms);
+        for &(x_start, x_end, wall_side) in &sides {
+            if x_end <= x_start {
+                continue;
+            }
+            // Find clear sub-rectangles by scanning Y rows for shaft obstacles
+            let sub_rects = find_clear_subrects(grid, x_start, x_end, seg_y0, seg_y1);
+            for (rx, ry, rw, rh) in sub_rects {
+                if rw < MIN_ROOM_DIM || rh < MIN_ROOM_DIM {
+                    continue;
+                }
+                // Strips touching spine get a spine corridor door
+                let touches_spine = (wall_side == wall_sides::WEST && rx + rw == spine_left)
+                    || (wall_side == wall_sides::EAST && rx == spine_right);
+                let corridor_id = if touches_spine {
+                    find_corridor_for_strip(
+                        if wall_side == wall_sides::WEST {
+                            spine_left
+                        } else {
+                            spine_right
+                        },
+                        ry,
+                        ry + rh,
+                        spine_segments,
+                        cross_rooms,
+                    )
+                } else {
+                    0
+                };
+                let door_x = if wall_side == wall_sides::WEST {
+                    rx + rw
+                } else {
+                    rx
+                };
                 strips.push(AttachmentStrip {
                     corridor_room_id: corridor_id,
-                    x: strip_x,
-                    y: y0,
-                    w: actual_w,
-                    h: strip_h,
-                    wall_side: wall_sides::EAST,
-                    door_x: spine_right,
-                    door_y: y0 + strip_h / 2,
+                    x: rx,
+                    y: ry,
+                    w: rw,
+                    h: rh,
+                    wall_side,
+                    door_x,
+                    door_y: ry + rh / 2,
                 });
             }
         }
@@ -969,6 +1050,90 @@ fn find_attachment_strips(
         a.wall_side.cmp(&b.wall_side)
     });
     strips
+}
+
+/// Find clear sub-rectangles within a region by splitting around obstacles.
+/// Returns Vec of (x, y, w, h) for each clear rectangle.
+fn find_clear_subrects(
+    grid: &[Vec<u8>],
+    x0: usize,
+    x1: usize,
+    y0: usize,
+    y1: usize,
+) -> Vec<(usize, usize, usize, usize)> {
+    let mut results = Vec::new();
+    if x1 <= x0 || y1 <= y0 {
+        return results;
+    }
+
+    // Scan columns to find X-runs of clear columns, then for each run
+    // scan rows to find Y-sub-runs
+    let mut col_start = x0;
+    let mut x = x0;
+    while x <= x1 {
+        // Check if this column has ANY non-empty cells in the Y range
+        let col_has_obstacle = if x < x1 {
+            (y0..y1).any(|y| y >= grid[x].len() || grid[x][y] != CELL_EMPTY)
+        } else {
+            true // sentinel: force flush at end
+        };
+
+        if col_has_obstacle {
+            let run_w = x - col_start;
+            if run_w >= MIN_ROOM_DIM {
+                // This column range is fully clear — emit as one rect
+                results.push((col_start, y0, run_w, y1 - y0));
+            } else if run_w > 0 && run_w < MIN_ROOM_DIM {
+                // Narrow clear band — skip (too small for a room)
+            }
+
+            if x < x1 {
+                // This column has obstacles — try to find clear Y-sub-ranges
+                // within just this column (and adjacent obstacle columns)
+                // by scanning rows
+                let obs_col_start = x;
+                // Find end of obstacle column block
+                let mut obs_end = x + 1;
+                while obs_end < x1 {
+                    let has_obs = (y0..y1)
+                        .any(|y| y >= grid[obs_end].len() || grid[obs_end][y] != CELL_EMPTY);
+                    if !has_obs {
+                        break;
+                    }
+                    obs_end += 1;
+                }
+                let obs_w = obs_end - obs_col_start;
+
+                // For obstacle columns, find Y sub-ranges that ARE clear
+                let mut row_start = y0;
+                let mut ry = y0;
+                while ry <= y1 {
+                    let row_clear = if ry < y1 {
+                        (obs_col_start..obs_end)
+                            .all(|cx| ry < grid[cx].len() && grid[cx][ry] == CELL_EMPTY)
+                    } else {
+                        false
+                    };
+                    if !row_clear {
+                        let run_h = ry - row_start;
+                        if run_h >= MIN_ROOM_DIM && obs_w >= MIN_ROOM_DIM {
+                            results.push((obs_col_start, row_start, obs_w, run_h));
+                        }
+                        row_start = ry + 1;
+                    }
+                    ry += 1;
+                }
+
+                x = obs_end;
+                col_start = obs_end;
+                continue;
+            }
+            col_start = x + 1;
+        }
+        x += 1;
+    }
+
+    results
 }
 
 /// Scan how many empty columns exist starting from x in the given y range.
@@ -1598,9 +1763,12 @@ fn compute_optimal_deck_count(
         let (b, l) = compute_hull_dimensions(room_per_deck, shaft_area_per_deck);
 
         let num_cross = (l as f32 / 35.0).round().max(1.0) as usize;
-        let strip_area = (b.saturating_sub(5)) as f32
-            * (l as f32 - num_cross as f32 * CROSS_CORRIDOR_WIDTH as f32)
-            - shaft_area_per_deck;
+        // Strip area estimate: both sides of spine, minus ring margins, CCs, shafts
+        let usable_width = b.saturating_sub(SPINE_WIDTH + 2 * SVC_CORRIDOR_WIDTH);
+        let usable_length =
+            l.saturating_sub(2 * SVC_CORRIDOR_WIDTH) - num_cross * CROSS_CORRIDOR_WIDTH;
+        // Apply 0.8 packing factor for shaft column blocking and BSP waste
+        let strip_area = usable_width as f32 * usable_length as f32 * 0.8 - shaft_area_per_deck;
 
         let fill = if strip_area > 0.0 {
             room_per_deck / strip_area
