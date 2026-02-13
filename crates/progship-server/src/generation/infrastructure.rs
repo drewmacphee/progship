@@ -816,8 +816,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
         // ---- Phase 6: BSP room placement into segments ----
         let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
-        let mut corridor_connected: std::collections::HashSet<u32> =
-            std::collections::HashSet::new();
         let mut request_idx = 0;
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
 
@@ -865,6 +863,26 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     continue;
                 }
 
+                // Only place if room touches a corridor
+                if !touches_any_corridor(
+                    *rx,
+                    *ry,
+                    *rw,
+                    *rh,
+                    spine_left,
+                    &spine_segments,
+                    &cross_rooms,
+                    inner_x0,
+                    inner_x1,
+                    inner_y1,
+                    ring_x0,
+                    ring_x1,
+                    ring_y0,
+                    ring_y1,
+                ) {
+                    continue;
+                }
+
                 let req = &deck_requests[request_idx];
                 let room_id = next_id();
 
@@ -889,8 +907,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                 });
 
-                // Door to corridor — only if room actually touches one
-                let got_corridor = create_corridor_door(
+                create_corridor_door(
                     ctx,
                     room_id,
                     *rx,
@@ -914,20 +931,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     ring_w_id,
                     ring_e_id,
                 );
-                if got_corridor
-                    || create_adjacent_room_door(
-                        ctx,
-                        room_id,
-                        *rx,
-                        *ry,
-                        *rw,
-                        *rh,
-                        &placed_rooms,
-                        &corridor_connected,
-                    )
-                {
-                    corridor_connected.insert(room_id);
-                }
 
                 placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
                 request_idx += 1;
@@ -1018,7 +1021,25 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 .min(max_h),
                         );
 
-                        if rw >= MIN_ROOM_DIM && rh >= MIN_ROOM_DIM {
+                        if rw >= MIN_ROOM_DIM
+                            && rh >= MIN_ROOM_DIM
+                            && touches_any_corridor(
+                                start_x,
+                                start_y,
+                                rw,
+                                rh,
+                                spine_left,
+                                &spine_segments,
+                                &cross_rooms,
+                                inner_x0,
+                                inner_x1,
+                                inner_y1,
+                                ring_x0,
+                                ring_x1,
+                                ring_y0,
+                                ring_y1,
+                            )
+                        {
                             let room_id = next_id();
                             for gx in start_x..(start_x + rw).min(hw) {
                                 for gy in start_y..(start_y + rh).min(hl) {
@@ -1039,8 +1060,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 capacity: req.capacity,
                             });
 
-                            // Find corridor to connect to
-                            let got_corridor = create_corridor_door(
+                            create_corridor_door(
                                 ctx,
                                 room_id,
                                 start_x,
@@ -1064,20 +1084,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 ring_w_id,
                                 ring_e_id,
                             );
-                            if got_corridor
-                                || create_adjacent_room_door(
-                                    ctx,
-                                    room_id,
-                                    start_x,
-                                    start_y,
-                                    rw,
-                                    rh,
-                                    &placed_rooms,
-                                    &corridor_connected,
-                                )
-                            {
-                                corridor_connected.insert(room_id);
-                            }
 
                             placed_rooms.push((room_id, start_x, start_y, rw, rh, req.room_type));
                             req_cursor += 1;
@@ -1133,116 +1139,70 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 .min(max_h),
                         );
 
-                        if rw >= MIN_ROOM_DIM && rh >= MIN_ROOM_DIM {
-                            // Check adjacency
-                            let mut has_adj = false;
-                            for &(_seg_id, seg_y0, seg_y1) in &spine_segments {
-                                if find_shared_edge(
-                                    x,
-                                    y,
-                                    rw,
-                                    rh,
-                                    spine_left,
-                                    seg_y0,
-                                    SPINE_WIDTH,
-                                    seg_y1 - seg_y0,
-                                )
-                                .is_some()
-                                {
-                                    has_adj = true;
-                                    break;
+                        if rw >= MIN_ROOM_DIM
+                            && rh >= MIN_ROOM_DIM
+                            && touches_any_corridor(
+                                x,
+                                y,
+                                rw,
+                                rh,
+                                spine_left,
+                                &spine_segments,
+                                &cross_rooms,
+                                inner_x0,
+                                inner_x1,
+                                inner_y1,
+                                ring_x0,
+                                ring_x1,
+                                ring_y0,
+                                ring_y1,
+                            )
+                        {
+                            filler_count += 1;
+                            let room_id = next_id();
+                            for gx in x..(x + rw) {
+                                for gy in y..(y + rh) {
+                                    grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
                                 }
                             }
-                            if !has_adj {
-                                for &(_, cy) in &cross_rooms {
-                                    if find_shared_edge(
-                                        x,
-                                        y,
-                                        rw,
-                                        rh,
-                                        inner_x0,
-                                        cy,
-                                        inner_x1 - inner_x0,
-                                        CROSS_CORRIDOR_WIDTH,
-                                    )
-                                    .is_some()
-                                    {
-                                        has_adj = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !has_adj {
-                                for &(_, ax, ay, aw, ah, _) in placed_rooms.iter() {
-                                    if find_shared_edge(x, y, rw, rh, ax, ay, aw, ah).is_some() {
-                                        has_adj = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            ctx.db.room().insert(Room {
+                                id: room_id,
+                                node_id: 0,
+                                name: format!("{} {}", fname, filler_count),
+                                room_type: frt,
+                                deck,
+                                x: x as f32 + rw as f32 / 2.0,
+                                y: y as f32 + rh as f32 / 2.0,
+                                width: rw as f32,
+                                height: rh as f32,
+                                capacity: fcap,
+                            });
+                            placed_rooms.push((room_id, x, y, rw, rh, frt));
 
-                            if has_adj {
-                                filler_count += 1;
-                                let room_id = next_id();
-                                for gx in x..(x + rw) {
-                                    for gy in y..(y + rh) {
-                                        grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
-                                    }
-                                }
-                                ctx.db.room().insert(Room {
-                                    id: room_id,
-                                    node_id: 0,
-                                    name: format!("{} {}", fname, filler_count),
-                                    room_type: frt,
-                                    deck,
-                                    x: x as f32 + rw as f32 / 2.0,
-                                    y: y as f32 + rh as f32 / 2.0,
-                                    width: rw as f32,
-                                    height: rh as f32,
-                                    capacity: fcap,
-                                });
-                                placed_rooms.push((room_id, x, y, rw, rh, frt));
-
-                                // Create door to nearest corridor or adjacent room
-                                let got_corridor = create_corridor_door(
-                                    ctx,
-                                    room_id,
-                                    x,
-                                    y,
-                                    rw,
-                                    rh,
-                                    spine_left,
-                                    spine_right,
-                                    &spine_segments,
-                                    &cross_rooms,
-                                    inner_x0,
-                                    inner_x1,
-                                    inner_y0,
-                                    inner_y1,
-                                    ring_x0,
-                                    ring_x1,
-                                    ring_y0,
-                                    ring_y1,
-                                    ring_n_id,
-                                    ring_s_id,
-                                    ring_w_id,
-                                    ring_e_id,
-                                );
-                                if got_corridor
-                                    || create_adjacent_room_door(
-                                        ctx,
-                                        room_id,
-                                        x,
-                                        y,
-                                        rw,
-                                        rh,
-                                        &placed_rooms,
-                                        &corridor_connected,
-                                    )
-                                {
-                                    corridor_connected.insert(room_id);
-                                }
-                            }
+                            create_corridor_door(
+                                ctx,
+                                room_id,
+                                x,
+                                y,
+                                rw,
+                                rh,
+                                spine_left,
+                                spine_right,
+                                &spine_segments,
+                                &cross_rooms,
+                                inner_x0,
+                                inner_x1,
+                                inner_y0,
+                                inner_y1,
+                                ring_x0,
+                                ring_x1,
+                                ring_y0,
+                                ring_y1,
+                                ring_n_id,
+                                ring_s_id,
+                                ring_w_id,
+                                ring_e_id,
+                            );
                         }
                     }
                     x += max_w.max(1);
@@ -1638,6 +1598,71 @@ fn find_clear_rects_in_region(
     results
 }
 
+/// Check if a rectangle touches any corridor (spine, cross-corridor, or ring).
+/// Pure geometry check — no side effects.
+#[allow(clippy::too_many_arguments)]
+fn touches_any_corridor(
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+    spine_left: usize,
+    spine_segments: &[(u32, usize, usize)],
+    cross_rooms: &[(u32, usize)],
+    inner_x0: usize,
+    inner_x1: usize,
+    inner_y1: usize,
+    ring_x0: usize,
+    ring_x1: usize,
+    ring_y0: usize,
+    ring_y1: usize,
+) -> bool {
+    for &(_, seg_y0, seg_y1) in spine_segments {
+        if find_shared_edge(
+            rx,
+            ry,
+            rw,
+            rh,
+            spine_left,
+            seg_y0,
+            SPINE_WIDTH,
+            seg_y1 - seg_y0,
+        )
+        .is_some()
+        {
+            return true;
+        }
+    }
+    for &(_, cy) in cross_rooms {
+        if find_shared_edge(
+            rx,
+            ry,
+            rw,
+            rh,
+            inner_x0,
+            cy,
+            inner_x1 - inner_x0,
+            CROSS_CORRIDOR_WIDTH,
+        )
+        .is_some()
+        {
+            return true;
+        }
+    }
+    let ring_checks: [(usize, usize, usize, usize); 4] = [
+        (ring_x0, ring_y0, RING_WIDTH, ring_y1 - ring_y0),
+        (ring_x1 - RING_WIDTH, ring_y0, RING_WIDTH, ring_y1 - ring_y0),
+        (ring_x0, ring_y0, ring_x1 - ring_x0, RING_WIDTH),
+        (ring_x0, inner_y1, ring_x1 - ring_x0, RING_WIDTH),
+    ];
+    for (rcx, rcy, rcw, rch) in ring_checks {
+        if find_shared_edge(rx, ry, rw, rh, rcx, rcy, rcw, rch).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Try to create a door from a room to the nearest corridor it actually touches.
 /// Returns true if a door was created.
 #[allow(clippy::too_many_arguments)]
@@ -1738,64 +1763,6 @@ fn create_corridor_door(
                 id: 0,
                 room_a: room_id,
                 room_b: rid,
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
-                access_level: access_levels::PUBLIC,
-                door_x: dx,
-                door_y: dy,
-            });
-            return true;
-        }
-    }
-    false
-}
-
-/// Try to create a door from a room to any adjacent placed room.
-/// Returns true if a door was created.
-#[allow(clippy::too_many_arguments)]
-fn create_adjacent_room_door(
-    ctx: &ReducerContext,
-    room_id: u32,
-    rx: usize,
-    ry: usize,
-    rw: usize,
-    rh: usize,
-    placed_rooms: &[(u32, usize, usize, usize, usize, u8)],
-    corridor_connected: &std::collections::HashSet<u32>,
-) -> bool {
-    // First pass: prefer rooms that already have corridor access
-    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
-        if adj_id == room_id || !corridor_connected.contains(&adj_id) {
-            continue;
-        }
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, ax, ay, aw, ah) {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: room_id,
-                room_b: adj_id,
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
-                access_level: access_levels::PUBLIC,
-                door_x: dx,
-                door_y: dy,
-            });
-            return true;
-        }
-    }
-    // Second pass: any adjacent room (last resort)
-    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
-        if adj_id == room_id {
-            continue;
-        }
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, ax, ay, aw, ah) {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: room_id,
-                room_b: adj_id,
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
