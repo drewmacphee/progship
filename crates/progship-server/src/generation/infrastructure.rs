@@ -816,6 +816,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
         // ---- Phase 6: BSP room placement into segments ----
         let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        let mut corridor_connected: std::collections::HashSet<u32> =
+            std::collections::HashSet::new();
         let mut request_idx = 0;
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
 
@@ -887,45 +889,44 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                 });
 
-                // Door to the corridor — determine which edge actually touches a corridor
-                let touches_corridor = room_touches_corridor(
+                // Door to corridor — only if room actually touches one
+                let got_corridor = create_corridor_door(
+                    ctx,
+                    room_id,
                     *rx,
                     *ry,
                     *rw,
                     *rh,
-                    &grid,
-                    hw,
-                    hl,
                     spine_left,
                     spine_right,
+                    &spine_segments,
+                    &cross_rooms,
                     inner_x0,
                     inner_x1,
-                    &spine_segments,
-                    ring_w_id,
-                    ring_e_id,
+                    inner_y0,
+                    inner_y1,
+                    ring_x0,
+                    ring_x1,
+                    ring_y0,
+                    ring_y1,
                     ring_n_id,
                     ring_s_id,
+                    ring_w_id,
+                    ring_e_id,
                 );
-                if let Some((cid, ws)) = touches_corridor {
-                    create_segment_door(
+                if got_corridor
+                    || create_adjacent_room_door(
                         ctx,
                         room_id,
                         *rx,
                         *ry,
                         *rw,
                         *rh,
-                        &Segment {
-                            x: seg.x,
-                            y: seg.y,
-                            w: seg.w,
-                            h: seg.h,
-                            corridor_id: cid,
-                            wall_side: ws,
-                        },
-                    );
-                } else {
-                    // Doesn't touch corridor — will be connected via room-to-room doors later
-                    create_segment_door(ctx, room_id, *rx, *ry, *rw, *rh, seg);
+                        &placed_rooms,
+                        &corridor_connected,
+                    )
+                {
+                    corridor_connected.insert(room_id);
                 }
 
                 placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
@@ -1039,134 +1040,43 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                             });
 
                             // Find corridor to connect to
-                            let mut door_created = false;
-                            // Try spine
-                            for &(seg_id, seg_y0, seg_y1) in &spine_segments {
-                                if let Some((ddx, ddy, wa, wb)) = find_shared_edge(
+                            let got_corridor = create_corridor_door(
+                                ctx,
+                                room_id,
+                                start_x,
+                                start_y,
+                                rw,
+                                rh,
+                                spine_left,
+                                spine_right,
+                                &spine_segments,
+                                &cross_rooms,
+                                inner_x0,
+                                inner_x1,
+                                inner_y0,
+                                inner_y1,
+                                ring_x0,
+                                ring_x1,
+                                ring_y0,
+                                ring_y1,
+                                ring_n_id,
+                                ring_s_id,
+                                ring_w_id,
+                                ring_e_id,
+                            );
+                            if got_corridor
+                                || create_adjacent_room_door(
+                                    ctx,
+                                    room_id,
                                     start_x,
                                     start_y,
                                     rw,
                                     rh,
-                                    spine_left,
-                                    seg_y0,
-                                    SPINE_WIDTH,
-                                    seg_y1 - seg_y0,
-                                ) {
-                                    ctx.db.door().insert(Door {
-                                        id: 0,
-                                        room_a: room_id,
-                                        room_b: seg_id,
-                                        wall_a: wa,
-                                        wall_b: wb,
-                                        position_along_wall: 0.5,
-                                        width: 3.0_f32.min(rw as f32).min(rh as f32),
-                                        access_level: access_levels::PUBLIC,
-                                        door_x: ddx,
-                                        door_y: ddy,
-                                    });
-                                    door_created = true;
-                                    break;
-                                }
-                            }
-                            // Try cross-corridors
-                            if !door_created {
-                                for &(cc_id, cy) in &cross_rooms {
-                                    if let Some((ddx, ddy, wa, wb)) = find_shared_edge(
-                                        start_x,
-                                        start_y,
-                                        rw,
-                                        rh,
-                                        inner_x0,
-                                        cy,
-                                        inner_x1 - inner_x0,
-                                        CROSS_CORRIDOR_WIDTH,
-                                    ) {
-                                        ctx.db.door().insert(Door {
-                                            id: 0,
-                                            room_a: room_id,
-                                            room_b: cc_id,
-                                            wall_a: wa,
-                                            wall_b: wb,
-                                            position_along_wall: 0.5,
-                                            width: 3.0_f32.min(rw as f32).min(rh as f32),
-                                            access_level: access_levels::PUBLIC,
-                                            door_x: ddx,
-                                            door_y: ddy,
-                                        });
-                                        door_created = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            // Try ring segments
-                            if !door_created {
-                                let ring_rects: [(u32, usize, usize, usize, usize); 4] = [
-                                    (ring_n_id, ring_x0, ring_y0, ring_x1 - ring_x0, RING_WIDTH),
-                                    (
-                                        ring_s_id,
-                                        ring_x0,
-                                        ring_y1 - RING_WIDTH,
-                                        ring_x1 - ring_x0,
-                                        RING_WIDTH,
-                                    ),
-                                    (
-                                        ring_w_id,
-                                        ring_x0,
-                                        inner_y0,
-                                        RING_WIDTH,
-                                        inner_y1 - inner_y0,
-                                    ),
-                                    (
-                                        ring_e_id,
-                                        ring_x1 - RING_WIDTH,
-                                        inner_y0,
-                                        RING_WIDTH,
-                                        inner_y1 - inner_y0,
-                                    ),
-                                ];
-                                for &(rid, rrx, rry, rrw, rrh) in &ring_rects {
-                                    if let Some((ddx, ddy, wa, wb)) = find_shared_edge(
-                                        start_x, start_y, rw, rh, rrx, rry, rrw, rrh,
-                                    ) {
-                                        ctx.db.door().insert(Door {
-                                            id: 0,
-                                            room_a: room_id,
-                                            room_b: rid,
-                                            wall_a: wa,
-                                            wall_b: wb,
-                                            position_along_wall: 0.5,
-                                            width: 3.0_f32.min(rw as f32).min(rh as f32),
-                                            access_level: access_levels::PUBLIC,
-                                            door_x: ddx,
-                                            door_y: ddy,
-                                        });
-                                        door_created = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            // Try adjacent placed rooms
-                            if !door_created {
-                                for &(adj_id, ax, ay, aw, ah, _) in &placed_rooms {
-                                    if let Some((ddx, ddy, wa, wb)) =
-                                        find_shared_edge(start_x, start_y, rw, rh, ax, ay, aw, ah)
-                                    {
-                                        ctx.db.door().insert(Door {
-                                            id: 0,
-                                            room_a: room_id,
-                                            room_b: adj_id,
-                                            wall_a: wa,
-                                            wall_b: wb,
-                                            position_along_wall: 0.5,
-                                            width: 3.0_f32.min(rw as f32).min(rh as f32),
-                                            access_level: access_levels::PUBLIC,
-                                            door_x: ddx,
-                                            door_y: ddy,
-                                        });
-                                        door_created = true;
-                                        break;
-                                    }
-                                }
+                                    &placed_rooms,
+                                    &corridor_connected,
+                                )
+                            {
+                                corridor_connected.insert(room_id);
                             }
 
                             placed_rooms.push((room_id, start_x, start_y, rw, rh, req.room_type));
@@ -1294,143 +1204,43 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 placed_rooms.push((room_id, x, y, rw, rh, frt));
 
                                 // Create door to nearest corridor or adjacent room
-                                let mut door_made = false;
-                                // Try spine
-                                for &(seg_id, seg_y0, seg_y1) in &spine_segments {
-                                    if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                                let got_corridor = create_corridor_door(
+                                    ctx,
+                                    room_id,
+                                    x,
+                                    y,
+                                    rw,
+                                    rh,
+                                    spine_left,
+                                    spine_right,
+                                    &spine_segments,
+                                    &cross_rooms,
+                                    inner_x0,
+                                    inner_x1,
+                                    inner_y0,
+                                    inner_y1,
+                                    ring_x0,
+                                    ring_x1,
+                                    ring_y0,
+                                    ring_y1,
+                                    ring_n_id,
+                                    ring_s_id,
+                                    ring_w_id,
+                                    ring_e_id,
+                                );
+                                if got_corridor
+                                    || create_adjacent_room_door(
+                                        ctx,
+                                        room_id,
                                         x,
                                         y,
                                         rw,
                                         rh,
-                                        spine_left,
-                                        seg_y0,
-                                        SPINE_WIDTH,
-                                        seg_y1 - seg_y0,
-                                    ) {
-                                        ctx.db.door().insert(Door {
-                                            id: 0,
-                                            room_a: room_id,
-                                            room_b: seg_id,
-                                            wall_a: wa,
-                                            wall_b: wb,
-                                            position_along_wall: 0.5,
-                                            width: 2.0_f32.min(rw as f32).min(rh as f32),
-                                            access_level: access_levels::PUBLIC,
-                                            door_x: dx,
-                                            door_y: dy,
-                                        });
-                                        door_made = true;
-                                        break;
-                                    }
-                                }
-                                // Try cross-corridors
-                                if !door_made {
-                                    for &(cr_id, cy) in &cross_rooms {
-                                        if let Some((dx, dy, wa, wb)) = find_shared_edge(
-                                            x,
-                                            y,
-                                            rw,
-                                            rh,
-                                            inner_x0,
-                                            cy,
-                                            inner_x1 - inner_x0,
-                                            CROSS_CORRIDOR_WIDTH,
-                                        ) {
-                                            ctx.db.door().insert(Door {
-                                                id: 0,
-                                                room_a: room_id,
-                                                room_b: cr_id,
-                                                wall_a: wa,
-                                                wall_b: wb,
-                                                position_along_wall: 0.5,
-                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
-                                                access_level: access_levels::PUBLIC,
-                                                door_x: dx,
-                                                door_y: dy,
-                                            });
-                                            door_made = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Try ring corridors
-                                if !door_made {
-                                    let ring_checks: [(u32, usize, usize, usize, usize); 4] = [
-                                        (
-                                            ring_w_id,
-                                            ring_x0,
-                                            ring_y0,
-                                            RING_WIDTH,
-                                            ring_y1 - ring_y0,
-                                        ),
-                                        (
-                                            ring_e_id,
-                                            inner_x1,
-                                            ring_y0,
-                                            RING_WIDTH,
-                                            ring_y1 - ring_y0,
-                                        ),
-                                        (
-                                            ring_n_id,
-                                            ring_x0,
-                                            ring_y0,
-                                            ring_x1 - ring_x0,
-                                            RING_WIDTH,
-                                        ),
-                                        (
-                                            ring_s_id,
-                                            ring_x0,
-                                            inner_y1,
-                                            ring_x1 - ring_x0,
-                                            RING_WIDTH,
-                                        ),
-                                    ];
-                                    for (rid, rcx, rcy, rcw, rch) in ring_checks {
-                                        if let Some((dx, dy, wa, wb)) =
-                                            find_shared_edge(x, y, rw, rh, rcx, rcy, rcw, rch)
-                                        {
-                                            ctx.db.door().insert(Door {
-                                                id: 0,
-                                                room_a: room_id,
-                                                room_b: rid,
-                                                wall_a: wa,
-                                                wall_b: wb,
-                                                position_along_wall: 0.5,
-                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
-                                                access_level: access_levels::PUBLIC,
-                                                door_x: dx,
-                                                door_y: dy,
-                                            });
-                                            door_made = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Try adjacent placed rooms
-                                if !door_made {
-                                    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
-                                        if adj_id == room_id {
-                                            continue;
-                                        }
-                                        if let Some((dx, dy, wa, wb)) =
-                                            find_shared_edge(x, y, rw, rh, ax, ay, aw, ah)
-                                        {
-                                            ctx.db.door().insert(Door {
-                                                id: 0,
-                                                room_a: room_id,
-                                                room_b: adj_id,
-                                                wall_a: wa,
-                                                wall_b: wb,
-                                                position_along_wall: 0.5,
-                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
-                                                access_level: access_levels::PUBLIC,
-                                                door_x: dx,
-                                                door_y: dy,
-                                            });
-                                            door_made = true;
-                                            break;
-                                        }
-                                    }
+                                        &placed_rooms,
+                                        &corridor_connected,
+                                    )
+                                {
+                                    corridor_connected.insert(room_id);
                                 }
                             }
                         }
@@ -1828,117 +1638,176 @@ fn find_clear_rects_in_region(
     results
 }
 
-/// Check which corridor a room's edge actually touches.
-/// Returns (corridor_id, wall_side) for the first corridor edge found.
+/// Try to create a door from a room to the nearest corridor it actually touches.
+/// Returns true if a door was created.
 #[allow(clippy::too_many_arguments)]
-fn room_touches_corridor(
-    rx: usize,
-    ry: usize,
-    rw: usize,
-    rh: usize,
-    grid: &[Vec<u8>],
-    hw: usize,
-    hl: usize,
-    spine_left: usize,
-    spine_right: usize,
-    inner_x0: usize,
-    inner_x1: usize,
-    spine_segments: &[(u32, usize, usize)],
-    ring_w_id: u32,
-    ring_e_id: u32,
-    ring_n_id: u32,
-    ring_s_id: u32,
-) -> Option<(u32, u8)> {
-    // Check east wall → spine
-    if rx + rw == spine_left {
-        let sid = find_spine_segment(ry, ry + rh, spine_segments);
-        return Some((sid, wall_sides::EAST));
-    }
-    // Check west wall → spine
-    if rx == spine_right {
-        let sid = find_spine_segment(ry, ry + rh, spine_segments);
-        return Some((sid, wall_sides::WEST));
-    }
-    // Check west wall → ring west
-    if rx == inner_x0 {
-        return Some((ring_w_id, wall_sides::WEST));
-    }
-    // Check east wall → ring east
-    if rx + rw == inner_x1 {
-        return Some((ring_e_id, wall_sides::EAST));
-    }
-    // Check north/south walls for corridor adjacency
-    if ry > 0 {
-        let any_corridor_north =
-            (rx..rx + rw).any(|gx| gx < hw && ry > 0 && grid[gx][ry - 1] == CELL_MAIN_CORRIDOR);
-        if any_corridor_north {
-            return Some((ring_n_id, wall_sides::NORTH));
-        }
-    }
-    if ry + rh < hl {
-        let any_corridor_south = (rx..rx + rw)
-            .any(|gx| gx < hw && ry + rh < hl && grid[gx][ry + rh] == CELL_MAIN_CORRIDOR);
-        if any_corridor_south {
-            return Some((ring_s_id, wall_sides::SOUTH));
-        }
-    }
-    None
-}
-
-/// Create a door from a room to the segment's corridor based on wall_side.
-fn create_segment_door(
+fn create_corridor_door(
     ctx: &ReducerContext,
     room_id: u32,
     rx: usize,
     ry: usize,
     rw: usize,
     rh: usize,
-    seg: &Segment,
-) {
-    let (door_x, door_y, wall_room, wall_corr) = match seg.wall_side {
-        wall_sides::WEST => {
-            // Room's west wall touches corridor
-            (
-                rx as f32,
-                ry as f32 + rh as f32 / 2.0,
-                wall_sides::WEST,
-                wall_sides::EAST,
-            )
+    spine_left: usize,
+    _spine_right: usize,
+    spine_segments: &[(u32, usize, usize)],
+    cross_rooms: &[(u32, usize)],
+    inner_x0: usize,
+    inner_x1: usize,
+    _inner_y0: usize,
+    inner_y1: usize,
+    ring_x0: usize,
+    ring_x1: usize,
+    ring_y0: usize,
+    ring_y1: usize,
+    ring_n_id: u32,
+    ring_s_id: u32,
+    ring_w_id: u32,
+    ring_e_id: u32,
+) -> bool {
+    // Try spine segments
+    for &(seg_id, seg_y0, seg_y1) in spine_segments {
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(
+            rx,
+            ry,
+            rw,
+            rh,
+            spine_left,
+            seg_y0,
+            SPINE_WIDTH,
+            seg_y1 - seg_y0,
+        ) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: seg_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
         }
-        wall_sides::EAST => {
-            // Room's east wall touches corridor
-            (
-                (rx + rw) as f32,
-                ry as f32 + rh as f32 / 2.0,
-                wall_sides::EAST,
-                wall_sides::WEST,
-            )
+    }
+    // Try cross-corridors
+    for &(cr_id, cy) in cross_rooms {
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(
+            rx,
+            ry,
+            rw,
+            rh,
+            inner_x0,
+            cy,
+            inner_x1 - inner_x0,
+            CROSS_CORRIDOR_WIDTH,
+        ) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: cr_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
         }
-        wall_sides::NORTH => (
-            rx as f32 + rw as f32 / 2.0,
-            ry as f32,
-            wall_sides::NORTH,
-            wall_sides::SOUTH,
+    }
+    // Try ring corridors
+    let ring_checks: [(u32, usize, usize, usize, usize); 4] = [
+        (ring_w_id, ring_x0, ring_y0, RING_WIDTH, ring_y1 - ring_y0),
+        (
+            ring_e_id,
+            ring_x1 - RING_WIDTH,
+            ring_y0,
+            RING_WIDTH,
+            ring_y1 - ring_y0,
         ),
-        _ => (
-            rx as f32 + rw as f32 / 2.0,
-            (ry + rh) as f32,
-            wall_sides::SOUTH,
-            wall_sides::NORTH,
-        ),
-    };
-    ctx.db.door().insert(Door {
-        id: 0,
-        room_a: room_id,
-        room_b: seg.corridor_id,
-        wall_a: wall_room,
-        wall_b: wall_corr,
-        position_along_wall: 0.5,
-        width: 3.0_f32.min(rw as f32).min(rh as f32),
-        access_level: access_levels::PUBLIC,
-        door_x,
-        door_y,
-    });
+        (ring_n_id, ring_x0, ring_y0, ring_x1 - ring_x0, RING_WIDTH),
+        (ring_s_id, ring_x0, inner_y1, ring_x1 - ring_x0, RING_WIDTH),
+    ];
+    for (rid, rcx, rcy, rcw, rch) in ring_checks {
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, rcx, rcy, rcw, rch) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: rid,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
+        }
+    }
+    false
+}
+
+/// Try to create a door from a room to any adjacent placed room.
+/// Returns true if a door was created.
+#[allow(clippy::too_many_arguments)]
+fn create_adjacent_room_door(
+    ctx: &ReducerContext,
+    room_id: u32,
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+    placed_rooms: &[(u32, usize, usize, usize, usize, u8)],
+    corridor_connected: &std::collections::HashSet<u32>,
+) -> bool {
+    // First pass: prefer rooms that already have corridor access
+    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
+        if adj_id == room_id || !corridor_connected.contains(&adj_id) {
+            continue;
+        }
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, ax, ay, aw, ah) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: adj_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
+        }
+    }
+    // Second pass: any adjacent room (last resort)
+    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
+        if adj_id == room_id {
+            continue;
+        }
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, ax, ay, aw, ah) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: adj_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
+        }
+    }
+    false
 }
 
 /// BSP subdivide a rectangle into sub-rectangles for room packing.
