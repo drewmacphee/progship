@@ -25,7 +25,9 @@ const CELL_ROOM_BASE: u8 = 10;
 const SPINE_WIDTH: usize = 3;
 const CROSS_CORRIDOR_WIDTH: usize = 3;
 const RING_WIDTH: usize = 3; // perimeter ring — same as spine
+const SPUR_WIDTH: usize = 2; // spur corridors — narrower than spine
 const MIN_ROOM_DIM: usize = 4;
+const SPUR_THRESHOLD: usize = 12; // add spurs when segment wider than this
 
 /// Filler room pool: used to backfill empty deck space after zone rooms are placed.
 const FILLER_POOL: &[(u8, &str, f32, u32)] = &[
@@ -547,6 +549,173 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             cross_rooms.push((cc_id, cy));
         }
 
+        // ---- Phase 2.5: Spur corridors into wide segments ----
+        // When segments are too wide for rooms to reach from spine/ring,
+        // add perpendicular spur corridors from the spine into each segment.
+        let mut spur_rooms: Vec<(u32, usize, usize, usize, usize)> = Vec::new(); // (id, x, y, w, h)
+        {
+            // Build Y boundaries for segments (same logic as find_segments)
+            let mut y_bounds: Vec<usize> = vec![inner_y0];
+            for &cy in cross_ys.iter() {
+                if cy >= inner_y0 && cy + CROSS_CORRIDOR_WIDTH <= inner_y1 {
+                    y_bounds.push(cy);
+                    y_bounds.push(cy + CROSS_CORRIDOR_WIDTH);
+                }
+            }
+            y_bounds.push(inner_y1);
+
+            for chunk in y_bounds.chunks(2) {
+                if chunk.len() < 2 || chunk[0] >= chunk[1] {
+                    continue;
+                }
+                let seg_y0 = chunk[0];
+                let seg_y1 = chunk[1];
+                let seg_h = seg_y1 - seg_y0;
+                if seg_h < SPUR_WIDTH + 2 * MIN_ROOM_DIM {
+                    continue; // too short for a spur + rooms on both sides
+                }
+
+                // Spur Y position: centered in segment
+                let spur_y = seg_y0 + (seg_h - SPUR_WIDTH) / 2;
+
+                // Port spur: from spine_left toward ring-west
+                let port_w = spine_left.saturating_sub(inner_x0);
+                if port_w > SPUR_THRESHOLD {
+                    let spur_x = inner_x0;
+                    let spur_len = port_w;
+                    // Stamp grid
+                    for x in spur_x..spur_x + spur_len {
+                        for y in spur_y..spur_y + SPUR_WIDTH {
+                            if x < hw && y < hl && grid[x][y] == CELL_EMPTY {
+                                grid[x][y] = CELL_MAIN_CORRIDOR;
+                            }
+                        }
+                    }
+                    let spur_id = next_id();
+                    ctx.db.room().insert(Room {
+                        id: spur_id,
+                        node_id: 0,
+                        name: format!("Spur Port D{} Y{}", deck + 1, spur_y),
+                        room_type: room_types::CORRIDOR,
+                        deck,
+                        x: spur_x as f32 + spur_len as f32 / 2.0,
+                        y: spur_y as f32 + SPUR_WIDTH as f32 / 2.0,
+                        width: spur_len as f32,
+                        height: SPUR_WIDTH as f32,
+                        capacity: 0,
+                    });
+                    spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
+                }
+
+                // Starboard spur: from spine_right toward ring-east
+                let starb_w = inner_x1.saturating_sub(spine_right);
+                if starb_w > SPUR_THRESHOLD {
+                    let spur_x = spine_right;
+                    let spur_len = starb_w;
+                    for x in spur_x..spur_x + spur_len {
+                        for y in spur_y..spur_y + SPUR_WIDTH {
+                            if x < hw && y < hl && grid[x][y] == CELL_EMPTY {
+                                grid[x][y] = CELL_MAIN_CORRIDOR;
+                            }
+                        }
+                    }
+                    let spur_id = next_id();
+                    ctx.db.room().insert(Room {
+                        id: spur_id,
+                        node_id: 0,
+                        name: format!("Spur Starb D{} Y{}", deck + 1, spur_y),
+                        room_type: room_types::CORRIDOR,
+                        deck,
+                        x: spur_x as f32 + spur_len as f32 / 2.0,
+                        y: spur_y as f32 + SPUR_WIDTH as f32 / 2.0,
+                        width: spur_len as f32,
+                        height: SPUR_WIDTH as f32,
+                        capacity: 0,
+                    });
+                    spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
+                }
+            }
+
+            // Create doors: spur ↔ spine, spur ↔ ring
+            for &(spur_id, sx, sy, sw, sh) in &spur_rooms {
+                // Spur ↔ spine
+                for &(seg_id, seg_y0, seg_y1) in &spine_segments {
+                    if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                        sx,
+                        sy,
+                        sw,
+                        sh,
+                        spine_left,
+                        seg_y0,
+                        SPINE_WIDTH,
+                        seg_y1 - seg_y0,
+                    ) {
+                        ctx.db.door().insert(Door {
+                            id: 0,
+                            room_a: spur_id,
+                            room_b: seg_id,
+                            wall_a: wa,
+                            wall_b: wb,
+                            position_along_wall: 0.5,
+                            width: SPUR_WIDTH as f32,
+                            access_level: access_levels::PUBLIC,
+                            door_x: dx,
+                            door_y: dy,
+                        });
+                        break;
+                    }
+                }
+                // Spur ↔ ring west
+                if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    ring_x0,
+                    ring_y0,
+                    RING_WIDTH,
+                    ring_y1 - ring_y0,
+                ) {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: spur_id,
+                        room_b: ring_w_id,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SPUR_WIDTH as f32,
+                        access_level: access_levels::PUBLIC,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+                // Spur ↔ ring east
+                if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    ring_x1 - RING_WIDTH,
+                    ring_y0,
+                    RING_WIDTH,
+                    ring_y1 - ring_y0,
+                ) {
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: spur_id,
+                        room_b: ring_e_id,
+                        wall_a: wa,
+                        wall_b: wb,
+                        position_along_wall: 0.5,
+                        width: SPUR_WIDTH as f32,
+                        access_level: access_levels::PUBLIC,
+                        door_x: dx,
+                        door_y: dy,
+                    });
+                }
+            }
+        }
+
         // ---- Corridor-to-corridor doors ----
 
         // Spine ↔ cross-corridors
@@ -872,6 +1041,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     spine_left,
                     &spine_segments,
                     &cross_rooms,
+                    &spur_rooms,
                     inner_x0,
                     inner_x1,
                     inner_y1,
@@ -918,6 +1088,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     spine_right,
                     &spine_segments,
                     &cross_rooms,
+                    &spur_rooms,
                     inner_x0,
                     inner_x1,
                     inner_y0,
@@ -1031,6 +1202,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 spine_left,
                                 &spine_segments,
                                 &cross_rooms,
+                                &spur_rooms,
                                 inner_x0,
                                 inner_x1,
                                 inner_y1,
@@ -1071,6 +1243,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 spine_right,
                                 &spine_segments,
                                 &cross_rooms,
+                                &spur_rooms,
                                 inner_x0,
                                 inner_x1,
                                 inner_y0,
@@ -1149,6 +1322,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 spine_left,
                                 &spine_segments,
                                 &cross_rooms,
+                                &spur_rooms,
                                 inner_x0,
                                 inner_x1,
                                 inner_y1,
@@ -1190,6 +1364,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 spine_right,
                                 &spine_segments,
                                 &cross_rooms,
+                                &spur_rooms,
                                 inner_x0,
                                 inner_x1,
                                 inner_y0,
@@ -1609,6 +1784,7 @@ fn touches_any_corridor(
     spine_left: usize,
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
+    spur_rooms: &[(u32, usize, usize, usize, usize)],
     inner_x0: usize,
     inner_x1: usize,
     inner_y1: usize,
@@ -1649,6 +1825,11 @@ fn touches_any_corridor(
             return true;
         }
     }
+    for &(_, sx, sy, sw, sh) in spur_rooms {
+        if find_shared_edge(rx, ry, rw, rh, sx, sy, sw, sh).is_some() {
+            return true;
+        }
+    }
     let ring_checks: [(usize, usize, usize, usize); 4] = [
         (ring_x0, ring_y0, RING_WIDTH, ring_y1 - ring_y0),
         (ring_x1 - RING_WIDTH, ring_y0, RING_WIDTH, ring_y1 - ring_y0),
@@ -1677,6 +1858,7 @@ fn create_corridor_door(
     _spine_right: usize,
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
+    spur_rooms: &[(u32, usize, usize, usize, usize)],
     inner_x0: usize,
     inner_x1: usize,
     _inner_y0: usize,
@@ -1733,6 +1915,24 @@ fn create_corridor_door(
                 id: 0,
                 room_a: room_id,
                 room_b: cr_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                access_level: access_levels::PUBLIC,
+                door_x: dx,
+                door_y: dy,
+            });
+            return true;
+        }
+    }
+    // Try spur corridors
+    for &(spur_id, sx, sy, sw, sh) in spur_rooms {
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, sx, sy, sw, sh) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: room_id,
+                room_b: spur_id,
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
