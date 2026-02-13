@@ -731,6 +731,27 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         door_x,
                         door_y,
                     });
+                } else {
+                    // Non-spine strip: connect to nearest adjacent placed room
+                    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter() {
+                        if let Some((dx, dy, wa, wb)) =
+                            find_shared_edge(*rx, *ry, *rw, *rh, ax, ay, aw, ah)
+                        {
+                            ctx.db.door().insert(Door {
+                                id: 0,
+                                room_a: room_id,
+                                room_b: adj_id,
+                                wall_a: wa,
+                                wall_b: wb,
+                                position_along_wall: 0.5,
+                                width: 3.0_f32.min(*rw as f32).min(*rh as f32),
+                                access_level: access_levels::PUBLIC,
+                                door_x: dx,
+                                door_y: dy,
+                            });
+                            break;
+                        }
+                    }
                 }
 
                 placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
@@ -1598,14 +1619,20 @@ fn find_attachment_strips(
         }
     }
 
-    // Interleave port and starboard strips for balanced filling.
-    // Pair up strips by Y position, alternating port/starboard.
+    // Sort strips: spine-touching first (they have corridor_room_id != 0),
+    // then by Y for balanced filling, alternating port/starboard.
     strips.sort_by(|a, b| {
+        // Spine-touching strips first
+        let a_spine = if a.corridor_room_id != 0 { 0 } else { 1 };
+        let b_spine = if b.corridor_room_id != 0 { 0 } else { 1 };
+        let spine_cmp = a_spine.cmp(&b_spine);
+        if spine_cmp != core::cmp::Ordering::Equal {
+            return spine_cmp;
+        }
         let y_cmp = a.y.cmp(&b.y);
         if y_cmp != core::cmp::Ordering::Equal {
             return y_cmp;
         }
-        // Same Y: alternate sides (WEST=port first, then EAST=starboard)
         a.wall_side.cmp(&b.wall_side)
     });
     strips
