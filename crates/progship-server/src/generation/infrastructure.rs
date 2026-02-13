@@ -1292,6 +1292,146 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                     capacity: fcap,
                                 });
                                 placed_rooms.push((room_id, x, y, rw, rh, frt));
+
+                                // Create door to nearest corridor or adjacent room
+                                let mut door_made = false;
+                                // Try spine
+                                for &(seg_id, seg_y0, seg_y1) in &spine_segments {
+                                    if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                                        x,
+                                        y,
+                                        rw,
+                                        rh,
+                                        spine_left,
+                                        seg_y0,
+                                        SPINE_WIDTH,
+                                        seg_y1 - seg_y0,
+                                    ) {
+                                        ctx.db.door().insert(Door {
+                                            id: 0,
+                                            room_a: room_id,
+                                            room_b: seg_id,
+                                            wall_a: wa,
+                                            wall_b: wb,
+                                            position_along_wall: 0.5,
+                                            width: 2.0_f32.min(rw as f32).min(rh as f32),
+                                            access_level: access_levels::PUBLIC,
+                                            door_x: dx,
+                                            door_y: dy,
+                                        });
+                                        door_made = true;
+                                        break;
+                                    }
+                                }
+                                // Try cross-corridors
+                                if !door_made {
+                                    for &(cr_id, cy) in &cross_rooms {
+                                        if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                                            x,
+                                            y,
+                                            rw,
+                                            rh,
+                                            inner_x0,
+                                            cy,
+                                            inner_x1 - inner_x0,
+                                            CROSS_CORRIDOR_WIDTH,
+                                        ) {
+                                            ctx.db.door().insert(Door {
+                                                id: 0,
+                                                room_a: room_id,
+                                                room_b: cr_id,
+                                                wall_a: wa,
+                                                wall_b: wb,
+                                                position_along_wall: 0.5,
+                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                                                access_level: access_levels::PUBLIC,
+                                                door_x: dx,
+                                                door_y: dy,
+                                            });
+                                            door_made = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Try ring corridors
+                                if !door_made {
+                                    let ring_checks: [(u32, usize, usize, usize, usize); 4] = [
+                                        (
+                                            ring_w_id,
+                                            ring_x0,
+                                            ring_y0,
+                                            RING_WIDTH,
+                                            ring_y1 - ring_y0,
+                                        ),
+                                        (
+                                            ring_e_id,
+                                            inner_x1,
+                                            ring_y0,
+                                            RING_WIDTH,
+                                            ring_y1 - ring_y0,
+                                        ),
+                                        (
+                                            ring_n_id,
+                                            ring_x0,
+                                            ring_y0,
+                                            ring_x1 - ring_x0,
+                                            RING_WIDTH,
+                                        ),
+                                        (
+                                            ring_s_id,
+                                            ring_x0,
+                                            inner_y1,
+                                            ring_x1 - ring_x0,
+                                            RING_WIDTH,
+                                        ),
+                                    ];
+                                    for (rid, rcx, rcy, rcw, rch) in ring_checks {
+                                        if let Some((dx, dy, wa, wb)) =
+                                            find_shared_edge(x, y, rw, rh, rcx, rcy, rcw, rch)
+                                        {
+                                            ctx.db.door().insert(Door {
+                                                id: 0,
+                                                room_a: room_id,
+                                                room_b: rid,
+                                                wall_a: wa,
+                                                wall_b: wb,
+                                                position_along_wall: 0.5,
+                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                                                access_level: access_levels::PUBLIC,
+                                                door_x: dx,
+                                                door_y: dy,
+                                            });
+                                            door_made = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Try adjacent placed rooms
+                                if !door_made {
+                                    for &(adj_id, ax, ay, aw, ah, _) in placed_rooms.iter().rev() {
+                                        if adj_id == room_id {
+                                            continue;
+                                        }
+                                        if let Some((dx, dy, wa, wb)) =
+                                            find_shared_edge(x, y, rw, rh, ax, ay, aw, ah)
+                                        {
+                                            ctx.db.door().insert(Door {
+                                                id: 0,
+                                                room_a: room_id,
+                                                room_b: adj_id,
+                                                wall_a: wa,
+                                                wall_b: wb,
+                                                position_along_wall: 0.5,
+                                                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                                                access_level: access_levels::PUBLIC,
+                                                door_x: dx,
+                                                door_y: dy,
+                                            });
+                                            door_made = true;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
