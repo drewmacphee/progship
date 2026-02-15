@@ -391,45 +391,39 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
         });
 
-        // Ring corner doors (N↔W, N↔E, S↔W, S↔E)
-        for &(a, b, dx, dy) in &[
-            (
-                ring_n_id,
-                ring_w_id,
-                ring_x0 as f32 + RING_WIDTH as f32 / 2.0,
-                inner_y0 as f32,
-            ),
-            (
-                ring_n_id,
-                ring_e_id,
-                (ring_x1 - RING_WIDTH) as f32 + RING_WIDTH as f32 / 2.0,
-                inner_y0 as f32,
-            ),
-            (
-                ring_s_id,
-                ring_w_id,
-                ring_x0 as f32 + RING_WIDTH as f32 / 2.0,
-                inner_y1 as f32,
-            ),
-            (
-                ring_s_id,
-                ring_e_id,
-                (ring_x1 - RING_WIDTH) as f32 + RING_WIDTH as f32 / 2.0,
-                inner_y1 as f32,
-            ),
+        // Ring corner doors (N↔W, N↔E, S↔W, S↔E) — use find_shared_edge for correct walls
+        // Ring grid bounds (top-left corner, width, height):
+        let ring_n_grid = (ring_x0, ring_y0, ring_x1 - ring_x0, RING_WIDTH);
+        let ring_s_grid = (ring_x0, inner_y1, ring_x1 - ring_x0, RING_WIDTH);
+        let ring_w_grid = (ring_x0, inner_y0, RING_WIDTH, inner_y1 - inner_y0);
+        let ring_e_grid = (
+            ring_x1 - RING_WIDTH,
+            inner_y0,
+            RING_WIDTH,
+            inner_y1 - inner_y0,
+        );
+        for &(a_id, a_grid, b_id, b_grid) in &[
+            (ring_n_id, ring_n_grid, ring_w_id, ring_w_grid),
+            (ring_n_id, ring_n_grid, ring_e_id, ring_e_grid),
+            (ring_s_id, ring_s_grid, ring_w_id, ring_w_grid),
+            (ring_s_id, ring_s_grid, ring_e_id, ring_e_grid),
         ] {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: a,
-                room_b: b,
-                wall_a: wall_sides::SOUTH,
-                wall_b: wall_sides::NORTH,
-                position_along_wall: 0.5,
-                width: RING_WIDTH as f32,
-                access_level: access_levels::PUBLIC,
-                door_x: dx,
-                door_y: dy,
-            });
+            if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                a_grid.0, a_grid.1, a_grid.2, a_grid.3, b_grid.0, b_grid.1, b_grid.2, b_grid.3,
+            ) {
+                ctx.db.door().insert(Door {
+                    id: 0,
+                    room_a: a_id,
+                    room_b: b_id,
+                    wall_a: wa,
+                    wall_b: wb,
+                    position_along_wall: 0.5,
+                    width: RING_WIDTH as f32,
+                    access_level: access_levels::PUBLIC,
+                    door_x: dx,
+                    door_y: dy,
+                });
+            }
         }
 
         // Ring Corridor table entries
@@ -900,7 +894,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 &spine_segments,
                 &cross_rooms,
                 spine_left,
-                spine_right,
+                inner_x0,
+                inner_x1,
                 access,
             );
         }
@@ -2142,60 +2137,56 @@ fn connect_shaft_to_corridor(
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
     spine_left: usize,
-    spine_right: usize,
+    inner_x0: usize,
+    inner_x1: usize,
     access: u8,
 ) {
-    // Check cross-corridor overlap
+    let sx = sp.x;
+    let sy = sp.y;
+    let sw = sp.w;
+    let sh = sp.h;
+
+    // Try cross-corridors (full inner width)
     for &(cc_id, cy) in cross_rooms {
-        if sp.y < cy + CROSS_CORRIDOR_WIDTH && sp.y + sp.h > cy {
+        let cc_w = inner_x1 - inner_x0;
+        if let Some((dx, dy, wa, wb)) =
+            find_shared_edge(sx, sy, sw, sh, inner_x0, cy, cc_w, CROSS_CORRIDOR_WIDTH)
+        {
             ctx.db.door().insert(Door {
                 id: 0,
                 room_a: shaft_room_id,
                 room_b: cc_id,
-                wall_a: wall_sides::SOUTH,
-                wall_b: wall_sides::NORTH,
+                wall_a: wa,
+                wall_b: wb,
                 position_along_wall: 0.5,
-                width: sp.w.min(sp.h) as f32,
+                width: sw.min(sh) as f32,
                 access_level: access,
-                door_x: sp.x as f32 + sp.w as f32 / 2.0,
-                door_y: sp.y as f32 + sp.h as f32 / 2.0,
+                door_x: dx,
+                door_y: dy,
             });
             return;
         }
     }
 
-    // Check spine adjacency
-    if sp.x == spine_right || sp.x + sp.w == spine_left {
-        let mid_y = sp.y + sp.h / 2;
-        for &(seg_id, seg_y0, seg_y1) in spine_segments {
-            if mid_y >= seg_y0 && mid_y < seg_y1 {
-                let dx = if sp.x == spine_right {
-                    spine_right as f32
-                } else {
-                    spine_left as f32
-                };
-                ctx.db.door().insert(Door {
-                    id: 0,
-                    room_a: shaft_room_id,
-                    room_b: seg_id,
-                    wall_a: if sp.x == spine_right {
-                        wall_sides::WEST
-                    } else {
-                        wall_sides::EAST
-                    },
-                    wall_b: if sp.x == spine_right {
-                        wall_sides::EAST
-                    } else {
-                        wall_sides::WEST
-                    },
-                    position_along_wall: 0.5,
-                    width: sp.h.min(sp.w) as f32,
-                    access_level: access,
-                    door_x: dx,
-                    door_y: mid_y as f32,
-                });
-                return;
-            }
+    // Try spine segments
+    for &(seg_id, seg_y0, seg_y1) in spine_segments {
+        let seg_h = seg_y1 - seg_y0;
+        if let Some((dx, dy, wa, wb)) =
+            find_shared_edge(sx, sy, sw, sh, spine_left, seg_y0, SPINE_WIDTH, seg_h)
+        {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: shaft_room_id,
+                room_b: seg_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: sw.min(sh) as f32,
+                access_level: access,
+                door_x: dx,
+                door_y: dy,
+            });
+            return;
         }
     }
 }
