@@ -247,9 +247,9 @@ pub fn player_input(
         }
     }
 
-    // Simulation tick
+    // Simulation tick (4Hz — keeps reducer queue short for responsive input)
     view.tick_timer += time.delta_secs();
-    if view.tick_timer >= 0.1 {
+    if view.tick_timer >= 0.25 {
         let _ = conn.reducers().tick(view.tick_timer);
         view.tick_timer = 0.0;
     }

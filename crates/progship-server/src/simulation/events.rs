@@ -7,11 +7,15 @@ use spacetimedb::{ReducerContext, Table};
 pub fn tick_events(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
     // Progress existing events and apply consequences
     let events: Vec<Event> = ctx.db.event().iter().collect();
+    let mut active_count = 0u32;
     for event in events {
         if event.state == event_states::RESOLVED {
+            // Clean up resolved events immediately
+            ctx.db.event().id().delete(event.id);
             continue;
         }
 
+        active_count += 1;
         let elapsed = sim_time - event.started_at;
         let mut e = event.clone();
 
@@ -38,6 +42,11 @@ pub fn tick_events(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
         ctx.db.event().id().update(e);
     }
 
+    // Cap active events to prevent runaway accumulation
+    if active_count >= 10 {
+        return;
+    }
+
     // Generate new events - use high-precision time bits for pseudo-randomness
     let time_bits = (sim_time * 100000.0) as u64;
     let hash = time_bits
@@ -45,14 +54,14 @@ pub fn tick_events(ctx: &ReducerContext, sim_time: f64, delta_hours: f32) {
         .wrapping_add(1442695040888963407);
     let event_chance = (hash >> 32) % 1000; // Use upper bits for better distribution
 
-    if event_chance < 5 {
-        // ~0.5% chance per tick
+    if event_chance < 3 {
+        // ~0.3% chance per tick (reduced from 0.5%)
         let hash2 = hash.wrapping_mul(2862933555777941757);
         let event_type = (hash2 % 8) as u8;
         let severity = 0.3 + ((hash2 / 8 % 50) as f32 * 0.01);
 
-        // Pick a random room
-        let rooms: Vec<Room> = ctx.db.room().iter().collect();
+        // Pick a random room (only content rooms, not corridors)
+        let rooms: Vec<Room> = ctx.db.room().iter().filter(|r| r.room_type < 100).collect();
         if rooms.is_empty() {
             return;
         }
