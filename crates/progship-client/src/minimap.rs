@@ -49,15 +49,22 @@ pub fn minimap_toggle(keyboard: Res<ButtonInput<KeyCode>>, mut minimap: ResMut<M
     }
 }
 
-/// Spawn/update the minimap overlay each frame.
+/// Spawn/update the minimap overlay when dirty.
 pub fn render_minimap(
     state: Res<ConnectionState>,
-    view: Res<ViewState>,
+    mut view: ResMut<ViewState>,
     player: Res<PlayerState>,
     minimap: Res<MinimapState>,
     mut commands: Commands,
     existing_roots: Query<Entity, With<MinimapRoot>>,
 ) {
+    // Only rebuild when minimap is marked dirty or visibility toggled
+    let needs_rebuild = view.minimap_dirty || minimap.is_changed();
+    if !needs_rebuild {
+        return;
+    }
+    view.minimap_dirty = false;
+
     // Clean up old minimap (root despawn_recursive handles all children)
     for entity in existing_roots.iter() {
         if let Some(cmd) = commands.get_entity(entity) {
