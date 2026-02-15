@@ -86,8 +86,9 @@ pub fn setup_ui(mut commands: Commands) {
 pub fn render_hud(
     state: Res<ConnectionState>,
     config: Res<ConnectionConfig>,
-    view: Res<ViewState>,
+    mut view: ResMut<ViewState>,
     player: Res<PlayerState>,
+    time: Res<Time>,
     mut hud_q: Query<
         &mut Text,
         (
@@ -107,6 +108,13 @@ pub fn render_hud(
         ),
     >,
 ) {
+    // Throttle HUD updates to ~4Hz
+    view.hud_timer += time.delta_secs();
+    if view.hud_timer < 0.25 {
+        return;
+    }
+    view.hud_timer = 0.0;
+
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         ConnectionState::Reconnecting => {
@@ -282,9 +290,10 @@ pub fn render_hud(
 
 pub fn render_info_panel(
     state: Res<ConnectionState>,
-    view: Res<ViewState>,
+    mut view: ResMut<ViewState>,
     player: Res<PlayerState>,
     ui: Res<UiState>,
+    time: Res<Time>,
     mut panel_q: Query<
         &mut Text,
         (
@@ -295,6 +304,13 @@ pub fn render_info_panel(
         ),
     >,
 ) {
+    // Throttle info panel updates to ~2Hz
+    view.info_timer += time.delta_secs();
+    if view.info_timer < 0.5 {
+        return;
+    }
+    view.info_timer = 0.0;
+
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         _ => return,

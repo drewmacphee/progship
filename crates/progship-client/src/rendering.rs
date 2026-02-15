@@ -28,10 +28,12 @@ pub fn sync_rooms(
     let room_count = conn.db.room().iter().count();
     if view.current_deck != view.prev_deck {
         view.rooms_dirty = true;
+        view.minimap_dirty = true;
         view.prev_deck = view.current_deck;
     }
     if room_count != view.prev_room_count && room_count > 0 {
         view.rooms_dirty = true;
+        view.minimap_dirty = true;
         view.prev_room_count = room_count;
     }
 
