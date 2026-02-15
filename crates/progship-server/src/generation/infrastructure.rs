@@ -1389,6 +1389,98 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
+        // ---- Phase 8.5: Room expansion into empty space ----
+        // Try to grow each placed room in all 4 directions into adjacent empty cells.
+        // This reduces gaps without adding new rooms.
+        {
+            let mut expanded = 0u32;
+            for i in 0..placed_rooms.len() {
+                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt) = placed_rooms[i];
+                let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+                let mut changed = true;
+                while changed {
+                    changed = false;
+                    // Try expand east (+x)
+                    let new_x1 = rx + rw;
+                    if new_x1 < inner_x1 {
+                        let col_clear = (ry..ry + rh).all(|y| grid[new_x1][y] == CELL_EMPTY);
+                        if col_clear {
+                            for y in ry..ry + rh {
+                                grid[new_x1][y] = cell_tag;
+                            }
+                            rw += 1;
+                            changed = true;
+                        }
+                    }
+                    // Try expand west (-x)
+                    if rx > inner_x0 {
+                        let col_clear = (ry..ry + rh).all(|y| grid[rx - 1][y] == CELL_EMPTY);
+                        if col_clear {
+                            rx -= 1;
+                            for y in ry..ry + rh {
+                                grid[rx][y] = cell_tag;
+                            }
+                            rw += 1;
+                            changed = true;
+                        }
+                    }
+                    // Try expand south (+y)
+                    let new_y1 = ry + rh;
+                    if new_y1 < inner_y1 {
+                        let row_clear = (rx..rx + rw).all(|x| grid[x][new_y1] == CELL_EMPTY);
+                        if row_clear {
+                            for x in rx..rx + rw {
+                                grid[x][new_y1] = cell_tag;
+                            }
+                            rh += 1;
+                            changed = true;
+                        }
+                    }
+                    // Try expand north (-y)
+                    if ry > inner_y0 {
+                        let row_clear = (rx..rx + rw).all(|x| grid[x][ry - 1] == CELL_EMPTY);
+                        if row_clear {
+                            ry -= 1;
+                            for x in rx..rx + rw {
+                                grid[x][ry] = cell_tag;
+                            }
+                            rh += 1;
+                            changed = true;
+                        }
+                    }
+                }
+                if (rx, ry, rw, rh)
+                    != (
+                        placed_rooms[i].1,
+                        placed_rooms[i].2,
+                        placed_rooms[i].3,
+                        placed_rooms[i].4,
+                    )
+                {
+                    expanded += 1;
+                    placed_rooms[i].1 = rx;
+                    placed_rooms[i].2 = ry;
+                    placed_rooms[i].3 = rw;
+                    placed_rooms[i].4 = rh;
+                    // Update Room entry in DB
+                    if let Some(mut room) = ctx.db.room().id().find(room_id) {
+                        room.x = rx as f32 + rw as f32 / 2.0;
+                        room.y = ry as f32 + rh as f32 / 2.0;
+                        room.width = rw as f32;
+                        room.height = rh as f32;
+                        ctx.db.room().id().update(room);
+                    }
+                }
+            }
+            if expanded > 0 {
+                log::info!(
+                    "Deck {}: expanded {} rooms into empty space",
+                    deck + 1,
+                    expanded
+                );
+            }
+        }
+
         // ---- Phase 9: Room-to-room doors (adjacent logical pairs) ----
         for i in 0..placed_rooms.len() {
             for j in (i + 1)..placed_rooms.len() {

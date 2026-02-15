@@ -131,7 +131,7 @@ pub fn render_minimap(
             // Render each room as a small colored rectangle
             for room in &rooms {
                 let rx = (room.x - min_x) * scale_x + 2.0;
-                let ry = (room.y - min_y) * scale_y + 2.0;
+                let ry = (max_y - (room.y + room.height)) * scale_y + 2.0;
                 let rw = (room.width * scale_x).max(1.0);
                 let rh = (room.height * scale_y).max(1.0);
 
@@ -164,7 +164,7 @@ pub fn render_minimap(
                         .unwrap_or(false)
                     {
                         let px = (pos.x - min_x) * scale_x + 2.0;
-                        let py = (pos.y - min_y) * scale_y + 2.0;
+                        let py = (max_y - pos.y) * scale_y + 2.0;
 
                         parent.spawn((
                             Node {
