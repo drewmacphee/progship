@@ -455,148 +455,146 @@ pub fn sync_people(
         _ => return,
     };
 
-    // Every frame: smoothly update ALL existing person transforms toward server positions
     let dt = time.delta_secs();
-    for (_, pe, mut transform) in existing.iter_mut() {
-        if let Some(pos) = conn.db.position().person_id().find(&pe.person_id) {
+
+    // Incremental sync at 2Hz (was 5Hz full despawn/respawn)
+    view.people_sync_timer += dt;
+    let do_sync = view.people_sync_timer >= 0.5;
+    if do_sync {
+        view.people_sync_timer = 0.0;
+    }
+
+    // Build set of person_ids that should be visible on current deck
+    // Only do full scan during sync ticks
+    if do_sync {
+        // Collect who SHOULD be on this deck
+        let mut wanted: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for pos in conn.db.position().iter() {
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
                 if room.deck == view.current_deck {
-                    let is_player = Some(pe.person_id) == player.person_id;
-                    let person_height = if is_player { 1.0 } else { 0.8 };
-                    let target = Vec3::new(pos.x, person_height, -pos.y);
-                    // Time-based lerp: ~10x/sec for player, ~5x/sec for NPCs
-                    let lerp_rate = if is_player { 12.0 } else { 6.0 };
-                    let t = (lerp_rate * dt).min(1.0);
-                    transform.translation = transform.translation.lerp(target, t);
-                } else {
-                    transform.translation.y = -100.0;
+                    wanted.insert(pos.person_id);
                 }
+            }
+        }
+
+        // Despawn entities no longer on this deck
+        let mut have: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for (entity, pe, _) in existing.iter() {
+            if wanted.contains(&pe.person_id) {
+                have.insert(pe.person_id);
+            } else {
+                if let Some(mut cmd) = commands.get_entity(entity) {
+                    cmd.despawn();
+                }
+            }
+        }
+
+        // Despawn old indicators (recreated below for visible people)
+        for entity in indicators.iter() {
+            if let Some(mut cmd) = commands.get_entity(entity) {
+                cmd.despawn();
+            }
+        }
+
+        // Spawn only NEW people (not already in scene)
+        let capsule_mesh = meshes.add(Capsule3d::new(0.4, 1.2));
+        let indicator_mesh = meshes.add(Sphere::new(0.2));
+
+        for &pid in &wanted {
+            if have.contains(&pid) {
+                continue; // already spawned
+            }
+            let Some(pos) = conn.db.position().person_id().find(&pid) else {
+                continue;
+            };
+
+            let is_player = Some(pid) == player.person_id;
+            let person = conn.db.person().id().find(&pid);
+            let is_crew = person.as_ref().map(|p| p.is_crew).unwrap_or(false);
+            let is_selected = ui.selected_person == Some(pid);
+
+            let base_color = if is_player {
+                Color::srgb(0.0, 1.0, 0.2)
+            } else if is_crew {
+                Color::srgb(0.3, 0.5, 1.0)
+            } else {
+                Color::srgb(0.9, 0.8, 0.3)
+            };
+
+            let needs = conn.db.needs().person_id().find(&pid);
+            let health = needs.as_ref().map(|n| n.health).unwrap_or(1.0);
+            let final_color = if health < 0.5 {
+                Color::srgb(1.0, 0.2, 0.2)
+            } else if is_selected {
+                Color::srgb(1.0, 1.0, 1.0)
+            } else {
+                base_color
+            };
+
+            let person_height = if is_player { 1.0 } else { 0.8 };
+
+            commands.spawn((
+                Mesh3d(capsule_mesh.clone()),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: final_color,
+                    ..default()
+                })),
+                Transform::from_xyz(pos.x, person_height, -pos.y).with_scale(Vec3::new(
+                    1.0,
+                    if is_player { 1.2 } else { 1.0 },
+                    1.0,
+                )),
+                PersonEntity { person_id: pid },
+            ));
+        }
+
+        // Respawn indicators for all visible people
+        let indicator_mesh2 = meshes.add(Sphere::new(0.2));
+        for &pid in &wanted {
+            let Some(pos) = conn.db.position().person_id().find(&pid) else {
+                continue;
+            };
+            let is_player = Some(pid) == player.person_id;
+            let person_height = if is_player { 1.0 } else { 0.8 };
+
+            if let Some(activity) = conn.db.activity().person_id().find(&pid) {
+                let indicator_color = activity_indicator_color(activity.activity_type);
+                commands.spawn((
+                    Mesh3d(indicator_mesh2.clone()),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: indicator_color,
+                        emissive: indicator_color.into(),
+                        ..default()
+                    })),
+                    Transform::from_xyz(pos.x, person_height * 2.0 + 0.8, -pos.y),
+                    IndicatorEntity,
+                ));
+            }
+
+            if conn.db.in_conversation().person_id().find(&pid).is_some() {
+                commands.spawn((
+                    Mesh3d(meshes.add(Sphere::new(0.3))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(1.0, 1.0, 0.5),
+                        emissive: Color::srgb(0.5, 0.5, 0.0).into(),
+                        ..default()
+                    })),
+                    Transform::from_xyz(pos.x + 0.5, person_height * 2.0 + 1.5, -pos.y),
+                    IndicatorEntity,
+                ));
             }
         }
     }
 
-    // Full rebuild at 5Hz — despawn/respawn NPCs (not the player)
-    view.people_sync_timer += time.delta_secs();
-    if view.people_sync_timer < 0.2 {
-        return;
-    }
-    view.people_sync_timer = 0.0;
-
-    // Collect existing person IDs and despawn non-player entities
-    let mut existing_player_entity: Option<Entity> = None;
-    let mut entities_to_despawn = Vec::new();
-    for (entity, pe, _) in existing.iter() {
-        if Some(pe.person_id) == player.person_id {
-            existing_player_entity = Some(entity);
-        } else {
-            entities_to_despawn.push(entity);
-        }
-    }
-    for entity in entities_to_despawn {
-        if let Some(mut cmd) = commands.get_entity(entity) {
-            cmd.despawn();
-        }
-    }
-    // Despawn all indicator/bubble entities (recreated each rebuild)
-    for entity in indicators.iter() {
-        if let Some(mut cmd) = commands.get_entity(entity) {
-            cmd.despawn();
-        }
-    }
-
-    let capsule_mesh = meshes.add(Capsule3d::new(0.4, 1.2));
-    let indicator_mesh = meshes.add(Sphere::new(0.2));
-
-    for pos in conn.db.position().iter() {
-        let Some(room) = conn.db.room().id().find(&pos.room_id) else {
-            continue;
-        };
-        if room.deck != view.current_deck {
-            continue;
-        }
-
-        let is_player = Some(pos.person_id) == player.person_id;
-
-        // Skip spawning player if entity already exists (it persists across rebuilds)
-        if is_player && existing_player_entity.is_some() {
-            continue;
-        }
-
-        let person = conn.db.person().id().find(&pos.person_id);
-        let is_crew = person.as_ref().map(|p| p.is_crew).unwrap_or(false);
-        let is_selected = ui.selected_person == Some(pos.person_id);
-
-        // Color: bright green for player, blue for crew, yellow for passengers
-        let base_color = if is_player {
-            Color::srgb(0.0, 1.0, 0.2)
-        } else if is_crew {
-            Color::srgb(0.3, 0.5, 1.0)
-        } else {
-            Color::srgb(0.9, 0.8, 0.3)
-        };
-
-        // Health-based tinting
-        let needs = conn.db.needs().person_id().find(&pos.person_id);
-        let health = needs.as_ref().map(|n| n.health).unwrap_or(1.0);
-        let final_color = if health < 0.5 {
-            Color::srgb(1.0, 0.2, 0.2)
-        } else if is_selected {
-            Color::srgb(1.0, 1.0, 1.0) // Highlight selected
-        } else {
-            base_color
-        };
-
-        let person_height = if is_player { 1.0 } else { 0.8 };
-
-        commands.spawn((
-            Mesh3d(capsule_mesh.clone()),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: final_color,
-                ..default()
-            })),
-            Transform::from_xyz(pos.x, person_height, -pos.y).with_scale(Vec3::new(
-                1.0,
-                if is_player { 1.2 } else { 1.0 },
-                1.0,
-            )),
-            PersonEntity {
-                person_id: pos.person_id,
-            },
-        ));
-
-        // Activity indicator (small sphere above head)
-        if let Some(activity) = conn.db.activity().person_id().find(&pos.person_id) {
-            let indicator_color = activity_indicator_color(activity.activity_type);
-            commands.spawn((
-                Mesh3d(indicator_mesh.clone()),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: indicator_color,
-                    emissive: indicator_color.into(),
-                    ..default()
-                })),
-                Transform::from_xyz(pos.x, person_height * 2.0 + 0.8, -pos.y),
-                IndicatorEntity,
-            ));
-        }
-
-        // Conversation bubble (flat disc above the activity indicator)
-        if conn
-            .db
-            .in_conversation()
-            .person_id()
-            .find(&pos.person_id)
-            .is_some()
-        {
-            commands.spawn((
-                Mesh3d(meshes.add(Sphere::new(0.3))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(1.0, 1.0, 0.5),
-                    emissive: Color::srgb(0.5, 0.5, 0.0).into(),
-                    ..default()
-                })),
-                Transform::from_xyz(pos.x + 0.5, person_height * 2.0 + 1.5, -pos.y),
-                IndicatorEntity,
-            ));
+    // Every frame: lerp ONLY existing entities (already filtered to current deck)
+    for (_, pe, mut transform) in existing.iter_mut() {
+        if let Some(pos) = conn.db.position().person_id().find(&pe.person_id) {
+            let is_player = Some(pe.person_id) == player.person_id;
+            let person_height = if is_player { 1.0 } else { 0.8 };
+            let target = Vec3::new(pos.x, person_height, -pos.y);
+            let lerp_rate = if is_player { 12.0 } else { 6.0 };
+            let t = (lerp_rate * dt).min(1.0);
+            transform.translation = transform.translation.lerp(target, t);
         }
     }
 }
