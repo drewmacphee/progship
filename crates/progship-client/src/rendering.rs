@@ -67,61 +67,18 @@ pub fn sync_rooms(
         let wall_thickness = 0.3;
 
         // Floor
-        let is_corridor = room.room_type >= 100 && room.room_type < 120;
-        let floor_mat = if is_corridor {
-            materials.add(StandardMaterial {
-                base_color: color,
-                emissive: color.into(),
-                ..default()
-            })
-        } else {
-            materials.add(StandardMaterial {
-                base_color: color,
-                ..default()
-            })
-        };
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(w, 0.2, h))),
-            MeshMaterial3d(floor_mat),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: color,
+                ..default()
+            })),
             Transform::from_xyz(room.x, 0.0, room.y),
             RoomEntity {
                 room_id: room.id,
                 deck: room.deck,
             },
         ));
-
-        // Corridor center stripe
-        if is_corridor {
-            let stripe_color = Color::srgb(0.35, 0.35, 0.40);
-            let stripe_mat = materials.add(StandardMaterial {
-                base_color: stripe_color,
-                emissive: stripe_color.into(),
-                ..default()
-            });
-            if w > h {
-                // Horizontal corridor — stripe along X
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(w, 0.05, 0.4))),
-                    MeshMaterial3d(stripe_mat),
-                    Transform::from_xyz(room.x, 0.12, room.y),
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
-            } else {
-                // Vertical corridor — stripe along Z
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.4, 0.05, h))),
-                    MeshMaterial3d(stripe_mat),
-                    Transform::from_xyz(room.x, 0.12, room.y),
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
-            }
-        }
 
         // Room label (skip corridors/infrastructure — too many, too small)
         if room.room_type < 100 {
@@ -206,6 +163,8 @@ pub fn sync_rooms(
         }
 
         // North wall (NORTH = low Y; in 3D: z = room.y - h/2)
+        // Offset walls inward by half-thickness to prevent z-fighting with neighbors
+        let wall_inset = wall_thickness / 2.0;
         let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -214,7 +173,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            room.y - h / 2.0,
+            room.y - h / 2.0 + wall_inset,
             w,
             wall_height,
             wall_thickness,
@@ -234,7 +193,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            room.y + h / 2.0,
+            room.y + h / 2.0 - wall_inset,
             w,
             wall_height,
             wall_thickness,
@@ -253,7 +212,7 @@ pub fn sync_rooms(
             &mut meshes,
             &mut materials,
             wall_color,
-            room.x + w / 2.0,
+            room.x + w / 2.0 - wall_inset,
             room.y,
             h,
             wall_height,
@@ -273,7 +232,7 @@ pub fn sync_rooms(
             &mut meshes,
             &mut materials,
             wall_color,
-            room.x - w / 2.0,
+            room.x - w / 2.0 + wall_inset,
             room.y,
             h,
             wall_height,
