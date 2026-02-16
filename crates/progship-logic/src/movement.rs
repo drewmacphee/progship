@@ -130,11 +130,6 @@ fn door_wall(door: &DoorInfo, room: &RoomBounds) -> DoorWall {
     }
 }
 
-/// Check if `py` (perpendicular coord) is within the door opening ± slack.
-fn in_door_opening(py_coord: f32, door_center: f32, half_open: f32, slack: f32) -> bool {
-    py_coord >= door_center - half_open - slack && py_coord <= door_center + half_open + slack
-}
-
 /// Compute the result of a movement within the given room, checking doors
 /// for room transitions. Uses per-axis clamping with door checks on clamped walls.
 pub fn compute_move(
@@ -189,8 +184,6 @@ pub fn compute_move(
     //   c) the perpendicular coordinate is within the door opening
     // Only try the axis that was actually clamped (player hit that wall).
 
-    let slack = 1.0; // approach tolerance for perpendicular coordinate
-
     // Try X-axis door (player hit left or right wall)
     if x_clamped {
         let hit_wall = if tx < current_room.x_lo(r) {
@@ -210,14 +203,21 @@ pub fn compute_move(
                 if half_open <= 0.0 {
                     continue;
                 }
-                // Perpendicular check: is player's Y near the door opening?
-                // Use the CLAMPED cy (where the player actually ends up on Y axis)
-                if !in_door_opening(cy, door.door_y, half_open, slack) {
+                // Use STARTING py to check if player is actually at the door,
+                // not clamped cy which could be anywhere along the wall.
+                if py < door.door_y - half_open || py > door.door_y + half_open {
                     continue;
                 }
                 if let Some(dest) = door_rooms(other_id) {
-                    let enter_y = cy.clamp(door.door_y - half_open, door.door_y + half_open);
-                    let (fx, fy) = dest.clamp(tx, enter_y, r);
+                    let enter_y = py.clamp(door.door_y - half_open, door.door_y + half_open);
+                    // Place player just past the wall, not at raw tx which could be far away
+                    let step = r + 0.1;
+                    let enter_x = match wall {
+                        DoorWall::MinX => dest.x_hi(r).min(current_room.min_x() - step),
+                        DoorWall::MaxX => dest.x_lo(r).max(current_room.max_x() + step),
+                        _ => unreachable!(),
+                    };
+                    let (fx, fy) = dest.clamp(enter_x, enter_y, r);
                     if dest.contains(fx, fy, r) {
                         return MoveResult::DoorTraversal {
                             room_id: other_id,
@@ -249,13 +249,19 @@ pub fn compute_move(
                 if half_open <= 0.0 {
                     continue;
                 }
-                // Perpendicular check: is player's X near the door opening?
-                if !in_door_opening(cx, door.door_x, half_open, slack) {
+                // Use STARTING px to check if player is actually at the door
+                if px < door.door_x - half_open || px > door.door_x + half_open {
                     continue;
                 }
                 if let Some(dest) = door_rooms(other_id) {
-                    let enter_x = cx.clamp(door.door_x - half_open, door.door_x + half_open);
-                    let (fx, fy) = dest.clamp(enter_x, ty, r);
+                    let enter_x = px.clamp(door.door_x - half_open, door.door_x + half_open);
+                    let step = r + 0.1;
+                    let enter_y = match wall {
+                        DoorWall::MinY => dest.y_hi(r).min(current_room.min_y() - step),
+                        DoorWall::MaxY => dest.y_lo(r).max(current_room.max_y() + step),
+                        _ => unreachable!(),
+                    };
+                    let (fx, fy) = dest.clamp(enter_x, enter_y, r);
                     if dest.contains(fx, fy, r) {
                         return MoveResult::DoorTraversal {
                             room_id: other_id,
@@ -401,7 +407,8 @@ mod tests {
         match res {
             MoveResult::DoorTraversal { room_id, x, y } => {
                 assert_eq!(room_id, 2);
-                assert!((x - 11.0).abs() < 0.1, "x={x}");
+                assert!(x > 10.0, "past wall, x={x}");
+                assert!(x < 11.0, "not too far in, x={x}");
                 assert!((y - 5.0).abs() < 0.1, "y={y}");
             }
             _ => panic!("Expected DoorTraversal, got {:?}", res),
