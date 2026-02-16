@@ -4287,6 +4287,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "progship-client-sdk",
+ "progship-logic",
  "spacetimedb-sdk",
 ]
 

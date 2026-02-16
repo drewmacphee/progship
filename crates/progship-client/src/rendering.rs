@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use progship_client_sdk::*;
+use progship_logic::constants::room_types;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
@@ -49,17 +50,99 @@ pub fn sync_rooms(
         }
     }
 
-    // Collect doors for this deck
+    // Collect doors and rooms for this deck
     let doors: Vec<_> = conn.db.door().iter().collect();
-
-    // Collect all rooms for cross-deck door filtering
     let all_rooms: Vec<_> = conn.db.room().iter().collect();
+    let deck_rooms: Vec<&Room> = all_rooms
+        .iter()
+        .filter(|r| r.deck == view.current_deck)
+        .collect();
 
-    for room in conn.db.room().iter() {
-        if room.deck != view.current_deck {
-            continue;
+    // Build edge lookup for wall ownership:
+    // For each room edge, check if another room's opposite edge is flush.
+    // If so, only the room with the lower ID draws the wall.
+    let edge_eps = 0.1; // tolerance for edge alignment
+
+    // Helper: check if room has a neighbor on a given side
+    // Returns Some(neighbor_id) if a neighbor shares that edge
+    let has_neighbor = |room: &Room, side: u8, deck_rooms: &[&Room]| -> bool {
+        for other in deck_rooms {
+            if other.id == room.id {
+                continue;
+            }
+            let (shared, overlap) = match side {
+                // NORTH: room's top edge at y - h/2, neighbor's bottom at other.y + oh/2
+                0 => {
+                    let edge_match = (room.y - room.height / 2.0 - (other.y + other.height / 2.0))
+                        .abs()
+                        < edge_eps;
+                    // X ranges must overlap
+                    let r_left = room.x - room.width / 2.0;
+                    let r_right = room.x + room.width / 2.0;
+                    let o_left = other.x - other.width / 2.0;
+                    let o_right = other.x + other.width / 2.0;
+                    (
+                        edge_match,
+                        r_left < o_right - edge_eps && r_right > o_left + edge_eps,
+                    )
+                }
+                // SOUTH: room's bottom edge at y + h/2, neighbor's top at other.y - oh/2
+                1 => {
+                    let edge_match = (room.y + room.height / 2.0 - (other.y - other.height / 2.0))
+                        .abs()
+                        < edge_eps;
+                    let r_left = room.x - room.width / 2.0;
+                    let r_right = room.x + room.width / 2.0;
+                    let o_left = other.x - other.width / 2.0;
+                    let o_right = other.x + other.width / 2.0;
+                    (
+                        edge_match,
+                        r_left < o_right - edge_eps && r_right > o_left + edge_eps,
+                    )
+                }
+                // EAST: room's right edge at x + w/2, neighbor's left at other.x - ow/2
+                2 => {
+                    let edge_match = (room.x + room.width / 2.0 - (other.x - other.width / 2.0))
+                        .abs()
+                        < edge_eps;
+                    let r_top = room.y - room.height / 2.0;
+                    let r_bot = room.y + room.height / 2.0;
+                    let o_top = other.y - other.height / 2.0;
+                    let o_bot = other.y + other.height / 2.0;
+                    (
+                        edge_match,
+                        r_top < o_bot - edge_eps && r_bot > o_top + edge_eps,
+                    )
+                }
+                // WEST: room's left edge at x - w/2, neighbor's right at other.x + ow/2
+                3 => {
+                    let edge_match = (room.x - room.width / 2.0 - (other.x + other.width / 2.0))
+                        .abs()
+                        < edge_eps;
+                    let r_top = room.y - room.height / 2.0;
+                    let r_bot = room.y + room.height / 2.0;
+                    let o_top = other.y - other.height / 2.0;
+                    let o_bot = other.y + other.height / 2.0;
+                    (
+                        edge_match,
+                        r_top < o_bot - edge_eps && r_bot > o_top + edge_eps,
+                    )
+                }
+                _ => (false, false),
+            };
+            if shared && overlap {
+                // Neighbor found. Only the lower-ID room owns this wall.
+                if room.id < other.id {
+                    return false; // We own it — draw it
+                } else {
+                    return true; // Neighbor owns it — skip
+                }
+            }
         }
+        false // No neighbor — exterior wall, always draw
+    };
 
+    for room in &deck_rooms {
         let color = room_color(room.room_type);
         let w = room.width;
         let h = room.height;
@@ -80,8 +163,8 @@ pub fn sync_rooms(
             },
         ));
 
-        // Room label (skip corridors/infrastructure — too many, too small)
-        if room.room_type < 100 {
+        // Room label (skip corridors/infrastructure)
+        if !room_types::is_corridor(room.room_type) {
             let font_size = (w.min(h) * 2.5).clamp(8.0, 28.0);
             commands.spawn((
                 Text2d::new(&room.name),
@@ -101,156 +184,136 @@ pub fn sync_rooms(
         }
 
         // Furniture props
-        if room.room_type < 100 {
-            spawn_furniture(&mut commands, &mut meshes, &mut materials, &room);
+        if !room_types::is_corridor(room.room_type) {
+            spawn_furniture(&mut commands, &mut meshes, &mut materials, room);
         }
 
         let wall_color = color.with_luminance(0.3);
 
-        // Collect door world positions per wall from the Door table.
-        // door_x/door_y store the absolute world position of the door center.
-        // wall: NORTH=0, SOUTH=1, EAST=2, WEST=3
-        let mut north_doors: Vec<(f32, f32)> = Vec::new(); // (world_x, door_width)
+        // Collect door gaps per wall for THIS room
+        let mut north_doors: Vec<(f32, f32)> = Vec::new();
         let mut south_doors: Vec<(f32, f32)> = Vec::new();
-        let mut east_doors: Vec<(f32, f32)> = Vec::new(); // (world_y, door_width)
+        let mut east_doors: Vec<(f32, f32)> = Vec::new();
         let mut west_doors: Vec<(f32, f32)> = Vec::new();
 
         for door in &doors {
-            // Skip doors not connected to this room
             let is_a = door.room_a == room.id;
             let is_b = door.room_b == room.id;
             if !is_a && !is_b {
                 continue;
             }
-
-            // Skip cross-deck doors (elevator/ladder connections)
             let other_id = if is_a { door.room_b } else { door.room_a };
             if let Some(other_room) = all_rooms.iter().find(|r| r.id == other_id) {
                 if other_room.deck != room.deck {
                     continue;
                 }
             }
-
-            // Which wall of THIS room is the door on?
             let wall = if is_a { door.wall_a } else { door.wall_b };
-
-            // Use absolute door position directly
-            let door_world_x = door.door_x;
-            let door_world_y = door.door_y;
-
-            // Place the gap on THIS room's wall at the door's world position
             match wall {
-                0 | 1 => {
-                    // NORTH or SOUTH: door position is along X axis
-                    let list = if wall == 0 {
-                        &mut north_doors
-                    } else {
-                        &mut south_doors
-                    };
-                    list.push((door_world_x, door.width));
-                }
-                2 | 3 => {
-                    // EAST or WEST: door position is along Y axis
-                    let list = if wall == 2 {
-                        &mut east_doors
-                    } else {
-                        &mut west_doors
-                    };
-                    list.push((door_world_y, door.width));
-                }
+                0 => north_doors.push((door.door_x, door.width)),
+                1 => south_doors.push((door.door_x, door.width)),
+                2 => east_doors.push((door.door_y, door.width)),
+                3 => west_doors.push((door.door_y, door.width)),
                 _ => {}
             }
         }
 
-        // Nudge walls inward by a tiny epsilon so adjacent rooms' parallel walls
-        // don't z-fight (they sit at the same boundary but 0.01m apart).
-        let z_nudge = 0.01;
-        // Walls extend by half wall_thickness at each end to fill corner notches.
-        let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
-        let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x,
-            room.y - h / 2.0 + z_nudge,
-            w,
-            wall_height,
-            wall_thickness,
-            true,
-            &north_pos,
-            room.x,
-            &north_widths,
-            room.id,
-            room.deck,
-        );
-        let south_pos: Vec<f32> = south_doors.iter().map(|d| d.0).collect();
-        let south_widths: Vec<f32> = south_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x,
-            room.y + h / 2.0 - z_nudge,
-            w,
-            wall_height,
-            wall_thickness,
-            true,
-            &south_pos,
-            room.x,
-            &south_widths,
-            room.id,
-            room.deck,
-        );
-        let east_pos: Vec<f32> = east_doors.iter().map(|d| d.0).collect();
-        let east_widths: Vec<f32> = east_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x + w / 2.0 - z_nudge,
-            room.y,
-            h,
-            wall_height,
-            wall_thickness,
-            false,
-            &east_pos,
-            room.y,
-            &east_widths,
-            room.id,
-            room.deck,
-        );
-        let west_pos: Vec<f32> = west_doors.iter().map(|d| d.0).collect();
-        let west_widths: Vec<f32> = west_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x - w / 2.0 + z_nudge,
-            room.y,
-            h,
-            wall_height,
-            wall_thickness,
-            false,
-            &west_pos,
-            room.y,
-            &west_widths,
-            room.id,
-            room.deck,
-        );
+        // Wall ownership: only draw a wall if we own it (no neighbor, or we have lower ID)
+        // Walls extend by half wall_thickness at each end for solid corners.
+        if !has_neighbor(room, 0, &deck_rooms) {
+            let pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
+            let widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
+            spawn_wall_with_gaps(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                wall_color,
+                room.x,
+                room.y - h / 2.0,
+                w,
+                wall_height,
+                wall_thickness,
+                true,
+                &pos,
+                room.x,
+                &widths,
+                room.id,
+                room.deck,
+            );
+        }
+        if !has_neighbor(room, 1, &deck_rooms) {
+            let pos: Vec<f32> = south_doors.iter().map(|d| d.0).collect();
+            let widths: Vec<f32> = south_doors.iter().map(|d| d.1).collect();
+            spawn_wall_with_gaps(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                wall_color,
+                room.x,
+                room.y + h / 2.0,
+                w,
+                wall_height,
+                wall_thickness,
+                true,
+                &pos,
+                room.x,
+                &widths,
+                room.id,
+                room.deck,
+            );
+        }
+        if !has_neighbor(room, 2, &deck_rooms) {
+            let pos: Vec<f32> = east_doors.iter().map(|d| d.0).collect();
+            let widths: Vec<f32> = east_doors.iter().map(|d| d.1).collect();
+            spawn_wall_with_gaps(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                wall_color,
+                room.x + w / 2.0,
+                room.y,
+                h,
+                wall_height,
+                wall_thickness,
+                false,
+                &pos,
+                room.y,
+                &widths,
+                room.id,
+                room.deck,
+            );
+        }
+        if !has_neighbor(room, 3, &deck_rooms) {
+            let pos: Vec<f32> = west_doors.iter().map(|d| d.0).collect();
+            let widths: Vec<f32> = west_doors.iter().map(|d| d.1).collect();
+            spawn_wall_with_gaps(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                wall_color,
+                room.x - w / 2.0,
+                room.y,
+                h,
+                wall_height,
+                wall_thickness,
+                false,
+                &pos,
+                room.y,
+                &widths,
+                room.id,
+                room.deck,
+            );
+        }
 
-        // Door frames — only for doors between a room and a corridor (not corridor-to-corridor).
-        // Build a list of doors that need frames, checking both sides' room types.
+        // Door frames — only where at least one side is NOT a plain corridor.
+        // Shafts (elevators, ladders) and regular rooms get frames.
+
         let frame_color = Color::srgb(0.55, 0.55, 0.6);
         let frame_mat = materials.add(StandardMaterial {
             base_color: frame_color,
             ..default()
         });
-        let frame_depth = wall_thickness + 0.05; // covers wall + slight protrusion
+        let frame_depth = wall_thickness + 0.05;
         let post_w = 0.2;
         let lintel_height = 0.3;
 
@@ -266,8 +329,14 @@ pub fn sync_rooms(
                 if other.deck != room.deck {
                     continue;
                 }
-                // Skip frames for corridor-to-corridor connections
-                if room.room_type >= 100 && other.room_type >= 100 {
+                // Skip frames for plain corridor-to-corridor (both walkable corridors)
+                if room_types::is_plain_corridor(room.room_type)
+                    && room_types::is_plain_corridor(other.room_type)
+                {
+                    continue;
+                }
+                // Only the lower-ID room spawns frames to avoid duplicates
+                if room.id > other.id {
                     continue;
                 }
             }
@@ -277,124 +346,80 @@ pub fn sync_rooms(
 
             match wall {
                 0 => {
-                    // North wall: frame along X
                     let dx = door.door_x;
                     let dz = room.y - h / 2.0;
-                    let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
-                    for sign in [-1.0_f32, 1.0] {
-                        commands.spawn((
-                            Mesh3d(post_mesh.clone()),
-                            MeshMaterial3d(frame_mat.clone()),
-                            Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
-                            DoorMarker,
-                            RoomEntity {
-                                room_id: room.id,
-                                deck: room.deck,
-                            },
-                        ));
-                    }
-                    let lintel =
-                        meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
-                    commands.spawn((
-                        Mesh3d(lintel),
-                        MeshMaterial3d(frame_mat.clone()),
-                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
-                        DoorMarker,
-                        RoomEntity {
-                            room_id: room.id,
-                            deck: room.deck,
-                        },
-                    ));
+                    spawn_door_frame(
+                        &mut commands,
+                        &mut meshes,
+                        &frame_mat,
+                        dx,
+                        dz,
+                        dw,
+                        wall_height,
+                        frame_depth,
+                        post_w,
+                        lintel_height,
+                        true,
+                        room.id,
+                        room.deck,
+                    );
                 }
                 1 => {
-                    // South wall
                     let dx = door.door_x;
                     let dz = room.y + h / 2.0;
-                    let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
-                    for sign in [-1.0_f32, 1.0] {
-                        commands.spawn((
-                            Mesh3d(post_mesh.clone()),
-                            MeshMaterial3d(frame_mat.clone()),
-                            Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
-                            DoorMarker,
-                            RoomEntity {
-                                room_id: room.id,
-                                deck: room.deck,
-                            },
-                        ));
-                    }
-                    let lintel =
-                        meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
-                    commands.spawn((
-                        Mesh3d(lintel),
-                        MeshMaterial3d(frame_mat.clone()),
-                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
-                        DoorMarker,
-                        RoomEntity {
-                            room_id: room.id,
-                            deck: room.deck,
-                        },
-                    ));
+                    spawn_door_frame(
+                        &mut commands,
+                        &mut meshes,
+                        &frame_mat,
+                        dx,
+                        dz,
+                        dw,
+                        wall_height,
+                        frame_depth,
+                        post_w,
+                        lintel_height,
+                        true,
+                        room.id,
+                        room.deck,
+                    );
                 }
                 2 => {
-                    // East wall: frame along Z
                     let dx = room.x + w / 2.0;
                     let dy = door.door_y;
-                    let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
-                    for sign in [-1.0_f32, 1.0] {
-                        commands.spawn((
-                            Mesh3d(post_mesh.clone()),
-                            MeshMaterial3d(frame_mat.clone()),
-                            Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
-                            DoorMarker,
-                            RoomEntity {
-                                room_id: room.id,
-                                deck: room.deck,
-                            },
-                        ));
-                    }
-                    let lintel =
-                        meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
-                    commands.spawn((
-                        Mesh3d(lintel),
-                        MeshMaterial3d(frame_mat.clone()),
-                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
-                        DoorMarker,
-                        RoomEntity {
-                            room_id: room.id,
-                            deck: room.deck,
-                        },
-                    ));
+                    spawn_door_frame(
+                        &mut commands,
+                        &mut meshes,
+                        &frame_mat,
+                        dx,
+                        dy,
+                        dw,
+                        wall_height,
+                        frame_depth,
+                        post_w,
+                        lintel_height,
+                        false,
+                        room.id,
+                        room.deck,
+                    );
                 }
                 3 => {
-                    // West wall: frame along Z
                     let dx = room.x - w / 2.0;
                     let dy = door.door_y;
-                    let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
-                    for sign in [-1.0_f32, 1.0] {
-                        commands.spawn((
-                            Mesh3d(post_mesh.clone()),
-                            MeshMaterial3d(frame_mat.clone()),
-                            Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
-                            DoorMarker,
-                            RoomEntity {
-                                room_id: room.id,
-                                deck: room.deck,
-                            },
-                        ));
-                    }
-                    let lintel =
-                        meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
-                    commands.spawn((
-                        Mesh3d(lintel),
-                        MeshMaterial3d(frame_mat.clone()),
-                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
-                        DoorMarker,
-                        RoomEntity {
-                            room_id: room.id,
-                            deck: room.deck,
-                        },
-                    ));
+                    spawn_door_frame(
+                        &mut commands,
+                        &mut meshes,
+                        &frame_mat,
+                        dx,
+                        dy,
+                        dw,
+                        wall_height,
+                        frame_depth,
+                        post_w,
+                        lintel_height,
+                        false,
+                        room.id,
+                        room.deck,
+                    );
                 }
                 _ => {}
             }
@@ -692,6 +717,76 @@ fn spawn_wall_with_gaps(
                 RoomEntity { room_id, deck },
             ));
         }
+    }
+}
+
+/// Spawn a door frame (two posts + lintel) at the given position.
+/// `horizontal`: true if the wall runs along X (N/S walls), false for Z (E/W walls).
+#[allow(clippy::too_many_arguments)]
+fn spawn_door_frame(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    frame_mat: &Handle<StandardMaterial>,
+    x: f32,
+    z: f32,
+    door_width: f32,
+    wall_height: f32,
+    frame_depth: f32,
+    post_w: f32,
+    lintel_height: f32,
+    horizontal: bool,
+    room_id: u32,
+    deck: i32,
+) {
+    let re = RoomEntity { room_id, deck };
+    if horizontal {
+        // Wall along X: posts offset in X, frame depth in Z
+        let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
+        for sign in [-1.0_f32, 1.0] {
+            commands.spawn((
+                Mesh3d(post_mesh.clone()),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(x + sign * door_width / 2.0, wall_height / 2.0, z),
+                DoorMarker,
+                re.clone(),
+            ));
+        }
+        let lintel = meshes.add(Cuboid::new(
+            door_width + post_w * 2.0,
+            lintel_height,
+            frame_depth,
+        ));
+        commands.spawn((
+            Mesh3d(lintel),
+            MeshMaterial3d(frame_mat.clone()),
+            Transform::from_xyz(x, wall_height - lintel_height / 2.0, z),
+            DoorMarker,
+            re,
+        ));
+    } else {
+        // Wall along Z: posts offset in Z, frame depth in X
+        let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
+        for sign in [-1.0_f32, 1.0] {
+            commands.spawn((
+                Mesh3d(post_mesh.clone()),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(x, wall_height / 2.0, z + sign * door_width / 2.0),
+                DoorMarker,
+                re.clone(),
+            ));
+        }
+        let lintel = meshes.add(Cuboid::new(
+            frame_depth,
+            lintel_height,
+            door_width + post_w * 2.0,
+        ));
+        commands.spawn((
+            Mesh3d(lintel),
+            MeshMaterial3d(frame_mat.clone()),
+            Transform::from_xyz(x, wall_height - lintel_height / 2.0, z),
+            DoorMarker,
+            re,
+        ));
     }
 }
 

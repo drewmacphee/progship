@@ -155,6 +155,14 @@ pub mod room_types {
     pub fn is_corridor(rt: u8) -> bool {
         rt >= 100
     }
+    /// Returns true if this room type is a walkable corridor (not a shaft or service deck)
+    pub fn is_plain_corridor(rt: u8) -> bool {
+        matches!(rt, CORRIDOR | SERVICE_CORRIDOR | CROSS_CORRIDOR)
+    }
+    /// Returns true if this room type is a vertical shaft (elevator, ladder, service elevator)
+    pub fn is_shaft(rt: u8) -> bool {
+        matches!(rt, ELEVATOR_SHAFT | LADDER_SHAFT | SERVICE_ELEVATOR_SHAFT)
+    }
     /// Returns true if this room type is a medical facility
     pub fn is_medical(rt: u8) -> bool {
         matches!(
