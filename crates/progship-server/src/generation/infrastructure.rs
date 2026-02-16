@@ -893,6 +893,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 sp,
                 &spine_segments,
                 &cross_rooms,
+                &spur_rooms,
+                [ring_n_id, ring_s_id, ring_w_id, ring_e_id],
+                [ring_n_grid, ring_s_grid, ring_w_grid, ring_e_grid],
                 spine_left,
                 inner_x0,
                 inner_x1,
@@ -2136,6 +2139,9 @@ fn connect_shaft_to_corridor(
     sp: &ShaftPlacement,
     spine_segments: &[(u32, usize, usize)],
     cross_rooms: &[(u32, usize)],
+    spur_rooms: &[(u32, usize, usize, usize, usize)],
+    ring_ids: [u32; 4],
+    ring_grids: [(usize, usize, usize, usize); 4],
     spine_left: usize,
     inner_x0: usize,
     inner_x1: usize,
@@ -2189,6 +2195,56 @@ fn connect_shaft_to_corridor(
             return;
         }
     }
+
+    // Try spur corridors
+    for &(spur_id, spur_x, spur_y, spur_w, spur_h) in spur_rooms {
+        if let Some((dx, dy, wa, wb)) =
+            find_shared_edge(sx, sy, sw, sh, spur_x, spur_y, spur_w, spur_h)
+        {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: shaft_room_id,
+                room_b: spur_id,
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: sw.min(sh) as f32,
+                access_level: access,
+                door_x: dx,
+                door_y: dy,
+            });
+            return;
+        }
+    }
+
+    // Try ring corridors (N, S, W, E)
+    for i in 0..4 {
+        let (rx, ry, rw, rh) = ring_grids[i];
+        if let Some((dx, dy, wa, wb)) = find_shared_edge(sx, sy, sw, sh, rx, ry, rw, rh) {
+            ctx.db.door().insert(Door {
+                id: 0,
+                room_a: shaft_room_id,
+                room_b: ring_ids[i],
+                wall_a: wa,
+                wall_b: wb,
+                position_along_wall: 0.5,
+                width: sw.min(sh) as f32,
+                access_level: access,
+                door_x: dx,
+                door_y: dy,
+            });
+            return;
+        }
+    }
+
+    log::warn!(
+        "Shaft {} at ({},{}) {}x{} has no adjacent corridor",
+        sp.name,
+        sx,
+        sy,
+        sw,
+        sh
+    );
 }
 
 /// Find shared edge between two axis-aligned rectangles.
