@@ -73,6 +73,12 @@ impl ConnectionConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraMode {
+    TopDown,
+    FirstPerson,
+}
+
 #[derive(Resource)]
 pub struct ViewState {
     pub current_deck: i32,
@@ -85,6 +91,9 @@ pub struct ViewState {
     pub people_sync_timer: f32,
     pub hud_timer: f32,
     pub info_timer: f32,
+    pub camera_mode: CameraMode,
+    pub fps_yaw: f32,
+    pub fps_pitch: f32,
 }
 
 impl Default for ViewState {
@@ -100,6 +109,9 @@ impl Default for ViewState {
             people_sync_timer: 0.0,
             hud_timer: 0.0,
             info_timer: 0.0,
+            camera_mode: CameraMode::TopDown,
+            fps_yaw: 0.0,
+            fps_pitch: 0.0,
         }
     }
 }
