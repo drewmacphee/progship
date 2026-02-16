@@ -1,4 +1,11 @@
 //! Pure movement logic — room bounds, door traversal, wall-sliding.
+//!
+//! Algorithm: "clamp then slide"
+//! 1. Correct starting position into room bounds (handles NPC push edge case)
+//! 2. Compute desired target = start + delta
+//! 3. Clamp target into room bounds on EACH axis independently
+//! 4. If an axis was clamped AND there's a reachable door on that wall, traverse
+//! 5. Otherwise keep the clamped position (smooth wall slide)
 
 /// Axis-aligned bounding box for a room (center + half-extents).
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +55,19 @@ impl RoomBounds {
             x.clamp(self.min_x() + radius, self.max_x() - radius),
             y.clamp(self.min_y() + radius, self.max_y() - radius),
         )
+    }
+
+    fn x_lo(&self, r: f32) -> f32 {
+        self.min_x() + r
+    }
+    fn x_hi(&self, r: f32) -> f32 {
+        self.max_x() - r
+    }
+    fn y_lo(&self, r: f32) -> f32 {
+        self.min_y() + r
+    }
+    fn y_hi(&self, r: f32) -> f32 {
+        self.max_y() - r
     }
 }
 
@@ -110,107 +130,13 @@ fn door_wall(door: &DoorInfo, room: &RoomBounds) -> DoorWall {
     }
 }
 
-/// Pre-computed door context for a room.
-struct DoorCtx {
-    door: DoorInfo,
-    wall: DoorWall,
-    other_id: u32,
-}
-
-/// Try to enter `dest` through `door`. Returns clamped position inside dest
-/// if the target coordinates reach through the door opening.
-///
-/// The player's perpendicular coordinate must already be near the door
-/// opening — we only allow minor clamping (within 1 unit of the opening edge),
-/// NOT teleporting across the wall to the door.
-fn try_enter(
-    nx: f32,
-    ny: f32,
-    r: f32,
-    door: &DoorInfo,
-    wall: DoorWall,
-    dest: &RoomBounds,
-) -> Option<(f32, f32)> {
-    let half = door.width / 2.0 - r;
-    if half <= 0.0 {
-        return None;
-    }
-    // Check perpendicular coordinate is within or near the door opening.
-    // Allow 1.0 unit of slack for smooth approach, but not arbitrary teleportation.
-    let slack = 1.0;
-    let (cx, cy) = match wall {
-        DoorWall::MinX | DoorWall::MaxX => {
-            if ny < door.door_y - half - slack || ny > door.door_y + half + slack {
-                return None;
-            }
-            (nx, ny.clamp(door.door_y - half, door.door_y + half))
-        }
-        DoorWall::MinY | DoorWall::MaxY => {
-            if nx < door.door_x - half - slack || nx > door.door_x + half + slack {
-                return None;
-            }
-            (nx.clamp(door.door_x - half, door.door_x + half), ny)
-        }
-    };
-    // Clamp to dest room, then check if result is valid
-    let (fx, fy) = dest.clamp(cx, cy, r);
-    if dest.contains(fx, fy, r) {
-        Some((fx, fy))
-    } else {
-        None
-    }
-}
-
-/// Try all doors for a target position. Returns DoorTraversal on success.
-fn try_doors(
-    nx: f32,
-    ny: f32,
-    r: f32,
-    doors: &[DoorCtx],
-    door_rooms: &dyn Fn(u32) -> Option<RoomBounds>,
-) -> Option<MoveResult> {
-    // Try closest door first
-    let mut best: Option<(usize, f32)> = None;
-    for (i, dc) in doors.iter().enumerate() {
-        let dist = ((nx - dc.door.door_x).powi(2) + (ny - dc.door.door_y).powi(2)).sqrt();
-        if best.is_none() || dist < best.unwrap().1 {
-            best = Some((i, dist));
-        }
-    }
-    // Try best first, then all others
-    if let Some((best_i, _)) = best {
-        let dc = &doors[best_i];
-        if let Some(dest) = door_rooms(dc.other_id) {
-            if let Some((fx, fy)) = try_enter(nx, ny, r, &dc.door, dc.wall, &dest) {
-                return Some(MoveResult::DoorTraversal {
-                    room_id: dc.other_id,
-                    x: fx,
-                    y: fy,
-                });
-            }
-        }
-        // Try remaining doors
-        for (i, dc) in doors.iter().enumerate() {
-            if i == best_i {
-                continue;
-            }
-            if let Some(dest) = door_rooms(dc.other_id) {
-                if let Some((fx, fy)) = try_enter(nx, ny, r, &dc.door, dc.wall, &dest) {
-                    return Some(MoveResult::DoorTraversal {
-                        room_id: dc.other_id,
-                        x: fx,
-                        y: fy,
-                    });
-                }
-            }
-        }
-    }
-    None
+/// Check if `py` (perpendicular coord) is within the door opening ± slack.
+fn in_door_opening(py_coord: f32, door_center: f32, half_open: f32, slack: f32) -> bool {
+    py_coord >= door_center - half_open - slack && py_coord <= door_center + half_open + slack
 }
 
 /// Compute the result of a movement within the given room, checking doors
-/// for room transitions. Uses axis-decomposed wall-sliding for smooth
-/// diagonal movement along walls and through doorways.
+/// for room transitions. Uses per-axis clamping with door checks on clamped walls.
 pub fn compute_move(
     input: &MoveInput,
     current_room: &RoomBounds,
@@ -219,103 +145,138 @@ pub fn compute_move(
 ) -> MoveResult {
     let r = input.player_radius;
 
-    // Safety: if current position is already outside room bounds (floating point
-    // edge case from NPC push or prior clamp), snap it back inside first.
+    // 0. Correct starting position into room if outside (NPC push edge case)
     let (px, py) = if current_room.contains(input.px, input.py, r) {
         (input.px, input.py)
     } else {
         current_room.clamp(input.px, input.py, r)
     };
-    let nx = px + input.dx;
-    let ny = py + input.dy;
 
-    // 1. Fast path: full move stays inside current room
-    if current_room.contains(nx, ny, r) {
-        return MoveResult::InRoom { x: nx, y: ny };
+    // 1. Desired target
+    let tx = px + input.dx;
+    let ty = py + input.dy;
+
+    // 2. Clamp each axis independently
+    let cx = tx.clamp(current_room.x_lo(r), current_room.x_hi(r));
+    let cy = ty.clamp(current_room.y_lo(r), current_room.y_hi(r));
+
+    let x_clamped = (cx - tx).abs() > 0.001;
+    let y_clamped = (cy - ty).abs() > 0.001;
+
+    // 3. If nothing was clamped, free movement inside room
+    if !x_clamped && !y_clamped {
+        return MoveResult::InRoom { x: cx, y: cy };
     }
 
-    // Pre-compute door context
-    let dctx: Vec<DoorCtx> = doors
+    // 4. Pre-compute door info for this room
+    let room_doors: Vec<(DoorInfo, DoorWall, u32)> = doors
         .iter()
         .filter(|d| d.room_a == current_room.id || d.room_b == current_room.id)
         .map(|d| {
-            let other_id = if d.room_a == current_room.id {
+            let other = if d.room_a == current_room.id {
                 d.room_b
             } else {
                 d.room_a
             };
-            DoorCtx {
-                door: *d,
-                wall: door_wall(d, current_room),
-                other_id,
-            }
+            (*d, door_wall(d, current_room), other)
         })
         .collect();
 
-    // 2. Try door traversal with full diagonal move
-    if let Some(res) = try_doors(nx, ny, r, &dctx, door_rooms) {
-        return res;
-    }
+    // 5. For each clamped axis, check if there's a reachable door on that wall.
+    // A door is reachable if:
+    //   a) it's on the wall we hit (matching DoorWall variant)
+    //   b) we're moving TOWARD that wall (dx/dy sign matches)
+    //   c) the perpendicular coordinate is within the door opening
+    // Only try the axis that was actually clamped (player hit that wall).
 
-    // 3. Axis-decomposed wall sliding
-    let x_ok = current_room.contains(nx, py, r);
-    let y_ok = current_room.contains(px, ny, r);
+    let slack = 1.0; // approach tolerance for perpendicular coordinate
 
-    match (x_ok, y_ok) {
-        (true, true) => {
-            // Both single-axis ok but diagonal fails — corner hit
-            let (cx, cy) = current_room.clamp(nx, ny, r);
-            MoveResult::WallSlide { x: cx, y: cy }
-        }
-        (true, false) => {
-            // Y blocked — try Y-only through door, else slide X only
-            if input.dy != 0.0 {
-                if let Some(res) = try_doors(px, ny, r, &dctx, door_rooms) {
-                    return res;
+    // Try X-axis door (player hit left or right wall)
+    if x_clamped {
+        let hit_wall = if tx < current_room.x_lo(r) {
+            Some(DoorWall::MinX)
+        } else if tx > current_room.x_hi(r) {
+            Some(DoorWall::MaxX)
+        } else {
+            None
+        };
+
+        if let Some(wall) = hit_wall {
+            for &(door, dw, other_id) in &room_doors {
+                if dw != wall {
+                    continue;
+                }
+                let half_open = door.width / 2.0 - r;
+                if half_open <= 0.0 {
+                    continue;
+                }
+                // Perpendicular check: is player's Y near the door opening?
+                // Use the CLAMPED cy (where the player actually ends up on Y axis)
+                if !in_door_opening(cy, door.door_y, half_open, slack) {
+                    continue;
+                }
+                if let Some(dest) = door_rooms(other_id) {
+                    let enter_y = cy.clamp(door.door_y - half_open, door.door_y + half_open);
+                    let (fx, fy) = dest.clamp(tx, enter_y, r);
+                    if dest.contains(fx, fy, r) {
+                        return MoveResult::DoorTraversal {
+                            room_id: other_id,
+                            x: fx,
+                            y: fy,
+                        };
+                    }
                 }
             }
-            // Slide: use the valid X, clamp Y
-            let cy = ny.clamp(current_room.min_y() + r, current_room.max_y() - r);
-            MoveResult::WallSlide { x: nx, y: cy }
-        }
-        (false, true) => {
-            // X blocked — try X-only through door, else slide Y only
-            if input.dx != 0.0 {
-                if let Some(res) = try_doors(nx, py, r, &dctx, door_rooms) {
-                    return res;
-                }
-            }
-            // Slide: clamp X, use the valid Y
-            let cx = nx.clamp(current_room.min_x() + r, current_room.max_x() - r);
-            MoveResult::WallSlide { x: cx, y: ny }
-        }
-        (false, false) => {
-            // Both blocked — try each axis through doors
-            let (primary_x, primary_y, secondary_x, secondary_y) =
-                if input.dx.abs() >= input.dy.abs() {
-                    (nx, py, px, ny)
-                } else {
-                    (px, ny, nx, py)
-                };
-            if let Some(res) = try_doors(primary_x, primary_y, r, &dctx, door_rooms) {
-                return res;
-            }
-            if let Some(res) = try_doors(secondary_x, secondary_y, r, &dctx, door_rooms) {
-                return res;
-            }
-            // Clamp each axis independently — don't snap to corner
-            let cx = nx.clamp(current_room.min_x() + r, current_room.max_x() - r);
-            let cy = ny.clamp(current_room.min_y() + r, current_room.max_y() - r);
-            MoveResult::WallSlide { x: cx, y: cy }
         }
     }
+
+    // Try Y-axis door (player hit top or bottom wall)
+    if y_clamped {
+        let hit_wall = if ty < current_room.y_lo(r) {
+            Some(DoorWall::MinY)
+        } else if ty > current_room.y_hi(r) {
+            Some(DoorWall::MaxY)
+        } else {
+            None
+        };
+
+        if let Some(wall) = hit_wall {
+            for &(door, dw, other_id) in &room_doors {
+                if dw != wall {
+                    continue;
+                }
+                let half_open = door.width / 2.0 - r;
+                if half_open <= 0.0 {
+                    continue;
+                }
+                // Perpendicular check: is player's X near the door opening?
+                if !in_door_opening(cx, door.door_x, half_open, slack) {
+                    continue;
+                }
+                if let Some(dest) = door_rooms(other_id) {
+                    let enter_x = cx.clamp(door.door_x - half_open, door.door_x + half_open);
+                    let (fx, fy) = dest.clamp(enter_x, ty, r);
+                    if dest.contains(fx, fy, r) {
+                        return MoveResult::DoorTraversal {
+                            room_id: other_id,
+                            x: fx,
+                            y: fy,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. No door traversal — return clamped position (wall slide)
+    MoveResult::WallSlide { x: cx, y: cy }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn simple_room(id: u32, x: f32, y: f32, w: f32, h: f32) -> RoomBounds {
+    fn room(id: u32, x: f32, y: f32, w: f32, h: f32) -> RoomBounds {
         RoomBounds::new(id, x, y, w, h)
     }
 
@@ -329,58 +290,105 @@ mod tests {
         }
     }
 
+    // --- Basic movement ---
+
     #[test]
-    fn test_move_within_room() {
-        let room = simple_room(1, 10.0, 10.0, 20.0, 20.0);
-        let result = compute_move(&mi(10.0, 10.0, 1.0, 0.0), &room, &[], &|_| None);
-        assert_eq!(result, MoveResult::InRoom { x: 11.0, y: 10.0 });
+    fn free_move_inside_room() {
+        let r = room(1, 10.0, 10.0, 20.0, 20.0);
+        let res = compute_move(&mi(10.0, 10.0, 1.0, 0.0), &r, &[], &|_| None);
+        assert_eq!(res, MoveResult::InRoom { x: 11.0, y: 10.0 });
     }
 
     #[test]
-    fn test_wall_slide_no_doors() {
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        let result = compute_move(&mi(10.0, 10.0, 100.0, 0.0), &room, &[], &|_| None);
-        match result {
+    fn wall_clamp_no_doors() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        // max_x = 15, radius = 0.4, so wall at 14.6
+        let res = compute_move(&mi(10.0, 10.0, 100.0, 0.0), &r, &[], &|_| None);
+        match res {
             MoveResult::WallSlide { x, y } => {
                 assert!((x - 14.6).abs() < 0.01, "x={x}");
-                assert!((y - 10.0).abs() < 0.01);
+                assert!((y - 10.0).abs() < 0.01, "y={y}");
             }
-            _ => panic!("Expected WallSlide, got {:?}", result),
+            _ => panic!("Expected WallSlide, got {:?}", res),
         }
     }
 
+    // --- Wall sliding ---
+
     #[test]
-    fn test_diagonal_wall_slide_x_blocked() {
-        // Moving diagonally into right wall should slide along Y
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        let result = compute_move(&mi(14.0, 10.0, 2.0, 2.0), &room, &[], &|_| None);
-        match result {
+    fn slide_along_y_when_x_blocked() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        let res = compute_move(&mi(14.0, 10.0, 2.0, 2.0), &r, &[], &|_| None);
+        match res {
             MoveResult::WallSlide { x, y } => {
-                assert!(x <= 14.6 + 0.01, "X should be clamped, got {x}");
-                assert!((y - 12.0).abs() < 0.01, "Y should advance to 12.0, got {y}");
+                assert!(x <= 14.6 + 0.01, "X clamped, got {x}");
+                assert!((y - 12.0).abs() < 0.01, "Y advances, got {y}");
             }
-            _ => panic!("Expected WallSlide, got {:?}", result),
+            _ => panic!("Expected WallSlide, got {:?}", res),
         }
     }
 
     #[test]
-    fn test_diagonal_wall_slide_y_blocked() {
-        // Moving diagonally into top wall should slide along X
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        let result = compute_move(&mi(10.0, 14.0, 2.0, 2.0), &room, &[], &|_| None);
-        match result {
+    fn slide_along_x_when_y_blocked() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        let res = compute_move(&mi(10.0, 14.0, 2.0, 2.0), &r, &[], &|_| None);
+        match res {
             MoveResult::WallSlide { x, y } => {
-                assert!((x - 12.0).abs() < 0.01, "X should advance to 12.0, got {x}");
-                assert!(y <= 14.6 + 0.01, "Y should be clamped, got {y}");
+                assert!((x - 12.0).abs() < 0.01, "X advances, got {x}");
+                assert!(y <= 14.6 + 0.01, "Y clamped, got {y}");
             }
-            _ => panic!("Expected WallSlide, got {:?}", result),
+            _ => panic!("Expected WallSlide, got {:?}", res),
         }
     }
 
     #[test]
-    fn test_door_traversal_straight() {
-        let room_a = simple_room(1, 5.0, 5.0, 10.0, 10.0);
-        let room_b = simple_room(2, 15.0, 5.0, 10.0, 10.0);
+    fn at_wall_boundary_slides_not_snaps() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player at right wall edge, moving up only
+        let res = compute_move(&mi(14.6, 10.0, 0.0, 2.0), &r, &[], &|_| None);
+        match res {
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
+                assert!((x - 14.6).abs() < 0.1, "X stays, got {x}");
+                assert!((y - 12.0).abs() < 0.1, "Y advances, got {y}");
+            }
+            _ => panic!("got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn at_wall_diagonal_slides_not_snaps() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player at right wall, moving right+up — X clamped, Y free
+        let res = compute_move(&mi(14.6, 10.0, 1.0, 2.0), &r, &[], &|_| None);
+        match res {
+            MoveResult::WallSlide { x, y } => {
+                assert!((x - 14.6).abs() < 0.1, "X stays, got {x}");
+                assert!((y - 12.0).abs() < 0.1, "Y advances, got {y}");
+            }
+            _ => panic!("got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn outside_bounds_corrected() {
+        let r = room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player past wall, moving up — corrected first
+        let res = compute_move(&mi(14.7, 10.0, 0.0, 1.0), &r, &[], &|_| None);
+        match res {
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
+                assert!(x <= 14.6 + 0.01, "X corrected, got {x}");
+                assert!((y - 11.0).abs() < 0.1, "Y advances, got {y}");
+            }
+            _ => panic!("got {:?}", res),
+        }
+    }
+
+    // --- Door traversal ---
+
+    #[test]
+    fn straight_through_door() {
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
         let door = DoorInfo {
             room_a: 1,
             room_b: 2,
@@ -388,27 +396,21 @@ mod tests {
             door_y: 5.0,
             width: 2.0,
         };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            if id == 2 {
-                Some(room_b)
-            } else {
-                None
-            }
-        };
-        let result = compute_move(&mi(9.0, 5.0, 2.0, 0.0), &room_a, &[door], &lookup);
-        match result {
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let res = compute_move(&mi(9.0, 5.0, 2.0, 0.0), &a, &[door], &lookup);
+        match res {
             MoveResult::DoorTraversal { room_id, x, y } => {
                 assert_eq!(room_id, 2);
                 assert!((x - 11.0).abs() < 0.1, "x={x}");
                 assert!((y - 5.0).abs() < 0.1, "y={y}");
             }
-            _ => panic!("Expected DoorTraversal, got {:?}", result),
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
     }
 
     #[test]
-    fn test_door_wrong_direction() {
-        let room_a = simple_room(1, 5.0, 5.0, 10.0, 10.0);
+    fn moving_away_from_door_stays_in_room() {
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
         let door = DoorInfo {
             room_a: 1,
             room_b: 2,
@@ -416,104 +418,14 @@ mod tests {
             door_y: 5.0,
             width: 2.0,
         };
-        let result = compute_move(&mi(9.0, 5.0, -2.0, 0.0), &room_a, &[door], &|_| None);
-        assert_eq!(result, MoveResult::InRoom { x: 7.0, y: 5.0 });
+        let res = compute_move(&mi(9.0, 5.0, -2.0, 0.0), &a, &[door], &|_| None);
+        assert_eq!(res, MoveResult::InRoom { x: 7.0, y: 5.0 });
     }
 
     #[test]
-    fn test_room_contains() {
-        let room = simple_room(1, 10.0, 10.0, 20.0, 20.0);
-        assert!(room.contains(10.0, 10.0, 0.4));
-        assert!(room.contains(19.0, 19.0, 0.4));
-        assert!(!room.contains(20.5, 10.0, 0.4));
-    }
-
-    #[test]
-    fn test_room_clamp() {
-        let room = simple_room(1, 10.0, 10.0, 20.0, 20.0);
-        let (x, y) = room.clamp(100.0, -100.0, 0.4);
-        assert!((x - 19.6).abs() < 0.01);
-        assert!((y - 0.4).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_intersection_picks_correct_door() {
-        let spine0 = simple_room(1, 20.0, 25.0, 3.0, 50.0);
-        let cross = simple_room(3, 20.0, 51.5, 38.0, 3.0);
-        let spine1 = simple_room(2, 20.0, 76.5, 3.0, 47.0);
-        let door_south = DoorInfo {
-            room_a: 3,
-            room_b: 1,
-            door_x: 20.0,
-            door_y: 50.0,
-            width: 3.0,
-        };
-        let door_north = DoorInfo {
-            room_a: 3,
-            room_b: 2,
-            door_x: 20.0,
-            door_y: 53.0,
-            width: 3.0,
-        };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            match id {
-                1 => Some(spine0),
-                2 => Some(spine1),
-                _ => None,
-            }
-        };
-
-        let result = compute_move(
-            &mi(20.0, 52.8, 0.0, 0.5),
-            &cross,
-            &[door_south, door_north],
-            &lookup,
-        );
-        match result {
-            MoveResult::DoorTraversal { room_id, .. } => {
-                assert_eq!(room_id, 2, "Should enter spine1, not spine0");
-            }
-            MoveResult::InRoom { y, .. } | MoveResult::WallSlide { y, .. } => {
-                assert!(y > 52.8, "Y should advance, got {y}");
-            }
-        }
-    }
-
-    #[test]
-    fn test_corridor_to_room_via_side_door() {
-        // Narrow corridor with a room off to the right
-        let corridor = simple_room(1, 10.0, 50.0, 3.0, 100.0);
-        let room = simple_room(2, 15.0, 50.0, 8.0, 6.0);
-        let door = DoorInfo {
-            room_a: 1,
-            room_b: 2,
-            door_x: 11.5,
-            door_y: 50.0,
-            width: 2.0,
-        };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            if id == 2 {
-                Some(room)
-            } else {
-                None
-            }
-        };
-
-        let result = compute_move(&mi(10.5, 50.0, 2.0, 0.0), &corridor, &[door], &lookup);
-        match result {
-            MoveResult::DoorTraversal { room_id, x, y } => {
-                assert_eq!(room_id, 2);
-                assert!(x > 11.0, "x should be in room, got {x}");
-                assert!((y - 50.0).abs() < 0.5, "y near 50, got {y}");
-            }
-            other => panic!("Expected DoorTraversal, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_wide_door_straight_through() {
-        let room_a = simple_room(1, 5.0, 5.0, 10.0, 10.0);
-        let room_b = simple_room(2, 15.0, 5.0, 10.0, 10.0);
+    fn wide_door_traversal() {
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
         let door = DoorInfo {
             room_a: 1,
             room_b: 2,
@@ -521,30 +433,18 @@ mod tests {
             door_y: 5.0,
             width: 3.0,
         };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            if id == 2 {
-                Some(room_b)
-            } else {
-                None
-            }
-        };
-
-        let result = compute_move(&mi(9.5, 5.0, 1.0, 0.0), &room_a, &[door], &lookup);
-        match result {
-            MoveResult::DoorTraversal { room_id, x, y } => {
-                assert_eq!(room_id, 2);
-                assert!((x - 10.5).abs() < 0.1, "x={x}");
-                assert!((y - 5.0).abs() < 0.1, "y={y}");
-            }
-            other => panic!("Expected DoorTraversal, got {:?}", other),
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let res = compute_move(&mi(9.5, 5.0, 1.0, 0.0), &a, &[door], &lookup);
+        match res {
+            MoveResult::DoorTraversal { room_id, .. } => assert_eq!(room_id, 2),
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
     }
 
     #[test]
-    fn test_door_offset_from_center() {
-        // Door not centered on the wall
-        let room_a = simple_room(1, 5.0, 5.0, 10.0, 10.0);
-        let room_b = simple_room(2, 15.0, 5.0, 10.0, 10.0);
+    fn offset_door_traverse_at_opening() {
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
         let door = DoorInfo {
             room_a: 1,
             room_b: 2,
@@ -552,34 +452,21 @@ mod tests {
             door_y: 8.0,
             width: 2.0,
         };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            if id == 2 {
-                Some(room_b)
-            } else {
-                None
-            }
-        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
-        // Walking right at door height — should traverse
-        let result = compute_move(&mi(9.5, 8.0, 1.5, 0.0), &room_a, &[door], &lookup);
-        match result {
-            MoveResult::DoorTraversal { room_id, .. } => assert_eq!(room_id, 2),
-            other => panic!("Expected DoorTraversal, got {:?}", other),
-        }
+        // At door height — traverse
+        let res = compute_move(&mi(9.5, 8.0, 1.5, 0.0), &a, &[door], &lookup);
+        assert!(matches!(res, MoveResult::DoorTraversal { room_id: 2, .. }));
 
-        // Walking right but NOT at door height — should wall-slide
-        let result = compute_move(&mi(9.5, 3.0, 1.5, 0.0), &room_a, &[door], &lookup);
-        match result {
-            MoveResult::WallSlide { .. } => {} // expected
-            other => panic!("Expected WallSlide, got {:?}", other),
-        }
+        // Far from door height — wall slide
+        let res = compute_move(&mi(9.5, 3.0, 1.5, 0.0), &a, &[door], &lookup);
+        assert!(matches!(res, MoveResult::WallSlide { .. }));
     }
 
     #[test]
-    fn test_no_teleport_through_wall() {
-        // Player far from door, big dx — should NOT teleport through wall
-        let room_a = simple_room(1, 5.0, 5.0, 10.0, 10.0);
-        let room_b = simple_room(2, 15.0, 5.0, 10.0, 10.0);
+    fn no_teleport_through_wall_to_door() {
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
         let door = DoorInfo {
             room_a: 1,
             room_b: 2,
@@ -587,66 +474,118 @@ mod tests {
             door_y: 5.0,
             width: 2.0,
         };
-        let lookup = |id: u32| -> Option<RoomBounds> {
-            if id == 2 {
-                Some(room_b)
-            } else {
-                None
-            }
-        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
-        // Walking right at y=2 (away from door at y=5) — should wall-slide
-        let result = compute_move(&mi(9.0, 2.0, 5.0, 0.0), &room_a, &[door], &lookup);
-        match result {
+        // Player at y=2, far from door at y=5 — should NOT traverse
+        let res = compute_move(&mi(9.0, 2.0, 5.0, 0.0), &a, &[door], &lookup);
+        match res {
             MoveResult::WallSlide { x, .. } => {
-                assert!(x <= 9.6 + 0.01, "Should clamp to wall, got x={x}");
+                assert!(x <= 9.6 + 0.01, "clamped, got x={x}");
             }
             MoveResult::DoorTraversal { .. } => {
-                panic!("Should NOT traverse — player is far from door opening");
+                panic!("Should NOT traverse — player far from door");
             }
             _ => {}
         }
     }
 
     #[test]
-    fn test_at_wall_boundary_no_corner_snap() {
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        // Player at right wall edge (14.6 = max_x - radius), moving up
-        let result = compute_move(&mi(14.6, 10.0, 0.0, 2.0), &room, &[], &|_| None);
-        match result {
-            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
-                assert!((x - 14.6).abs() < 0.1, "X should stay at wall, got {x}");
-                assert!((y - 12.0).abs() < 0.1, "Y should advance to 12.0, got {y}");
+    fn corridor_to_side_room() {
+        let corridor = room(1, 10.0, 50.0, 3.0, 100.0);
+        let side = room(2, 15.0, 50.0, 8.0, 6.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 11.5,
+            door_y: 50.0,
+            width: 2.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(side) } else { None };
+
+        let res = compute_move(&mi(10.5, 50.0, 2.0, 0.0), &corridor, &[door], &lookup);
+        match res {
+            MoveResult::DoorTraversal { room_id, x, y } => {
+                assert_eq!(room_id, 2);
+                assert!(x > 11.0, "in room, got {x}");
+                assert!((y - 50.0).abs() < 0.5, "y near 50, got {y}");
             }
-            other => panic!("Expected InRoom or WallSlide, got {:?}", other),
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
     }
 
     #[test]
-    fn test_at_wall_diagonal_no_corner_snap() {
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        // Player at right wall, moving right+up — should slide up only
-        let result = compute_move(&mi(14.6, 10.0, 1.0, 2.0), &room, &[], &|_| None);
-        match result {
-            MoveResult::WallSlide { x, y } => {
-                assert!((x - 14.6).abs() < 0.1, "X should stay at wall, got {x}");
-                assert!((y - 12.0).abs() < 0.1, "Y should advance to 12.0, got {y}");
+    fn intersection_picks_correct_door() {
+        let spine0 = room(1, 20.0, 25.0, 3.0, 50.0);
+        let cross = room(3, 20.0, 51.5, 38.0, 3.0);
+        let spine1 = room(2, 20.0, 76.5, 3.0, 47.0);
+        let door_s = DoorInfo {
+            room_a: 3,
+            room_b: 1,
+            door_x: 20.0,
+            door_y: 50.0,
+            width: 3.0,
+        };
+        let door_n = DoorInfo {
+            room_a: 3,
+            room_b: 2,
+            door_x: 20.0,
+            door_y: 53.0,
+            width: 3.0,
+        };
+        let lookup = |id: u32| match id {
+            1 => Some(spine0),
+            2 => Some(spine1),
+            _ => None,
+        };
+
+        let res = compute_move(
+            &mi(20.0, 52.8, 0.0, 0.5),
+            &cross,
+            &[door_s, door_n],
+            &lookup,
+        );
+        match res {
+            MoveResult::DoorTraversal { room_id, .. } => {
+                assert_eq!(room_id, 2, "Should enter spine1");
             }
-            other => panic!("Expected WallSlide, got {:?}", other),
+            MoveResult::InRoom { y, .. } | MoveResult::WallSlide { y, .. } => {
+                assert!(y > 52.8, "Y should advance, got {y}");
+            }
         }
     }
 
+    // --- Edge cases ---
+
     #[test]
-    fn test_outside_bounds_corrected() {
-        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
-        // Player at x=14.7 (past wall at 14.6), moving up
-        let result = compute_move(&mi(14.7, 10.0, 0.0, 1.0), &room, &[], &|_| None);
-        match result {
-            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
-                assert!(x <= 14.6 + 0.01, "X should be corrected to wall, got {x}");
-                assert!((y - 11.0).abs() < 0.1, "Y should advance, got {y}");
-            }
-            other => panic!("Expected InRoom or WallSlide, got {:?}", other),
+    fn room_contains_and_clamp() {
+        let r = room(1, 10.0, 10.0, 20.0, 20.0);
+        assert!(r.contains(10.0, 10.0, 0.4));
+        assert!(r.contains(19.0, 19.0, 0.4));
+        assert!(!r.contains(20.5, 10.0, 0.4));
+        let (x, y) = r.clamp(100.0, -100.0, 0.4);
+        assert!((x - 19.6).abs() < 0.01);
+        assert!((y - 0.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn diagonal_through_door_y_wall() {
+        // Door on the top wall, player moving diagonally up-right
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 5.0, 15.0, 10.0, 10.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 5.0,
+            door_y: 10.0,
+            width: 3.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+
+        // At x=5 (door center), moving up past the wall
+        let res = compute_move(&mi(5.0, 9.0, 0.5, 2.0), &a, &[door], &lookup);
+        match res {
+            MoveResult::DoorTraversal { room_id, .. } => assert_eq!(room_id, 2),
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
     }
 }
