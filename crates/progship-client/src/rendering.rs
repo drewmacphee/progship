@@ -489,7 +489,7 @@ pub fn sync_people(
             }
         }
 
-        // Despawn old indicators (recreated below for visible people)
+        // Despawn old indicators (will be re-parented to person entities)
         for entity in indicators.iter() {
             if let Some(mut cmd) = commands.get_entity(entity) {
                 cmd.despawn();
@@ -498,7 +498,6 @@ pub fn sync_people(
 
         // Spawn only NEW people (not already in scene)
         let capsule_mesh = meshes.add(Capsule3d::new(0.4, 1.2));
-        let indicator_mesh = meshes.add(Sphere::new(0.2));
 
         for &pid in &wanted {
             if have.contains(&pid) {
@@ -548,40 +547,49 @@ pub fn sync_people(
             ));
         }
 
-        // Respawn indicators for all visible people
-        let indicator_mesh2 = meshes.add(Sphere::new(0.2));
-        for &pid in &wanted {
-            let Some(pos) = conn.db.position().person_id().find(&pid) else {
-                continue;
-            };
+        // Spawn indicators as children of person entities (move with parent automatically)
+        let indicator_mesh = meshes.add(Sphere::new(0.2));
+        let convo_mesh = meshes.add(Sphere::new(0.3));
+        for (entity, pe, _) in existing.iter() {
+            let pid = pe.person_id;
             let is_player = Some(pid) == player.person_id;
             let person_height = if is_player { 1.0 } else { 0.8 };
 
             if let Some(activity) = conn.db.activity().person_id().find(&pid) {
                 let indicator_color = activity_indicator_color(activity.activity_type);
-                commands.spawn((
-                    Mesh3d(indicator_mesh2.clone()),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: indicator_color,
-                        emissive: indicator_color.into(),
-                        ..default()
-                    })),
-                    Transform::from_xyz(pos.x, person_height * 2.0 + 0.8, -pos.y),
-                    IndicatorEntity,
-                ));
+                let child = commands
+                    .spawn((
+                        Mesh3d(indicator_mesh.clone()),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: indicator_color,
+                            emissive: indicator_color.into(),
+                            ..default()
+                        })),
+                        Transform::from_xyz(0.0, person_height + 0.8, 0.0),
+                        IndicatorEntity,
+                    ))
+                    .id();
+                if let Some(mut cmd) = commands.get_entity(entity) {
+                    cmd.add_child(child);
+                }
             }
 
             if conn.db.in_conversation().person_id().find(&pid).is_some() {
-                commands.spawn((
-                    Mesh3d(meshes.add(Sphere::new(0.3))),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: Color::srgb(1.0, 1.0, 0.5),
-                        emissive: Color::srgb(0.5, 0.5, 0.0).into(),
-                        ..default()
-                    })),
-                    Transform::from_xyz(pos.x + 0.5, person_height * 2.0 + 1.5, -pos.y),
-                    IndicatorEntity,
-                ));
+                let child = commands
+                    .spawn((
+                        Mesh3d(convo_mesh.clone()),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: Color::srgb(1.0, 1.0, 0.5),
+                            emissive: Color::srgb(0.5, 0.5, 0.0).into(),
+                            ..default()
+                        })),
+                        Transform::from_xyz(0.5, person_height + 1.5, 0.0),
+                        IndicatorEntity,
+                    ))
+                    .id();
+                if let Some(mut cmd) = commands.get_entity(entity) {
+                    cmd.add_child(child);
+                }
             }
         }
     }
