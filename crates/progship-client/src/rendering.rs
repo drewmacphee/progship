@@ -162,8 +162,9 @@ pub fn sync_rooms(
             }
         }
 
-        // Walls sit at exact room edge; each extends by wall_thickness at ends
-        // to form solid corners (neighbor's perpendicular wall hides behind).
+        // Walls sit at exact room edge, exactly room-width/height long.
+        // No extension — perpendicular walls from this room meet at corners.
+        // Adjacent rooms' parallel walls overlap at shared edges (same height, invisible).
         let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -241,126 +242,161 @@ pub fn sync_rooms(
             room.deck,
         );
 
-        // Door frames — posts and lintel spanning the full double-wall depth
-        // with a slight protrusion on each side
+        // Door frames — only for doors between a room and a corridor (not corridor-to-corridor).
+        // Build a list of doors that need frames, checking both sides' room types.
         let frame_color = Color::srgb(0.55, 0.55, 0.6);
         let frame_mat = materials.add(StandardMaterial {
             base_color: frame_color,
             ..default()
         });
-        let frame_depth = wall_thickness * 2.0 + 0.1;
+        let frame_depth = wall_thickness + 0.05; // covers wall + slight protrusion
         let post_w = 0.2;
         let lintel_height = 0.3;
 
-        // East/West doors: wall runs along X, door gap opens in Z
-        for &(dy, dw) in east_doors.iter() {
-            let dx = room.x + w / 2.0;
-            let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
-            for sign in [-1.0_f32, 1.0] {
-                commands.spawn((
-                    Mesh3d(post_mesh.clone()),
-                    MeshMaterial3d(frame_mat.clone()),
-                    Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
-                    DoorMarker,
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
+        for door in &doors {
+            let is_a = door.room_a == room.id;
+            let is_b = door.room_b == room.id;
+            if !is_a && !is_b {
+                continue;
             }
-            let lintel = meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
-            commands.spawn((
-                Mesh3d(lintel),
-                MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-        }
-        for &(dy, dw) in west_doors.iter() {
-            let dx = room.x - w / 2.0;
-            let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
-            for sign in [-1.0_f32, 1.0] {
-                commands.spawn((
-                    Mesh3d(post_mesh.clone()),
-                    MeshMaterial3d(frame_mat.clone()),
-                    Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
-                    DoorMarker,
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
+            let other_id = if is_a { door.room_b } else { door.room_a };
+            let other_room = all_rooms.iter().find(|r| r.id == other_id);
+            if let Some(other) = other_room {
+                if other.deck != room.deck {
+                    continue;
+                }
+                // Skip frames for corridor-to-corridor connections
+                if room.room_type >= 100 && other.room_type >= 100 {
+                    continue;
+                }
             }
-            let lintel = meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
-            commands.spawn((
-                Mesh3d(lintel),
-                MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-        }
-        // North/South doors: wall runs along Z, door gap opens in X
-        for &(dx, dw) in north_doors.iter() {
-            let dz = room.y - h / 2.0;
-            let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
-            for sign in [-1.0_f32, 1.0] {
-                commands.spawn((
-                    Mesh3d(post_mesh.clone()),
-                    MeshMaterial3d(frame_mat.clone()),
-                    Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
-                    DoorMarker,
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
+
+            let wall = if is_a { door.wall_a } else { door.wall_b };
+            let dw = door.width;
+
+            match wall {
+                0 => {
+                    // North wall: frame along X
+                    let dx = door.door_x;
+                    let dz = room.y - h / 2.0;
+                    let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
+                    for sign in [-1.0_f32, 1.0] {
+                        commands.spawn((
+                            Mesh3d(post_mesh.clone()),
+                            MeshMaterial3d(frame_mat.clone()),
+                            Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
+                            DoorMarker,
+                            RoomEntity {
+                                room_id: room.id,
+                                deck: room.deck,
+                            },
+                        ));
+                    }
+                    let lintel =
+                        meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
+                    commands.spawn((
+                        Mesh3d(lintel),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
+                        DoorMarker,
+                        RoomEntity {
+                            room_id: room.id,
+                            deck: room.deck,
+                        },
+                    ));
+                }
+                1 => {
+                    // South wall
+                    let dx = door.door_x;
+                    let dz = room.y + h / 2.0;
+                    let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
+                    for sign in [-1.0_f32, 1.0] {
+                        commands.spawn((
+                            Mesh3d(post_mesh.clone()),
+                            MeshMaterial3d(frame_mat.clone()),
+                            Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
+                            DoorMarker,
+                            RoomEntity {
+                                room_id: room.id,
+                                deck: room.deck,
+                            },
+                        ));
+                    }
+                    let lintel =
+                        meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
+                    commands.spawn((
+                        Mesh3d(lintel),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
+                        DoorMarker,
+                        RoomEntity {
+                            room_id: room.id,
+                            deck: room.deck,
+                        },
+                    ));
+                }
+                2 => {
+                    // East wall: frame along Z
+                    let dx = room.x + w / 2.0;
+                    let dy = door.door_y;
+                    let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
+                    for sign in [-1.0_f32, 1.0] {
+                        commands.spawn((
+                            Mesh3d(post_mesh.clone()),
+                            MeshMaterial3d(frame_mat.clone()),
+                            Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
+                            DoorMarker,
+                            RoomEntity {
+                                room_id: room.id,
+                                deck: room.deck,
+                            },
+                        ));
+                    }
+                    let lintel =
+                        meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
+                    commands.spawn((
+                        Mesh3d(lintel),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
+                        DoorMarker,
+                        RoomEntity {
+                            room_id: room.id,
+                            deck: room.deck,
+                        },
+                    ));
+                }
+                3 => {
+                    // West wall: frame along Z
+                    let dx = room.x - w / 2.0;
+                    let dy = door.door_y;
+                    let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
+                    for sign in [-1.0_f32, 1.0] {
+                        commands.spawn((
+                            Mesh3d(post_mesh.clone()),
+                            MeshMaterial3d(frame_mat.clone()),
+                            Transform::from_xyz(dx, wall_height / 2.0, dy + sign * dw / 2.0),
+                            DoorMarker,
+                            RoomEntity {
+                                room_id: room.id,
+                                deck: room.deck,
+                            },
+                        ));
+                    }
+                    let lintel =
+                        meshes.add(Cuboid::new(frame_depth, lintel_height, dw + post_w * 2.0));
+                    commands.spawn((
+                        Mesh3d(lintel),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dy),
+                        DoorMarker,
+                        RoomEntity {
+                            room_id: room.id,
+                            deck: room.deck,
+                        },
+                    ));
+                }
+                _ => {}
             }
-            let lintel = meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
-            commands.spawn((
-                Mesh3d(lintel),
-                MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-        }
-        for &(dx, dw) in south_doors.iter() {
-            let dz = room.y + h / 2.0;
-            let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
-            for sign in [-1.0_f32, 1.0] {
-                commands.spawn((
-                    Mesh3d(post_mesh.clone()),
-                    MeshMaterial3d(frame_mat.clone()),
-                    Transform::from_xyz(dx + sign * dw / 2.0, wall_height / 2.0, dz),
-                    DoorMarker,
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
-            }
-            let lintel = meshes.add(Cuboid::new(dw + post_w * 2.0, lintel_height, frame_depth));
-            commands.spawn((
-                Mesh3d(lintel),
-                MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(dx, wall_height - lintel_height / 2.0, dz),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
         }
     }
 
@@ -575,18 +611,17 @@ fn spawn_wall_with_gaps(
     });
 
     if door_positions.is_empty() {
-        // No doors — solid wall, extended by wall_thickness at each end for solid corners
-        let extended_len = wall_length + wall_thickness * 2.0;
+        // No doors — solid wall, exact room length
         if horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(extended_len, wall_height, wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(wall_length, wall_height, wall_thickness))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, extended_len))),
+                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_length))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
@@ -608,10 +643,8 @@ fn spawn_wall_with_gaps(
     gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     let half_len = wall_length / 2.0;
-    let ext = wall_thickness;
-    // Extend wall ends by full wall thickness to form solid corners
-    let mut cursor = -half_len - ext;
-    let wall_end = half_len + ext;
+    let mut cursor = -half_len;
+    let wall_end = half_len;
 
     for (gap_start, gap_end) in &gaps {
         let seg_len = gap_start - cursor;
@@ -636,7 +669,7 @@ fn spawn_wall_with_gaps(
         cursor = *gap_end;
     }
 
-    // Final segment after last gap (extended to wall end)
+    // Final segment after last gap
     let seg_len = wall_end - cursor;
     if seg_len > wall_thickness {
         let seg_center = cursor + seg_len / 2.0;
