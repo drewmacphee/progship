@@ -218,8 +218,16 @@ pub fn compute_move(
     door_rooms: &dyn Fn(u32) -> Option<RoomBounds>,
 ) -> MoveResult {
     let r = input.player_radius;
-    let nx = input.px + input.dx;
-    let ny = input.py + input.dy;
+
+    // Safety: if current position is already outside room bounds (floating point
+    // edge case from NPC push or prior clamp), snap it back inside first.
+    let (px, py) = if current_room.contains(input.px, input.py, r) {
+        (input.px, input.py)
+    } else {
+        current_room.clamp(input.px, input.py, r)
+    };
+    let nx = px + input.dx;
+    let ny = py + input.dy;
 
     // 1. Fast path: full move stays inside current room
     if current_room.contains(nx, ny, r) {
@@ -250,8 +258,8 @@ pub fn compute_move(
     }
 
     // 3. Axis-decomposed wall sliding
-    let x_ok = current_room.contains(nx, input.py, r);
-    let y_ok = current_room.contains(input.px, ny, r);
+    let x_ok = current_room.contains(nx, py, r);
+    let y_ok = current_room.contains(px, ny, r);
 
     match (x_ok, y_ok) {
         (true, true) => {
@@ -262,7 +270,7 @@ pub fn compute_move(
         (true, false) => {
             // Y blocked — try Y-only through door, else slide X only
             if input.dy != 0.0 {
-                if let Some(res) = try_doors(input.px, ny, r, &dctx, door_rooms) {
+                if let Some(res) = try_doors(px, ny, r, &dctx, door_rooms) {
                     return res;
                 }
             }
@@ -273,7 +281,7 @@ pub fn compute_move(
         (false, true) => {
             // X blocked — try X-only through door, else slide Y only
             if input.dx != 0.0 {
-                if let Some(res) = try_doors(nx, input.py, r, &dctx, door_rooms) {
+                if let Some(res) = try_doors(nx, py, r, &dctx, door_rooms) {
                     return res;
                 }
             }
@@ -285,9 +293,9 @@ pub fn compute_move(
             // Both blocked — try each axis through doors
             let (primary_x, primary_y, secondary_x, secondary_y) =
                 if input.dx.abs() >= input.dy.abs() {
-                    (nx, input.py, input.px, ny)
+                    (nx, py, px, ny)
                 } else {
-                    (input.px, ny, nx, input.py)
+                    (px, ny, nx, py)
                 };
             if let Some(res) = try_doors(primary_x, primary_y, r, &dctx, door_rooms) {
                 return res;
@@ -295,16 +303,10 @@ pub fn compute_move(
             if let Some(res) = try_doors(secondary_x, secondary_y, r, &dctx, door_rooms) {
                 return res;
             }
-            // Clamp to room bounds
-            let (cx, cy) = current_room.clamp(nx, ny, r);
-            if cx != input.px || cy != input.py {
-                MoveResult::WallSlide { x: cx, y: cy }
-            } else {
-                MoveResult::WallSlide {
-                    x: input.px,
-                    y: input.py,
-                }
-            }
+            // Clamp each axis independently — don't snap to corner
+            let cx = nx.clamp(current_room.min_x() + r, current_room.max_x() - r);
+            let cy = ny.clamp(current_room.min_y() + r, current_room.max_y() - r);
+            MoveResult::WallSlide { x: cx, y: cy }
         }
     }
 }
@@ -603,6 +605,48 @@ mod tests {
                 panic!("Should NOT traverse — player is far from door opening");
             }
             _ => {}
+        }
+    }
+
+    #[test]
+    fn test_at_wall_boundary_no_corner_snap() {
+        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player at right wall edge (14.6 = max_x - radius), moving up
+        let result = compute_move(&mi(14.6, 10.0, 0.0, 2.0), &room, &[], &|_| None);
+        match result {
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
+                assert!((x - 14.6).abs() < 0.1, "X should stay at wall, got {x}");
+                assert!((y - 12.0).abs() < 0.1, "Y should advance to 12.0, got {y}");
+            }
+            other => panic!("Expected InRoom or WallSlide, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_at_wall_diagonal_no_corner_snap() {
+        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player at right wall, moving right+up — should slide up only
+        let result = compute_move(&mi(14.6, 10.0, 1.0, 2.0), &room, &[], &|_| None);
+        match result {
+            MoveResult::WallSlide { x, y } => {
+                assert!((x - 14.6).abs() < 0.1, "X should stay at wall, got {x}");
+                assert!((y - 12.0).abs() < 0.1, "Y should advance to 12.0, got {y}");
+            }
+            other => panic!("Expected WallSlide, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_outside_bounds_corrected() {
+        let room = simple_room(1, 10.0, 10.0, 10.0, 10.0);
+        // Player at x=14.7 (past wall at 14.6), moving up
+        let result = compute_move(&mi(14.7, 10.0, 0.0, 1.0), &room, &[], &|_| None);
+        match result {
+            MoveResult::InRoom { x, y } | MoveResult::WallSlide { x, y } => {
+                assert!(x <= 14.6 + 0.01, "X should be corrected to wall, got {x}");
+                assert!((y - 11.0).abs() < 0.1, "Y should advance, got {y}");
+            }
+            other => panic!("Expected InRoom or WallSlide, got {:?}", other),
         }
     }
 }
