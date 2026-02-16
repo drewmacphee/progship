@@ -1,14 +1,15 @@
 //! Camera setup and control for the ProgShip client.
 //!
-//! Handles top-down camera setup and smooth following of the player.
+//! Supports top-down (default) and first-person camera modes.
+//! Toggle with V key. Mouse look in first-person mode.
 
 use bevy::prelude::*;
 use progship_client_sdk::*;
 
-use crate::state::{ConnectionState, PlayerCamera, PlayerState, ViewState};
+use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewState};
 
 pub fn setup_camera(mut commands: Commands) {
-    // Top-down camera looking straight down
+    // Camera starts top-down
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
@@ -35,9 +36,34 @@ pub fn setup_camera(mut commands: Commands) {
 pub fn camera_follow_player(
     state: Res<ConnectionState>,
     player: Res<PlayerState>,
-    view: Res<ViewState>,
+    mut view: ResMut<ViewState>,
     mut camera_q: Query<&mut Transform, With<PlayerCamera>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut mouse_motion: EventReader<bevy::input::mouse::MouseMotion>,
+    mut windows: Query<&mut Window>,
 ) {
+    // Toggle camera mode with V; Escape returns to top-down
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        view.camera_mode = match view.camera_mode {
+            CameraMode::TopDown => CameraMode::FirstPerson,
+            CameraMode::FirstPerson => CameraMode::TopDown,
+        };
+    } else if keyboard.just_pressed(KeyCode::Escape) && view.camera_mode == CameraMode::FirstPerson
+    {
+        view.camera_mode = CameraMode::TopDown;
+    }
+    // Update cursor grab based on mode
+    if let Ok(mut window) = windows.get_single_mut() {
+        let (grab, visible) = match view.camera_mode {
+            CameraMode::FirstPerson => (bevy::window::CursorGrabMode::Locked, false),
+            CameraMode::TopDown => (bevy::window::CursorGrabMode::None, true),
+        };
+        if window.cursor_options.grab_mode != grab {
+            window.cursor_options.grab_mode = grab;
+            window.cursor_options.visible = visible;
+        }
+    }
+
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         _ => return,
@@ -50,7 +76,30 @@ pub fn camera_follow_player(
         return;
     };
 
-    // Smooth camera follow — only move position, keep fixed top-down rotation
-    let target = Vec3::new(pos.x, view.camera_height, -pos.y);
-    cam_tf.translation = cam_tf.translation.lerp(target, 0.08);
+    match view.camera_mode {
+        CameraMode::TopDown => {
+            // Smooth camera follow — fixed top-down rotation
+            let target = Vec3::new(pos.x, view.camera_height, -pos.y);
+            cam_tf.translation = cam_tf.translation.lerp(target, 0.08);
+            cam_tf.rotation = Transform::from_xyz(0.0, 1.0, 0.0)
+                .looking_at(Vec3::ZERO, Vec3::NEG_Z)
+                .rotation;
+        }
+        CameraMode::FirstPerson => {
+            // Mouse look
+            let sensitivity = 0.003;
+            for ev in mouse_motion.read() {
+                view.fps_yaw -= ev.delta.x * sensitivity;
+                view.fps_pitch = (view.fps_pitch - ev.delta.y * sensitivity).clamp(-1.4, 1.4);
+            }
+
+            // Eye height position at player location
+            let eye_height = 1.6;
+            let target = Vec3::new(pos.x, eye_height, -pos.y);
+            cam_tf.translation = cam_tf.translation.lerp(target, 0.15);
+
+            // Apply yaw and pitch rotation
+            cam_tf.rotation = Quat::from_euler(EulerRot::YXZ, view.fps_yaw, view.fps_pitch, 0.0);
+        }
+    }
 }

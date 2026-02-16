@@ -7,8 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState, ToastContainer,
-    UiState, ViewState,
+    CameraMode, ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState,
+    ToastContainer, UiState, ViewState,
 };
 
 pub fn setup_ui(mut commands: Commands) {
@@ -207,11 +207,15 @@ pub fn render_hud(
             })
             .unwrap_or_default();
 
+        let cam_str = match view.camera_mode {
+            CameraMode::TopDown => "",
+            CameraMode::FirstPerson => " [FPS]",
+        };
         **text = format!(
             "{} | Day {} {:02}:{:02}{} | {}x{}\n\
-             Deck {} | {} | {} aboard | {}\n\
+             Deck {} | {} | {} aboard | {}{}\n\
              {}{}\n\
-             [WASD] Move [E] Talk [F]{} [Q] Inspect [Tab] Overview [Space] Pause",
+             [WASD] Move [E] Talk [F]{} [Q] Inspect [V] Camera [Space] Pause",
             ship_name,
             day,
             h,
@@ -223,6 +227,7 @@ pub fn render_hud(
             room_name,
             person_count,
             atmo_str,
+            cam_str,
             activity_str,
             if activity_str.is_empty() { "" } else { "" },
             context_hint,
