@@ -37,10 +37,10 @@ pub fn player_input(
     match view.camera_mode {
         CameraMode::TopDown => {
             if keyboard.pressed(KeyCode::KeyW) {
-                dy += speed;
+                dy -= speed;
             }
             if keyboard.pressed(KeyCode::KeyS) {
-                dy -= speed;
+                dy += speed;
             }
             if keyboard.pressed(KeyCode::KeyA) {
                 dx -= speed;
@@ -66,7 +66,7 @@ pub fn player_input(
             if keyboard.pressed(KeyCode::KeyD) {
                 right += speed;
             }
-            // Yaw=0 faces -Z (north in our coord system = +Y game coords)
+            // Yaw=0 faces -Z in Bevy (= +Y game coords = south)
             dx += -sin_yaw * fwd + cos_yaw * right;
             dy += cos_yaw * fwd + sin_yaw * right;
         }
@@ -88,10 +88,10 @@ pub fn player_input(
 
     if !in_ladder_shaft {
         if keyboard.pressed(KeyCode::ArrowUp) {
-            dy += speed;
+            dy -= speed;
         }
         if keyboard.pressed(KeyCode::ArrowDown) {
-            dy -= speed;
+            dy += speed;
         }
         if keyboard.pressed(KeyCode::ArrowLeft) {
             dx -= speed;

@@ -12,7 +12,7 @@ pub fn setup_camera(mut commands: Commands) {
     // Camera starts top-down
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
+        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
         PlayerCamera,
     ));
 
@@ -82,7 +82,7 @@ pub fn camera_follow_player(
             let target = Vec3::new(pos.x, view.camera_height, -pos.y);
             cam_tf.translation = cam_tf.translation.lerp(target, 0.08);
             cam_tf.rotation = Transform::from_xyz(0.0, 1.0, 0.0)
-                .looking_at(Vec3::ZERO, Vec3::NEG_Z)
+                .looking_at(Vec3::ZERO, Vec3::Z)
                 .rotation;
         }
         CameraMode::FirstPerson => {
