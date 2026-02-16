@@ -162,9 +162,10 @@ pub fn sync_rooms(
             }
         }
 
-        // Walls sit at exact room edge, exactly room-width/height long.
-        // No extension — perpendicular walls from this room meet at corners.
-        // Adjacent rooms' parallel walls overlap at shared edges (same height, invisible).
+        // Nudge walls inward by a tiny epsilon so adjacent rooms' parallel walls
+        // don't z-fight (they sit at the same boundary but 0.01m apart).
+        let z_nudge = 0.01;
+        // Walls extend by half wall_thickness at each end to fill corner notches.
         let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -173,7 +174,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            room.y - h / 2.0,
+            room.y - h / 2.0 + z_nudge,
             w,
             wall_height,
             wall_thickness,
@@ -192,7 +193,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            room.y + h / 2.0,
+            room.y + h / 2.0 - z_nudge,
             w,
             wall_height,
             wall_thickness,
@@ -210,7 +211,7 @@ pub fn sync_rooms(
             &mut meshes,
             &mut materials,
             wall_color,
-            room.x + w / 2.0,
+            room.x + w / 2.0 - z_nudge,
             room.y,
             h,
             wall_height,
@@ -229,7 +230,7 @@ pub fn sync_rooms(
             &mut meshes,
             &mut materials,
             wall_color,
-            room.x - w / 2.0,
+            room.x - w / 2.0 + z_nudge,
             room.y,
             h,
             wall_height,
@@ -611,17 +612,18 @@ fn spawn_wall_with_gaps(
     });
 
     if door_positions.is_empty() {
-        // No doors — solid wall, exact room length
+        // No doors — solid wall, extended by half wall_thickness at each end to fill corners
+        let extended = wall_length + wall_thickness;
         if horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_length, wall_height, wall_thickness))),
+                Mesh3d(meshes.add(Cuboid::new(extended, wall_height, wall_thickness))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_length))),
+                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, extended))),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
@@ -643,8 +645,10 @@ fn spawn_wall_with_gaps(
     gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     let half_len = wall_length / 2.0;
-    let mut cursor = -half_len;
-    let wall_end = half_len;
+    let ext = wall_thickness / 2.0;
+    // Extend wall ends by half wall_thickness to fill corner notches
+    let mut cursor = -half_len - ext;
+    let wall_end = half_len + ext;
 
     for (gap_start, gap_end) in &gaps {
         let seg_len = gap_start - cursor;
