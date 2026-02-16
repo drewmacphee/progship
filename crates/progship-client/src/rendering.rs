@@ -479,17 +479,19 @@ pub fn sync_people(
 
         // Despawn entities no longer on this deck
         let mut have: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut despawned: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for (entity, pe, _) in existing.iter() {
             if wanted.contains(&pe.person_id) {
                 have.insert(pe.person_id);
             } else {
+                despawned.insert(pe.person_id);
                 if let Some(mut cmd) = commands.get_entity(entity) {
-                    cmd.despawn();
+                    cmd.despawn(); // recursive: also despawns indicator children
                 }
             }
         }
 
-        // Despawn old indicators (will be re-parented to person entities)
+        // Despawn indicators on surviving entities (will be recreated below)
         for entity in indicators.iter() {
             if let Some(mut cmd) = commands.get_entity(entity) {
                 cmd.despawn();
@@ -547,11 +549,14 @@ pub fn sync_people(
             ));
         }
 
-        // Spawn indicators as children of person entities (move with parent automatically)
+        // Spawn indicators as children of surviving person entities
         let indicator_mesh = meshes.add(Sphere::new(0.2));
         let convo_mesh = meshes.add(Sphere::new(0.3));
         for (entity, pe, _) in existing.iter() {
             let pid = pe.person_id;
+            if despawned.contains(&pid) {
+                continue;
+            }
             let is_player = Some(pid) == player.person_id;
             let person_height = if is_player { 1.0 } else { 0.8 };
 
