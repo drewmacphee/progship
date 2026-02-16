@@ -196,7 +196,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     if !hab_slots.is_empty() {
         let rec_decks = zone_decks_needed[3].min(hab_slots.len() as u32) as usize;
         for d in 0..rec_decks {
-            let idx = hab_slots[hab_slots.len() / 2 + d.min(hab_slots.len() - 1)];
+            let idx_pos = (hab_slots.len() / 2 + d).min(hab_slots.len() - 1);
+            let idx = hab_slots[idx_pos];
             deck_zone_map[idx] = 3;
         }
         let svc_decks = zone_decks_needed[2].min(hab_slots.len() as u32) as usize;
