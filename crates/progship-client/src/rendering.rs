@@ -67,18 +67,61 @@ pub fn sync_rooms(
         let wall_thickness = 0.3;
 
         // Floor
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(w, 0.2, h))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        let is_corridor = room.room_type >= 100 && room.room_type < 120;
+        let floor_mat = if is_corridor {
+            materials.add(StandardMaterial {
+                base_color: color,
+                emissive: color.into(),
+                ..default()
+            })
+        } else {
+            materials.add(StandardMaterial {
                 base_color: color,
                 ..default()
-            })),
+            })
+        };
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(w, 0.2, h))),
+            MeshMaterial3d(floor_mat),
             Transform::from_xyz(room.x, 0.0, room.y),
             RoomEntity {
                 room_id: room.id,
                 deck: room.deck,
             },
         ));
+
+        // Corridor center stripe
+        if is_corridor {
+            let stripe_color = Color::srgb(0.35, 0.35, 0.40);
+            let stripe_mat = materials.add(StandardMaterial {
+                base_color: stripe_color,
+                emissive: stripe_color.into(),
+                ..default()
+            });
+            if w > h {
+                // Horizontal corridor — stripe along X
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(w, 0.05, 0.4))),
+                    MeshMaterial3d(stripe_mat),
+                    Transform::from_xyz(room.x, 0.12, room.y),
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            } else {
+                // Vertical corridor — stripe along Z
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(0.4, 0.05, h))),
+                    MeshMaterial3d(stripe_mat),
+                    Transform::from_xyz(room.x, 0.12, room.y),
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
+        }
 
         // Room label (skip corridors/infrastructure — too many, too small)
         if room.room_type < 100 {
@@ -238,31 +281,38 @@ pub fn sync_rooms(
             room.deck,
         );
 
-        // Door frame markers (gold pillars at each side of door gaps)
-        let door_color = Color::srgb(0.8, 0.7, 0.2);
-        let door_mat = materials.add(StandardMaterial {
-            base_color: door_color,
+        // Door frames (posts with lintel)
+        let frame_color = Color::srgb(0.6, 0.6, 0.65);
+        let frame_mat = materials.add(StandardMaterial {
+            base_color: frame_color,
             ..default()
         });
-        let pillar_mesh = meshes.add(Cuboid::new(0.2, wall_height + 0.5, 0.2));
+        let post_mesh = meshes.add(Cuboid::new(0.15, wall_height, 0.15));
+        let lintel_h_mesh =
+            |dw: f32, meshes: &mut ResMut<Assets<Mesh>>| meshes.add(Cuboid::new(dw, 0.3, 0.15));
+        let lintel_v_mesh =
+            |dw: f32, meshes: &mut ResMut<Assets<Mesh>>| meshes.add(Cuboid::new(0.15, 0.3, dw));
 
-        // East/West doors: pillars along Z axis
+        // East/West doors: frame along Z axis
         for &(dy, dw) in east_doors.iter() {
-            let door_world_x = room.x + w / 2.0;
+            let dx = room.x + w / 2.0;
+            let post_y = wall_height / 2.0;
+            for sign in [-1.0_f32, 1.0] {
+                commands.spawn((
+                    Mesh3d(post_mesh.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(dx, post_y, dy + sign * dw / 2.0),
+                    DoorMarker,
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy - dw / 2.0),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-            commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy + dw / 2.0),
+                Mesh3d(lintel_v_mesh(dw, &mut meshes)),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(dx, wall_height - 0.15, dy),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -271,21 +321,24 @@ pub fn sync_rooms(
             ));
         }
         for &(dy, dw) in west_doors.iter() {
-            let door_world_x = room.x - w / 2.0;
+            let dx = room.x - w / 2.0;
+            let post_y = wall_height / 2.0;
+            for sign in [-1.0_f32, 1.0] {
+                commands.spawn((
+                    Mesh3d(post_mesh.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(dx, post_y, dy + sign * dw / 2.0),
+                    DoorMarker,
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy - dw / 2.0),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-            commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy + dw / 2.0),
+                Mesh3d(lintel_v_mesh(dw, &mut meshes)),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(dx, wall_height - 0.15, dy),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -293,23 +346,26 @@ pub fn sync_rooms(
                 },
             ));
         }
-        // North/South doors: pillars along X axis
+        // North/South doors: frame along X axis
         for &(dx, dw) in north_doors.iter() {
-            let door_world_z = room.y - h / 2.0;
+            let dz = room.y - h / 2.0;
+            let post_y = wall_height / 2.0;
+            for sign in [-1.0_f32, 1.0] {
+                commands.spawn((
+                    Mesh3d(post_mesh.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(dx + sign * dw / 2.0, post_y, dz),
+                    DoorMarker,
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-            commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
+                Mesh3d(lintel_h_mesh(dw, &mut meshes)),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(dx, wall_height - 0.15, dz),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -318,21 +374,24 @@ pub fn sync_rooms(
             ));
         }
         for &(dx, dw) in south_doors.iter() {
-            let door_world_z = room.y + h / 2.0;
+            let dz = room.y + h / 2.0;
+            let post_y = wall_height / 2.0;
+            for sign in [-1.0_f32, 1.0] {
+                commands.spawn((
+                    Mesh3d(post_mesh.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(dx + sign * dw / 2.0, post_y, dz),
+                    DoorMarker,
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
             commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(dx - dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
-                DoorMarker,
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
-            commands.spawn((
-                Mesh3d(pillar_mesh.clone()),
-                MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(dx + dw / 2.0, wall_height / 2.0 + 0.25, door_world_z),
+                Mesh3d(lintel_h_mesh(dw, &mut meshes)),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(dx, wall_height - 0.15, dz),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
