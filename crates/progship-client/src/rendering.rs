@@ -7,8 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState, RoomEntity, UiState,
-    ViewState,
+    ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState, RoomEntity, RoomLabel,
+    UiState, ViewState,
 };
 
 pub fn sync_rooms(
@@ -79,6 +79,26 @@ pub fn sync_rooms(
                 deck: room.deck,
             },
         ));
+
+        // Room label (skip corridors/infrastructure — too many, too small)
+        if room.room_type < 100 {
+            let font_size = (w.min(h) * 2.5).clamp(8.0, 28.0);
+            commands.spawn((
+                Text2d::new(&room.name),
+                TextFont {
+                    font_size,
+                    ..default()
+                },
+                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+                Transform::from_xyz(room.x, 0.2, room.y)
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                RoomLabel,
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        }
 
         let wall_color = color.with_luminance(0.3);
 
