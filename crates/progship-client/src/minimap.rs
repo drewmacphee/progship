@@ -36,7 +36,7 @@ impl Default for MinimapState {
     fn default() -> Self {
         Self {
             visible: true,
-            panel_size: 200.0,
+            panel_size: 250.0,
             margin: 10.0,
         }
     }
@@ -127,7 +127,8 @@ pub fn render_minimap(
                 right: Val::Px(minimap.margin),
                 bottom: Val::Px(minimap.margin),
                 width: Val::Px(panel_w + 4.0),
-                height: Val::Px(panel_h + 4.0),
+                height: Val::Px(panel_h + 24.0),
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.1, 0.8)),
@@ -135,61 +136,86 @@ pub fn render_minimap(
             MinimapRoot,
         ))
         .with_children(|parent| {
-            // Render each room as a small colored rectangle
-            for room in &rooms {
-                let rx = (room.x - min_x) * scale_x + 2.0;
-                let ry = (max_y - (room.y + room.height)) * scale_y + 2.0;
-                let rw = (room.width * scale_x).max(1.0);
-                let rh = (room.height * scale_y).max(1.0);
+            // Deck label
+            parent.spawn((
+                Text::new(format!("DECK {}", view.current_deck + 1)),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.8, 0.9)),
+                Node {
+                    margin: UiRect::new(Val::Px(4.0), Val::Px(0.0), Val::Px(2.0), Val::Px(2.0)),
+                    ..default()
+                },
+            ));
 
-                let color = minimap_room_color(room.room_type);
+            // Map area container
+            parent
+                .spawn(Node {
+                    width: Val::Px(panel_w + 4.0),
+                    height: Val::Px(panel_h),
+                    position_type: PositionType::Relative,
+                    ..default()
+                })
+                .with_children(|map| {
+                    // Render each room as a small colored rectangle
+                    for room in &rooms {
+                        let rx = (room.x - min_x) * scale_x + 2.0;
+                        let ry = (max_y - (room.y + room.height)) * scale_y;
+                        let rw = (room.width * scale_x).max(1.0);
+                        let rh = (room.height * scale_y).max(1.0);
 
-                parent.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(rx),
-                        top: Val::Px(ry),
-                        width: Val::Px(rw),
-                        height: Val::Px(rh),
-                        ..default()
-                    },
-                    BackgroundColor(color),
-                    MinimapRoom,
-                ));
-            }
+                        let color = minimap_room_color(room.room_type);
 
-            // Player position marker
-            if let Some(pid) = player.person_id {
-                if let Some(pos) = conn.db.position().person_id().find(&pid) {
-                    // Check player is on this deck
-                    if conn
-                        .db
-                        .room()
-                        .id()
-                        .find(&pos.room_id)
-                        .map(|r| r.deck == view.current_deck)
-                        .unwrap_or(false)
-                    {
-                        let px = (pos.x - min_x) * scale_x + 2.0;
-                        let py = (max_y - pos.y) * scale_y + 2.0;
-
-                        parent.spawn((
+                        map.spawn((
                             Node {
                                 position_type: PositionType::Absolute,
-                                left: Val::Px(px - 3.0),
-                                top: Val::Px(py - 3.0),
-                                width: Val::Px(6.0),
-                                height: Val::Px(6.0),
-                                border: UiRect::all(Val::Px(1.0)),
+                                left: Val::Px(rx),
+                                top: Val::Px(ry),
+                                width: Val::Px(rw),
+                                height: Val::Px(rh),
+                                border: UiRect::all(Val::Px(0.5)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(1.0, 1.0, 0.0)),
-                            BorderColor(Color::srgb(1.0, 0.5, 0.0)),
-                            MinimapPlayer,
+                            BackgroundColor(color),
+                            BorderColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+                            MinimapRoom,
                         ));
                     }
-                }
-            }
+
+                    // Player position marker
+                    if let Some(pid) = player.person_id {
+                        if let Some(pos) = conn.db.position().person_id().find(&pid) {
+                            if conn
+                                .db
+                                .room()
+                                .id()
+                                .find(&pos.room_id)
+                                .map(|r| r.deck == view.current_deck)
+                                .unwrap_or(false)
+                            {
+                                let px = (pos.x - min_x) * scale_x + 2.0;
+                                let py = (max_y - pos.y) * scale_y;
+
+                                map.spawn((
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: Val::Px(px - 3.0),
+                                        top: Val::Px(py - 3.0),
+                                        width: Val::Px(6.0),
+                                        height: Val::Px(6.0),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(1.0, 1.0, 0.0)),
+                                    BorderColor(Color::srgb(1.0, 0.5, 0.0)),
+                                    MinimapPlayer,
+                                ));
+                            }
+                        }
+                    }
+                });
         });
 }
 
