@@ -12,7 +12,7 @@ pub fn setup_camera(mut commands: Commands) {
     // Camera starts top-down
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
+        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
         PlayerCamera,
     ));
 
@@ -79,10 +79,10 @@ pub fn camera_follow_player(
     match view.camera_mode {
         CameraMode::TopDown => {
             // Smooth camera follow — fixed top-down rotation
-            let target = Vec3::new(pos.x, view.camera_height, -pos.y);
+            let target = Vec3::new(pos.x, view.camera_height, pos.y);
             cam_tf.translation = cam_tf.translation.lerp(target, 0.08);
             cam_tf.rotation = Transform::from_xyz(0.0, 1.0, 0.0)
-                .looking_at(Vec3::ZERO, Vec3::Z)
+                .looking_at(Vec3::ZERO, Vec3::NEG_Z)
                 .rotation;
         }
         CameraMode::FirstPerson => {
@@ -95,7 +95,7 @@ pub fn camera_follow_player(
 
             // Eye height position at player location
             let eye_height = 1.6;
-            let target = Vec3::new(pos.x, eye_height, -pos.y);
+            let target = Vec3::new(pos.x, eye_height, pos.y);
             cam_tf.translation = cam_tf.translation.lerp(target, 0.15);
 
             // Apply yaw and pitch rotation

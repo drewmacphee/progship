@@ -66,9 +66,9 @@ pub fn player_input(
             if keyboard.pressed(KeyCode::KeyD) {
                 right += speed;
             }
-            // Yaw=0 faces -Z in Bevy (= +Y game coords = south)
+            // Yaw=0 faces -Z in Bevy (= -Y game coords = north)
             dx += -sin_yaw * fwd + cos_yaw * right;
-            dy += cos_yaw * fwd + sin_yaw * right;
+            dy += -cos_yaw * fwd - sin_yaw * right;
         }
     }
 

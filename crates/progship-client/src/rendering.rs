@@ -73,7 +73,7 @@ pub fn sync_rooms(
                 base_color: color,
                 ..default()
             })),
-            Transform::from_xyz(room.x, 0.0, -room.y),
+            Transform::from_xyz(room.x, 0.0, room.y),
             RoomEntity {
                 room_id: room.id,
                 deck: room.deck,
@@ -137,7 +137,7 @@ pub fn sync_rooms(
             }
         }
 
-        // North wall (NORTH = low Y = fore; in 3D: z = -(room.y - h/2) = less negative z)
+        // North wall (NORTH = low Y; in 3D: z = room.y - h/2)
         let north_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let north_widths: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -146,7 +146,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            -(room.y - h / 2.0),
+            room.y - h / 2.0,
             w,
             wall_height,
             wall_thickness,
@@ -157,7 +157,7 @@ pub fn sync_rooms(
             room.id,
             room.deck,
         );
-        // South wall (SOUTH = high Y = aft; in 3D: z = -(room.y + h/2) = more negative z)
+        // South wall (SOUTH = high Y; in 3D: z = room.y + h/2)
         let south_pos: Vec<f32> = south_doors.iter().map(|d| d.0).collect();
         let south_widths: Vec<f32> = south_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -166,7 +166,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x,
-            -(room.y + h / 2.0),
+            room.y + h / 2.0,
             w,
             wall_height,
             wall_thickness,
@@ -186,7 +186,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x + w / 2.0,
-            -room.y,
+            room.y,
             h,
             wall_height,
             wall_thickness,
@@ -206,7 +206,7 @@ pub fn sync_rooms(
             &mut materials,
             wall_color,
             room.x - w / 2.0,
-            -room.y,
+            room.y,
             h,
             wall_height,
             wall_thickness,
@@ -232,7 +232,7 @@ pub fn sync_rooms(
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
+                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy - dw / 2.0),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -242,7 +242,7 @@ pub fn sync_rooms(
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
+                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy + dw / 2.0),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -255,7 +255,7 @@ pub fn sync_rooms(
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy - dw / 2.0)),
+                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy - dw / 2.0),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -265,7 +265,7 @@ pub fn sync_rooms(
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
-                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, -(dy + dw / 2.0)),
+                Transform::from_xyz(door_world_x, wall_height / 2.0 + 0.25, dy + dw / 2.0),
                 DoorMarker,
                 RoomEntity {
                     room_id: room.id,
@@ -275,7 +275,7 @@ pub fn sync_rooms(
         }
         // North/South doors: pillars along X axis
         for &(dx, dw) in north_doors.iter() {
-            let door_world_z = -(room.y - h / 2.0); // NORTH = low Y
+            let door_world_z = room.y - h / 2.0;
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
@@ -298,7 +298,7 @@ pub fn sync_rooms(
             ));
         }
         for &(dx, dw) in south_doors.iter() {
-            let door_world_z = -(room.y + h / 2.0); // SOUTH = high Y
+            let door_world_z = room.y + h / 2.0;
             commands.spawn((
                 Mesh3d(pillar_mesh.clone()),
                 MeshMaterial3d(door_mat.clone()),
@@ -377,11 +377,7 @@ fn spawn_wall_with_gaps(
         .iter()
         .zip(door_widths.iter())
         .map(|(&dp, &dw)| {
-            let offset = if horizontal {
-                dp - room_center
-            } else {
-                -(dp - room_center)
-            };
+            let offset = dp - room_center;
             (offset - dw / 2.0, offset + dw / 2.0)
         })
         .collect();
@@ -540,7 +536,7 @@ pub fn sync_people(
                     base_color: final_color,
                     ..default()
                 })),
-                Transform::from_xyz(pos.x, person_height, -pos.y).with_scale(Vec3::new(
+                Transform::from_xyz(pos.x, person_height, pos.y).with_scale(Vec3::new(
                     1.0,
                     if is_player { 1.2 } else { 1.0 },
                     1.0,
@@ -604,7 +600,7 @@ pub fn sync_people(
         if let Some(pos) = conn.db.position().person_id().find(&pe.person_id) {
             let is_player = Some(pe.person_id) == player.person_id;
             let person_height = if is_player { 1.0 } else { 0.8 };
-            let target = Vec3::new(pos.x, person_height, -pos.y);
+            let target = Vec3::new(pos.x, person_height, pos.y);
             let lerp_rate = if is_player { 12.0 } else { 6.0 };
             let t = (lerp_rate * dt).min(1.0);
             transform.translation = transform.translation.lerp(target, t);
