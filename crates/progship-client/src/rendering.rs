@@ -143,6 +143,11 @@ pub fn sync_rooms(
             ));
         }
 
+        // Furniture props
+        if room.room_type < 100 {
+            spawn_furniture(&mut commands, &mut meshes, &mut materials, &room);
+        }
+
         let wall_color = color.with_luminance(0.3);
 
         // Collect door world positions per wall from the Door table.
@@ -404,6 +409,189 @@ pub fn sync_rooms(
     // Corridor floors already rendered by their Room entries (type 17/24)
     // The Corridor table is for data only (carries flags, connectivity), not rendering.
     // Shaft rooms (110/111) are also rendered via their Room table entries per-deck.
+}
+
+/// Spawn simple furniture props inside rooms based on room type.
+fn spawn_furniture(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    room: &Room,
+) {
+    let rt = room.room_type;
+    let cx = room.x;
+    let cz = room.y;
+    let hw = room.width / 2.0 - 0.5; // half-width with margin
+    let hh = room.height / 2.0 - 0.5;
+    let re = RoomEntity {
+        room_id: room.id,
+        deck: room.deck,
+    };
+
+    match rt {
+        // Bridge / CIC — console desks in a semicircle
+        0 | 2 => {
+            let desk_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.15, 0.15, 0.25),
+                ..default()
+            });
+            let desk = meshes.add(Cuboid::new(1.5, 0.8, 0.6));
+            for i in 0..3 {
+                let offset = (i as f32 - 1.0) * 2.0;
+                commands.spawn((
+                    Mesh3d(desk.clone()),
+                    MeshMaterial3d(desk_mat.clone()),
+                    Transform::from_xyz(cx + offset, 0.4, cz - hh * 0.5),
+                    re.clone(),
+                ));
+            }
+        }
+        // Cabins / Quarters — beds
+        10 | 14 | 15 | 16 => {
+            let bed_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.25, 0.30, 0.45),
+                ..default()
+            });
+            let bed = meshes.add(Cuboid::new(1.0, 0.4, 2.0));
+            let count = if hw > 2.0 { 2 } else { 1 };
+            for i in 0..count {
+                let offset = if count == 1 {
+                    0.0
+                } else {
+                    (i as f32 - 0.5) * 2.5
+                };
+                commands.spawn((
+                    Mesh3d(bed.clone()),
+                    MeshMaterial3d(bed_mat.clone()),
+                    Transform::from_xyz(cx + offset, 0.2, cz + hh * 0.4),
+                    re.clone(),
+                ));
+            }
+        }
+        // Cabin Double / Family Suite / VIP — bigger bed
+        11..=13 => {
+            let bed_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.30, 0.28, 0.42),
+                ..default()
+            });
+            let bed = meshes.add(Cuboid::new(1.6, 0.4, 2.0));
+            commands.spawn((
+                Mesh3d(bed),
+                MeshMaterial3d(bed_mat),
+                Transform::from_xyz(cx, 0.2, cz + hh * 0.4),
+                re.clone(),
+            ));
+        }
+        // Mess Hall / Wardroom / Cafe — tables with chairs
+        20 | 21 | 25 => {
+            let table_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.40, 0.32, 0.22),
+                ..default()
+            });
+            let table = meshes.add(Cuboid::new(1.8, 0.75, 0.9));
+            let cols = ((hw * 2.0) / 3.0).floor().max(1.0) as i32;
+            let rows = ((hh * 2.0) / 3.0).floor().max(1.0) as i32;
+            for r in 0..rows.min(4) {
+                for c in 0..cols.min(6) {
+                    let x = cx - hw + 1.5 + c as f32 * 3.0;
+                    let z = cz - hh + 1.5 + r as f32 * 3.0;
+                    commands.spawn((
+                        Mesh3d(table.clone()),
+                        MeshMaterial3d(table_mat.clone()),
+                        Transform::from_xyz(x, 0.375, z),
+                        re.clone(),
+                    ));
+                }
+            }
+        }
+        // Hospital / Surgery / Medbay — beds in rows
+        30 | 31 | 37 => {
+            let bed_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.70, 0.72, 0.75),
+                ..default()
+            });
+            let bed = meshes.add(Cuboid::new(0.9, 0.5, 1.8));
+            let count = ((hw * 2.0) / 2.5).floor().max(1.0) as i32;
+            for i in 0..count.min(6) {
+                let x = cx - hw + 1.2 + i as f32 * 2.5;
+                commands.spawn((
+                    Mesh3d(bed.clone()),
+                    MeshMaterial3d(bed_mat.clone()),
+                    Transform::from_xyz(x, 0.25, cz),
+                    re.clone(),
+                ));
+            }
+        }
+        // Gym — equipment blocks
+        40 => {
+            let equip_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.3, 0.35),
+                ..default()
+            });
+            let equip = meshes.add(Cuboid::new(1.0, 1.2, 0.8));
+            let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
+            for i in 0..count.min(5) {
+                let x = cx - hw + 1.0 + i as f32 * 2.0;
+                commands.spawn((
+                    Mesh3d(equip.clone()),
+                    MeshMaterial3d(equip_mat.clone()),
+                    Transform::from_xyz(x, 0.6, cz + hh * 0.3),
+                    re.clone(),
+                ));
+            }
+        }
+        // Engineering / Reactor — large machinery blocks
+        60..=63 => {
+            let mach_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.25, 0.15),
+                ..default()
+            });
+            let machine = meshes.add(Cuboid::new(2.0, 2.0, 2.0));
+            commands.spawn((
+                Mesh3d(machine),
+                MeshMaterial3d(mach_mat),
+                Transform::from_xyz(cx, 1.0, cz),
+                re.clone(),
+            ));
+        }
+        // Hydroponics — planter rows
+        80 => {
+            let plant_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.15, 0.45, 0.15),
+                ..default()
+            });
+            let planter = meshes.add(Cuboid::new(0.8, 0.6, room.height - 1.0));
+            let count = ((hw * 2.0) / 1.5).floor().max(1.0) as i32;
+            for i in 0..count.min(8) {
+                let x = cx - hw + 0.6 + i as f32 * 1.5;
+                commands.spawn((
+                    Mesh3d(planter.clone()),
+                    MeshMaterial3d(plant_mat.clone()),
+                    Transform::from_xyz(x, 0.3, cz),
+                    re.clone(),
+                ));
+            }
+        }
+        // Cargo Bay — stacked crates
+        90 | 91 => {
+            let crate_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.30, 0.22),
+                ..default()
+            });
+            let crate_mesh = meshes.add(Cuboid::new(1.2, 1.2, 1.2));
+            let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
+            for i in 0..count.min(4) {
+                let x = cx - hw + 1.0 + i as f32 * 2.0;
+                commands.spawn((
+                    Mesh3d(crate_mesh.clone()),
+                    MeshMaterial3d(crate_mat.clone()),
+                    Transform::from_xyz(x, 0.6, cz - hh * 0.3),
+                    re.clone(),
+                ));
+            }
+        }
+        _ => {} // No furniture for unlisted types
+    }
 }
 
 fn spawn_wall_with_gaps(

@@ -174,7 +174,7 @@ pub struct Toast {
 // BEVY COMPONENTS
 // ============================================================================
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct RoomEntity {
     pub room_id: u32,
     pub deck: i32,
