@@ -277,6 +277,7 @@ pub fn default_access_for_room(room_type: u8) -> u8 {
         | rt::PARTS_STORAGE
         | rt::ELEVATOR_SHAFT
         | rt::LADDER_SHAFT
+        | rt::SERVICE_ELEVATOR_SHAFT
         | rt::SERVICE_DECK => access_levels::CREW_ONLY,
 
         // Department-restricted — engineering

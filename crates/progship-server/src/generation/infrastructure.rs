@@ -22,10 +22,10 @@ const CELL_HULL: u8 = 4;
 const CELL_ROOM_BASE: u8 = 10;
 
 // Corridor geometry
-const SPINE_WIDTH: usize = 3;
-const CROSS_CORRIDOR_WIDTH: usize = 3;
-const RING_WIDTH: usize = 3; // perimeter ring — same as spine
-const SPUR_WIDTH: usize = 2; // spur corridors — narrower than spine
+const SPINE_WIDTH: usize = 4;
+const CROSS_CORRIDOR_WIDTH: usize = 4;
+const RING_WIDTH: usize = 4; // perimeter ring — same as spine
+const SPUR_WIDTH: usize = 3; // spur corridors — narrower than spine
 const MIN_ROOM_DIM: usize = 4;
 const SPUR_THRESHOLD: usize = 12; // add spurs when segment wider than this
 
@@ -855,10 +855,10 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 continue;
             }
             let shaft_room_id = next_id();
-            let srt = if sp.shaft_type == shaft_types::ELEVATOR
-                || sp.shaft_type == shaft_types::SERVICE_ELEVATOR
-            {
+            let srt = if sp.shaft_type == shaft_types::ELEVATOR {
                 room_types::ELEVATOR_SHAFT
+            } else if sp.shaft_type == shaft_types::SERVICE_ELEVATOR {
+                room_types::SERVICE_ELEVATOR_SHAFT
             } else {
                 room_types::LADDER_SHAFT
             };
@@ -2369,10 +2369,10 @@ fn compute_shaft_templates(total_pop: u32) -> Vec<(&'static str, u8, bool, usize
         templates.push((MAIN_NAMES[i], shaft_types::ELEVATOR, true, 3, 3));
     }
     for i in 0..svc_count.min(SVC_NAMES.len()) {
-        templates.push((SVC_NAMES[i], shaft_types::SERVICE_ELEVATOR, false, 2, 2));
+        templates.push((SVC_NAMES[i], shaft_types::SERVICE_ELEVATOR, false, 3, 3));
     }
     for i in 0..ladder_count.min(LADDER_NAMES.len()) {
-        templates.push((LADDER_NAMES[i], shaft_types::LADDER, false, 2, 2));
+        templates.push((LADDER_NAMES[i], shaft_types::LADDER, false, 3, 3));
     }
 
     log::info!(
