@@ -706,8 +706,9 @@ fn room_color(room_type: u8) -> Color {
         100 => Color::srgb(0.18, 0.18, 0.22), // Corridor
         101 => Color::srgb(0.15, 0.15, 0.18), // Service Corridor
         102 => Color::srgb(0.20, 0.20, 0.24), // Cross Corridor
-        110 => Color::srgb(0.30, 0.30, 0.35), // Elevator Shaft
-        111 => Color::srgb(0.28, 0.28, 0.32), // Ladder Shaft
+        110 => Color::srgb(0.20, 0.35, 0.65), // Elevator Shaft (blue)
+        111 => Color::srgb(0.20, 0.55, 0.30), // Ladder Shaft (green)
+        112 => Color::srgb(0.65, 0.40, 0.15), // Service Elevator (orange)
         120 => Color::srgb(0.12, 0.12, 0.15), // Service Deck
 
         _ => Color::srgb(0.25, 0.25, 0.25), // Unknown - neutral gray

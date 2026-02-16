@@ -809,6 +809,7 @@ pub mod room_types {
     pub const CROSS_CORRIDOR: u8 = 102;
     pub const ELEVATOR_SHAFT: u8 = 110;
     pub const LADDER_SHAFT: u8 = 111;
+    pub const SERVICE_ELEVATOR_SHAFT: u8 = 112;
     pub const SERVICE_DECK: u8 = 120;
 
     /// Returns true if this room type is any kind of sleeping quarters

@@ -190,8 +190,8 @@ pub fn player_input(
     if let Some(pid) = player.person_id {
         if let Some(pos) = conn.db.position().person_id().find(&pid) {
             if let Some(room) = conn.db.room().id().find(&pos.room_id) {
-                if room.room_type == 110 {
-                    // ELEVATOR_SHAFT — digit keys select target deck
+                if room.room_type == 110 || room.room_type == 112 {
+                    // ELEVATOR_SHAFT / SERVICE_ELEVATOR_SHAFT — digit keys select target deck
                     let deck_keys: &[(KeyCode, i32)] = &[
                         (KeyCode::Digit1, 0),
                         (KeyCode::Digit2, 1),

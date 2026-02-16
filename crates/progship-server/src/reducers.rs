@@ -67,7 +67,10 @@ pub fn player_join(ctx: &ReducerContext, given_name: String, family_name: String
         .db
         .room()
         .iter()
-        .filter(|r| r.room_type == room_types::ELEVATOR_SHAFT)
+        .filter(|r| {
+            r.room_type == room_types::ELEVATOR_SHAFT
+                || r.room_type == room_types::SERVICE_ELEVATOR_SHAFT
+        })
         .map(|r| r.deck)
         .min()
         .unwrap_or(0);
@@ -458,7 +461,9 @@ pub fn player_use_elevator(ctx: &ReducerContext, target_deck: i32) {
     };
 
     // Must be in an elevator shaft
-    if current_room.room_type != room_types::ELEVATOR_SHAFT {
+    if current_room.room_type != room_types::ELEVATOR_SHAFT
+        && current_room.room_type != room_types::SERVICE_ELEVATOR_SHAFT
+    {
         log::warn!("Not in an elevator shaft");
         return;
     }
@@ -555,7 +560,10 @@ fn find_elevator_on_deck(ctx: &ReducerContext, start_room: u32, target_deck: i32
 
     while let Some(current) = queue.pop_front() {
         if let Some(room) = ctx.db.room().id().find(current) {
-            if room.deck == target_deck && room.room_type == room_types::ELEVATOR_SHAFT {
+            if room.deck == target_deck
+                && (room.room_type == room_types::ELEVATOR_SHAFT
+                    || room.room_type == room_types::SERVICE_ELEVATOR_SHAFT)
+            {
                 return Some(current);
             }
         }
@@ -572,7 +580,9 @@ fn find_elevator_on_deck(ctx: &ReducerContext, start_room: u32, target_deck: i32
             }
             // Only follow elevator shaft connections
             if let Some(other_room) = ctx.db.room().id().find(other) {
-                if other_room.room_type == room_types::ELEVATOR_SHAFT {
+                if other_room.room_type == room_types::ELEVATOR_SHAFT
+                    || other_room.room_type == room_types::SERVICE_ELEVATOR_SHAFT
+                {
                     visited.insert(other);
                     queue.push_back(other);
                 }
