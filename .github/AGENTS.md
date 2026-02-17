@@ -42,6 +42,12 @@ spacetime call -s http://localhost:3000 progship init_ship -- '"ISV Prometheus"'
 # ALWAYS specify -s http://localhost:3000 for all spacetime commands
 ```
 
+## PR Policy
+**Planned work** (tasks on the plan): Commit, push, create PR, wait for CI, merge.
+**Bug fixes / unplanned requests**: Commit and push to the branch only. Do NOT
+create a PR until the user has confirmed the fix works. Wait for explicit approval
+before opening the PR.
+
 ## MANDATORY for Every PR
 1. All new functions must have unit tests
 2. All public functions must have `///` doc comments
