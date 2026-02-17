@@ -45,7 +45,7 @@ pub fn sync_rooms(
 
     // Despawn existing room entities (flat hierarchy, no children)
     for entity in existing.iter() {
-        if let Some(mut cmd) = commands.get_entity(entity) {
+        if let Ok(mut cmd) = commands.get_entity(entity) {
             cmd.despawn();
         }
     }
@@ -92,6 +92,24 @@ pub fn sync_rooms(
                 },
             ));
             spawn_furniture(&mut commands, &mut meshes, &mut materials, room);
+
+            // Per-room ceiling light
+            let (light_color, intensity) = room_light(room.room_type);
+            let range = room.width.max(room.height) * 1.5;
+            commands.spawn((
+                PointLight {
+                    color: light_color,
+                    intensity: intensity * 1000.0,
+                    range,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                Transform::from_xyz(room.x, 2.8, room.y),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
         }
     }
 
@@ -773,7 +791,7 @@ pub fn sync_people(
                 have.insert(pe.person_id);
             } else {
                 despawned.insert(pe.person_id);
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.despawn(); // recursive: also despawns indicator children
                 }
             }
@@ -781,7 +799,7 @@ pub fn sync_people(
 
         // Despawn indicators on surviving entities (will be recreated below)
         for entity in indicators.iter() {
-            if let Some(mut cmd) = commands.get_entity(entity) {
+            if let Ok(mut cmd) = commands.get_entity(entity) {
                 cmd.despawn();
             }
         }
@@ -862,7 +880,7 @@ pub fn sync_people(
                         IndicatorEntity,
                     ))
                     .id();
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.add_child(child);
                 }
             }
@@ -880,7 +898,7 @@ pub fn sync_people(
                         IndicatorEntity,
                     ))
                     .id();
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.add_child(child);
                 }
             }
@@ -1004,6 +1022,32 @@ fn room_color(room_type: u8) -> Color {
         120 => Color::srgb(0.12, 0.12, 0.15), // Service Deck
 
         _ => Color::srgb(0.25, 0.25, 0.25), // Unknown - neutral gray
+    }
+}
+
+/// Returns (color, intensity_multiplier) for per-room point lights.
+fn room_light(room_type: u8) -> (Color, f32) {
+    match room_type {
+        // Command — cool white, bright
+        0..=8 => (Color::srgb(0.85, 0.88, 1.0), 3.0),
+        // Habitation — warm white, moderate
+        10..=16 => (Color::srgb(1.0, 0.92, 0.80), 1.5),
+        // Bathrooms/laundry — neutral, bright
+        17..=18 => (Color::srgb(0.95, 0.95, 1.0), 2.0),
+        // Food service — warm amber
+        20..=27 => (Color::srgb(1.0, 0.88, 0.65), 2.5),
+        // Medical — clinical white, very bright
+        30..=37 => (Color::srgb(0.95, 0.97, 1.0), 4.0),
+        // Recreation — warm daylight
+        40..=56 => (Color::srgb(0.95, 0.92, 0.85), 2.0),
+        // Engineering — amber/industrial
+        60..=71 => (Color::srgb(1.0, 0.75, 0.40), 2.0),
+        // Life support — cyan tint
+        80..=86 => (Color::srgb(0.80, 0.95, 1.0), 2.0),
+        // Cargo — dim utility
+        90..=95 => (Color::srgb(0.90, 0.85, 0.75), 1.0),
+        // Fallback
+        _ => (Color::srgb(0.90, 0.90, 0.90), 1.5),
     }
 }
 

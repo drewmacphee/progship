@@ -67,8 +67,8 @@ pub fn render_minimap(
 
     // Clean up old minimap (root despawn_recursive handles all children)
     for entity in existing_roots.iter() {
-        if let Some(cmd) = commands.get_entity(entity) {
-            cmd.despawn_recursive();
+        if let Ok(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
         }
     }
 
@@ -179,7 +179,7 @@ pub fn render_minimap(
                                 ..default()
                             },
                             BackgroundColor(color),
-                            BorderColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+                            BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.4)),
                             MinimapRoom,
                         ));
                     }
@@ -209,7 +209,7 @@ pub fn render_minimap(
                                         ..default()
                                     },
                                     BackgroundColor(Color::srgb(1.0, 1.0, 0.0)),
-                                    BorderColor(Color::srgb(1.0, 0.5, 0.0)),
+                                    BorderColor::all(Color::srgb(1.0, 0.5, 0.0)),
                                     MinimapPlayer,
                                 ));
                             }

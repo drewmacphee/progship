@@ -118,7 +118,7 @@ pub fn render_hud(
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
         ConnectionState::Reconnecting => {
-            if let Ok(mut text) = hud_q.get_single_mut() {
+            if let Ok(mut text) = hud_q.single_mut() {
                 **text = format!(
                     "Reconnecting to {}... (attempt {}, {:.0}s)",
                     config.server_url,
@@ -129,7 +129,7 @@ pub fn render_hud(
             return;
         }
         _ => {
-            if let Ok(mut text) = hud_q.get_single_mut() {
+            if let Ok(mut text) = hud_q.single_mut() {
                 **text = format!("Connecting to {}...", config.server_url);
             }
             return;
@@ -137,7 +137,7 @@ pub fn render_hud(
     };
 
     // Top-left: ship info
-    if let Ok(mut text) = hud_q.get_single_mut() {
+    if let Ok(mut text) = hud_q.single_mut() {
         let config = conn.db.ship_config().id().find(&0);
         let person_count = conn.db.person().count();
         let active_events: Vec<_> = conn.db.event().iter().filter(|e| e.state != 2).collect();
@@ -235,7 +235,7 @@ pub fn render_hud(
     }
 
     // Bottom-left: player needs bars
-    if let Ok(mut text) = needs_q.get_single_mut() {
+    if let Ok(mut text) = needs_q.single_mut() {
         if let Some(pid) = player.person_id {
             if let Some(needs) = conn.db.needs().person_id().find(&pid) {
                 let bar = |val: f32, label: &str, invert: bool| -> String {
@@ -320,7 +320,7 @@ pub fn render_info_panel(
         ConnectionState::Connected(c) => c,
         _ => return,
     };
-    let Ok(mut text) = panel_q.get_single_mut() else {
+    let Ok(mut text) = panel_q.single_mut() else {
         return;
     };
 
@@ -597,7 +597,7 @@ pub fn render_toasts(
         ),
     >,
 ) {
-    let Ok(mut text) = toast_q.get_single_mut() else {
+    let Ok(mut text) = toast_q.single_mut() else {
         return;
     };
     if ui.toasts.is_empty() {

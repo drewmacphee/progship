@@ -3,6 +3,7 @@
 //! Handles WASD movement, elevator/ladder controls, context actions, and UI toggles.
 
 use bevy::input::mouse::MouseWheel;
+use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 use progship_client_sdk::*;
 use progship_logic::constants::room_types;
@@ -17,7 +18,7 @@ pub fn player_input(
     mut view: ResMut<ViewState>,
     mut player: ResMut<PlayerState>,
     mut ui: ResMut<UiState>,
-    mut scroll_events: EventReader<MouseWheel>,
+    mut scroll_events: MessageReader<MouseWheel>,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
