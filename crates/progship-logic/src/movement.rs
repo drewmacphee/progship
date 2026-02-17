@@ -1,11 +1,12 @@
 //! Pure movement logic — room bounds, door traversal, wall-sliding.
 //!
-//! Algorithm: "clamp then slide"
-//! 1. Correct starting position into room bounds (handles NPC push edge case)
+//! Algorithm: "extended bounds with smooth room transition"
+//! 1. Correct starting position if outside room bounds (NPC push edge case)
 //! 2. Compute desired target = start + delta
-//! 3. Clamp target into room bounds on EACH axis independently
-//! 4. If an axis was clamped AND there's a reachable door on that wall, traverse
-//! 5. Otherwise keep the clamped position (smooth wall slide)
+//! 3. For each wall, extend bounds at door openings (remove radius inset)
+//! 4. Clamp target to extended bounds — player smoothly enters overlap zone
+//! 5. If player center crosses a wall, change room_id (no position jump)
+//! 6. Walls without doors use normal radius-inset bounds (wall slide)
 
 /// Axis-aligned bounding box for a room (center + half-extents).
 #[derive(Debug, Clone, Copy)]
@@ -130,8 +131,36 @@ fn door_wall(door: &DoorInfo, room: &RoomBounds) -> DoorWall {
     }
 }
 
+/// Check if a door on the given wall is reachable at the player's perpendicular position.
+/// Returns the door info if the player is within the door opening.
+fn door_at_wall(
+    wall: DoorWall,
+    perp: f32,
+    r: f32,
+    room_doors: &[(DoorInfo, DoorWall, u32)],
+) -> Option<(DoorInfo, u32)> {
+    for &(door, dw, other_id) in room_doors {
+        if dw != wall {
+            continue;
+        }
+        let half_open = door.width / 2.0 - r;
+        if half_open <= 0.0 {
+            continue;
+        }
+        let center = match wall {
+            DoorWall::MinX | DoorWall::MaxX => door.door_y,
+            DoorWall::MinY | DoorWall::MaxY => door.door_x,
+        };
+        if perp >= center - half_open && perp <= center + half_open {
+            return Some((door, other_id));
+        }
+    }
+    None
+}
+
 /// Compute the result of a movement within the given room, checking doors
-/// for room transitions. Uses per-axis clamping with door checks on clamped walls.
+/// for room transitions. Extends room bounds at door openings so the player
+/// smoothly walks through without position jumps.
 pub fn compute_move(
     input: &MoveInput,
     current_room: &RoomBounds,
@@ -140,30 +169,7 @@ pub fn compute_move(
 ) -> MoveResult {
     let r = input.player_radius;
 
-    // 0. Correct starting position into room if outside (NPC push edge case)
-    let (px, py) = if current_room.contains(input.px, input.py, r) {
-        (input.px, input.py)
-    } else {
-        current_room.clamp(input.px, input.py, r)
-    };
-
-    // 1. Desired target
-    let tx = px + input.dx;
-    let ty = py + input.dy;
-
-    // 2. Clamp each axis independently
-    let cx = tx.clamp(current_room.x_lo(r), current_room.x_hi(r));
-    let cy = ty.clamp(current_room.y_lo(r), current_room.y_hi(r));
-
-    let x_clamped = (cx - tx).abs() > 0.001;
-    let y_clamped = (cy - ty).abs() > 0.001;
-
-    // 3. If nothing was clamped, free movement inside room
-    if !x_clamped && !y_clamped {
-        return MoveResult::InRoom { x: cx, y: cy };
-    }
-
-    // 4. Pre-compute door info for this room
+    // 0. Pre-compute door info for this room
     let room_doors: Vec<(DoorInfo, DoorWall, u32)> = doors
         .iter()
         .filter(|d| d.room_a == current_room.id || d.room_b == current_room.id)
@@ -177,105 +183,155 @@ pub fn compute_move(
         })
         .collect();
 
-    // 5. For each clamped axis, check if there's a reachable door on that wall.
-    // A door is reachable if:
-    //   a) it's on the wall we hit (matching DoorWall variant)
-    //   b) we're moving TOWARD that wall (dx/dy sign matches)
-    //   c) the perpendicular coordinate is within the door opening
-    // Only try the axis that was actually clamped (player hit that wall).
-
-    // Try X-axis door (player hit left or right wall)
-    if x_clamped {
-        let hit_wall = if tx < current_room.x_lo(r) {
-            Some(DoorWall::MinX)
-        } else if tx > current_room.x_hi(r) {
-            Some(DoorWall::MaxX)
+    // 1. Correct starting position: allow overlap zone at doors
+    let px = if input.px >= current_room.x_lo(r) && input.px <= current_room.x_hi(r) {
+        input.px
+    } else if input.px < current_room.x_lo(r) {
+        // Past min_x wall — allowed if in a door opening
+        if input.px >= current_room.min_x()
+            && door_at_wall(DoorWall::MinX, input.py, r, &room_doors).is_some()
+        {
+            input.px
         } else {
-            None
-        };
+            current_room.x_lo(r)
+        }
+    } else if input.px <= current_room.max_x()
+        && door_at_wall(DoorWall::MaxX, input.py, r, &room_doors).is_some()
+    {
+        input.px
+    } else {
+        current_room.x_hi(r)
+    };
+    let py = if input.py >= current_room.y_lo(r) && input.py <= current_room.y_hi(r) {
+        input.py
+    } else if input.py < current_room.y_lo(r) {
+        if input.py >= current_room.min_y()
+            && door_at_wall(DoorWall::MinY, input.px, r, &room_doors).is_some()
+        {
+            input.py
+        } else {
+            current_room.y_lo(r)
+        }
+    } else if input.py <= current_room.max_y()
+        && door_at_wall(DoorWall::MaxY, input.px, r, &room_doors).is_some()
+    {
+        input.py
+    } else {
+        current_room.y_hi(r)
+    };
 
-        if let Some(wall) = hit_wall {
-            for &(door, dw, other_id) in &room_doors {
-                if dw != wall {
-                    continue;
-                }
+    // 2. Desired target
+    let tx = px + input.dx;
+    let ty = py + input.dy;
+
+    // 3. Compute extended bounds — extend at door openings
+    let x_lo = if door_at_wall(DoorWall::MinX, py, r, &room_doors).is_some() {
+        current_room.min_x() // extend to wall edge
+    } else {
+        current_room.x_lo(r) // normal: wall + radius
+    };
+    let x_hi = if door_at_wall(DoorWall::MaxX, py, r, &room_doors).is_some() {
+        current_room.max_x()
+    } else {
+        current_room.x_hi(r)
+    };
+    let y_lo = if door_at_wall(DoorWall::MinY, px, r, &room_doors).is_some() {
+        current_room.min_y()
+    } else {
+        current_room.y_lo(r)
+    };
+    let y_hi = if door_at_wall(DoorWall::MaxY, px, r, &room_doors).is_some() {
+        current_room.max_y()
+    } else {
+        current_room.y_hi(r)
+    };
+
+    // 4. Clamp to extended bounds
+    let cx = tx.clamp(x_lo, x_hi);
+    let cy = ty.clamp(y_lo, y_hi);
+
+    // 5. Check if player center crossed a wall → room transition
+    // Player center crosses when it goes past the wall edge (min_x/max_x/min_y/max_y).
+    // We check the traversal axis: if cx is past the wall AND there's a door there.
+
+    // X-axis: crossed min_x wall (moving left)
+    if cx <= current_room.min_x() && input.dx < 0.0 {
+        if let Some((door, other_id)) = door_at_wall(DoorWall::MinX, py, r, &room_doors) {
+            if let Some(dest) = door_rooms(other_id) {
                 let half_open = door.width / 2.0 - r;
-                if half_open <= 0.0 {
-                    continue;
-                }
-                // Use STARTING py to check if player is actually at the door,
-                // not clamped cy which could be anywhere along the wall.
-                if py < door.door_y - half_open || py > door.door_y + half_open {
-                    continue;
-                }
-                if let Some(dest) = door_rooms(other_id) {
-                    let enter_y = py.clamp(door.door_y - half_open, door.door_y + half_open);
-                    // Place player just past the wall, not at raw tx which could be far away
-                    let step = r + 0.1;
-                    let enter_x = match wall {
-                        DoorWall::MinX => dest.x_hi(r).min(current_room.min_x() - step),
-                        DoorWall::MaxX => dest.x_lo(r).max(current_room.max_x() + step),
-                        _ => unreachable!(),
-                    };
-                    let (fx, fy) = dest.clamp(enter_x, enter_y, r);
-                    if dest.contains(fx, fy, r) {
-                        return MoveResult::DoorTraversal {
-                            room_id: other_id,
-                            x: fx,
-                            y: fy,
-                        };
-                    }
-                }
+                let fy = cy.clamp(door.door_y - half_open, door.door_y + half_open);
+                // Entering dest from its MaxX side — extend that bound to wall edge
+                let fx = tx.clamp(dest.x_lo(r), dest.max_x());
+                let fy = fy.clamp(dest.y_lo(r), dest.y_hi(r));
+                return MoveResult::DoorTraversal {
+                    room_id: other_id,
+                    x: fx,
+                    y: fy,
+                };
+            }
+        }
+    }
+    // X-axis: crossed max_x wall (moving right)
+    if cx >= current_room.max_x() && input.dx > 0.0 {
+        if let Some((door, other_id)) = door_at_wall(DoorWall::MaxX, py, r, &room_doors) {
+            if let Some(dest) = door_rooms(other_id) {
+                let half_open = door.width / 2.0 - r;
+                let fy = cy.clamp(door.door_y - half_open, door.door_y + half_open);
+                // Entering dest from its MinX side — extend that bound to wall edge
+                let fx = tx.clamp(dest.min_x(), dest.x_hi(r));
+                let fy = fy.clamp(dest.y_lo(r), dest.y_hi(r));
+                return MoveResult::DoorTraversal {
+                    room_id: other_id,
+                    x: fx,
+                    y: fy,
+                };
+            }
+        }
+    }
+    // Y-axis: crossed min_y wall (moving up/north)
+    if cy <= current_room.min_y() && input.dy < 0.0 {
+        if let Some((door, other_id)) = door_at_wall(DoorWall::MinY, px, r, &room_doors) {
+            if let Some(dest) = door_rooms(other_id) {
+                let half_open = door.width / 2.0 - r;
+                let fx = cx.clamp(door.door_x - half_open, door.door_x + half_open);
+                // Entering dest from its MaxY side — extend that bound to wall edge
+                let fx = fx.clamp(dest.x_lo(r), dest.x_hi(r));
+                let fy = ty.clamp(dest.y_lo(r), dest.max_y());
+                return MoveResult::DoorTraversal {
+                    room_id: other_id,
+                    x: fx,
+                    y: fy,
+                };
+            }
+        }
+    }
+    // Y-axis: crossed max_y wall (moving down/south)
+    if cy >= current_room.max_y() && input.dy > 0.0 {
+        if let Some((door, other_id)) = door_at_wall(DoorWall::MaxY, px, r, &room_doors) {
+            if let Some(dest) = door_rooms(other_id) {
+                let half_open = door.width / 2.0 - r;
+                let fx = cx.clamp(door.door_x - half_open, door.door_x + half_open);
+                // Entering dest from its MinY side — extend that bound to wall edge
+                let fx = fx.clamp(dest.x_lo(r), dest.x_hi(r));
+                let fy = ty.clamp(dest.min_y(), dest.y_hi(r));
+                return MoveResult::DoorTraversal {
+                    room_id: other_id,
+                    x: fx,
+                    y: fy,
+                };
             }
         }
     }
 
-    // Try Y-axis door (player hit top or bottom wall)
-    if y_clamped {
-        let hit_wall = if ty < current_room.y_lo(r) {
-            Some(DoorWall::MinY)
-        } else if ty > current_room.y_hi(r) {
-            Some(DoorWall::MaxY)
-        } else {
-            None
-        };
+    // 6. No wall crossing — position within (possibly extended) room bounds
+    let x_clamped = (cx - tx).abs() > 0.001;
+    let y_clamped = (cy - ty).abs() > 0.001;
 
-        if let Some(wall) = hit_wall {
-            for &(door, dw, other_id) in &room_doors {
-                if dw != wall {
-                    continue;
-                }
-                let half_open = door.width / 2.0 - r;
-                if half_open <= 0.0 {
-                    continue;
-                }
-                // Use STARTING px to check if player is actually at the door
-                if px < door.door_x - half_open || px > door.door_x + half_open {
-                    continue;
-                }
-                if let Some(dest) = door_rooms(other_id) {
-                    let enter_x = px.clamp(door.door_x - half_open, door.door_x + half_open);
-                    let step = r + 0.1;
-                    let enter_y = match wall {
-                        DoorWall::MinY => dest.y_hi(r).min(current_room.min_y() - step),
-                        DoorWall::MaxY => dest.y_lo(r).max(current_room.max_y() + step),
-                        _ => unreachable!(),
-                    };
-                    let (fx, fy) = dest.clamp(enter_x, enter_y, r);
-                    if dest.contains(fx, fy, r) {
-                        return MoveResult::DoorTraversal {
-                            room_id: other_id,
-                            x: fx,
-                            y: fy,
-                        };
-                    }
-                }
-            }
-        }
+    if x_clamped || y_clamped {
+        MoveResult::WallSlide { x: cx, y: cy }
+    } else {
+        MoveResult::InRoom { x: cx, y: cy }
     }
-
-    // 6. No door traversal — return clamped position (wall slide)
-    MoveResult::WallSlide { x: cx, y: cy }
 }
 
 #[cfg(test)]
@@ -407,8 +463,8 @@ mod tests {
         match res {
             MoveResult::DoorTraversal { room_id, x, y } => {
                 assert_eq!(room_id, 2);
-                assert!(x > 10.0, "past wall, x={x}");
-                assert!(x < 11.0, "not too far in, x={x}");
+                // Player wanted to go to x=11, lands at exactly 11 (no artificial step)
+                assert!((x - 11.0).abs() < 0.01, "x at target, x={x}");
                 assert!((y - 5.0).abs() < 0.1, "y={y}");
             }
             _ => panic!("Expected DoorTraversal, got {:?}", res),
@@ -592,6 +648,128 @@ mod tests {
         let res = compute_move(&mi(5.0, 9.0, 0.5, 2.0), &a, &[door], &lookup);
         match res {
             MoveResult::DoorTraversal { room_id, .. } => assert_eq!(room_id, 2),
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
+        }
+    }
+
+    // --- Smooth traversal (no position jump) ---
+
+    #[test]
+    fn smooth_approach_door_no_jump() {
+        // Small dx should place player smoothly in overlap zone, not jump
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 10.0,
+            door_y: 5.0,
+            width: 2.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+
+        // Player very close to wall with tiny dx — should reach wall edge, not jump past
+        let res = compute_move(&mi(9.5, 5.0, 0.2, 0.0), &a, &[door], &lookup);
+        match res {
+            MoveResult::InRoom { x, .. } | MoveResult::WallSlide { x, .. } => {
+                // Still in room A's extended bounds (wall at 10.0, player at 9.7)
+                assert!((x - 9.7).abs() < 0.01, "smooth position, x={x}");
+            }
+            MoveResult::DoorTraversal { .. } => {
+                panic!("Shouldn't traverse yet — haven't crossed the wall");
+            }
+        }
+    }
+
+    #[test]
+    fn smooth_traversal_exact_target() {
+        // Player walks past the wall — should land at their actual target
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 10.0,
+            door_y: 5.0,
+            width: 2.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+
+        // Player at wall edge, dx=0.5 — target is 10.1, past wall at 10.0
+        let res = compute_move(&mi(9.6, 5.0, 0.5, 0.0), &a, &[door], &lookup);
+        match res {
+            MoveResult::DoorTraversal { room_id, x, y } => {
+                assert_eq!(room_id, 2);
+                // Should be at the actual target (10.1), not an artificial step
+                assert!((x - 10.1).abs() < 0.01, "at target, x={x}");
+                assert!((y - 5.0).abs() < 0.01, "y={y}");
+            }
+            _ => panic!("Expected DoorTraversal, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn overlap_zone_in_room() {
+        // Player in the overlap zone (between wall-r and wall) stays in current room
+        let a = room(1, 5.0, 5.0, 10.0, 10.0);
+        let b = room(2, 15.0, 5.0, 10.0, 10.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 10.0,
+            door_y: 5.0,
+            width: 2.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+
+        // Player at x=9.8 (past normal clamp of 9.6, but before wall at 10.0)
+        // Moving right with tiny dx — should stay in room A
+        let res = compute_move(&mi(9.8, 5.0, 0.1, 0.0), &a, &[door], &lookup);
+        match res {
+            MoveResult::InRoom { x, .. } | MoveResult::WallSlide { x, .. } => {
+                assert!((x - 9.9).abs() < 0.01, "stays in overlap, x={x}");
+            }
+            MoveResult::DoorTraversal { .. } => {
+                panic!("Shouldn't traverse — haven't crossed wall at 10.0");
+            }
+        }
+    }
+
+    #[test]
+    fn corridor_to_corridor_smooth() {
+        // Spine (4m wide) → Cross-corridor (3m tall) — typical corridor transition
+        let spine = room(1, 37.0, 30.0, 4.0, 20.0);
+        let cross = room(2, 37.0, 42.0, 38.0, 4.0);
+        let door = DoorInfo {
+            room_a: 1,
+            room_b: 2,
+            door_x: 37.0,
+            door_y: 40.0,
+            width: 4.0,
+        };
+        let lookup = |id: u32| if id == 2 { Some(cross) } else { None };
+
+        // Walking south in spine, approaching cross-corridor
+        // Player at y=39.5 (near south wall at 40.0), dy=0.3
+        let res = compute_move(&mi(37.0, 39.5, 0.0, 0.3), &spine, &[door], &lookup);
+        match res {
+            MoveResult::InRoom { y, .. } | MoveResult::WallSlide { y, .. } => {
+                // Should be at 39.8, still in overlap zone (wall at 40.0)
+                assert!((y - 39.8).abs() < 0.01, "smooth approach, y={y}");
+            }
+            MoveResult::DoorTraversal { .. } => {
+                panic!("Shouldn't traverse yet — y=39.8 < wall=40.0");
+            }
+        }
+
+        // Now cross the wall
+        let res = compute_move(&mi(37.0, 39.9, 0.0, 0.3), &spine, &[door], &lookup);
+        match res {
+            MoveResult::DoorTraversal { room_id, y, .. } => {
+                assert_eq!(room_id, 2);
+                // At actual target y=40.2, just past the wall
+                assert!((y - 40.2).abs() < 0.01, "at target, y={y}");
+            }
             _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
     }
