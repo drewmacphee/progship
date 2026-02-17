@@ -149,7 +149,7 @@ pub fn sync_rooms(
     let eps: f32 = 0.05;
     for i in 0..deck_rooms.len() {
         let ri = deck_rooms[i];
-        if !room_types::is_plain_corridor(ri.room_type) && !room_types::is_shaft(ri.room_type) {
+        if !room_types::is_plain_corridor(ri.room_type) {
             continue;
         }
         let ri_l = ri.x - ri.width / 2.0;
@@ -159,7 +159,7 @@ pub fn sync_rooms(
 
         for j in (i + 1)..deck_rooms.len() {
             let rj = deck_rooms[j];
-            if !room_types::is_plain_corridor(rj.room_type) && !room_types::is_shaft(rj.room_type) {
+            if !room_types::is_plain_corridor(rj.room_type) {
                 continue;
             }
             let rj_l = rj.x - rj.width / 2.0;
@@ -229,6 +229,7 @@ pub fn sync_rooms(
 
     struct DoorwayCut {
         room_idx: usize,
+        corridor_idx: usize,
         wall_side: u8,
         axis_pos: f32,
         width: f32,
@@ -271,6 +272,7 @@ pub fn sync_rooms(
                     room_walls[j].3.s_gaps.push((gc, dw));
                     doorway_cuts.push(DoorwayCut {
                         room_idx: i,
+                        corridor_idx: j,
                         wall_side: 0,
                         axis_pos: gc,
                         width: dw,
@@ -290,6 +292,7 @@ pub fn sync_rooms(
                     room_walls[j].3.n_gaps.push((gc, dw));
                     doorway_cuts.push(DoorwayCut {
                         room_idx: i,
+                        corridor_idx: j,
                         wall_side: 1,
                         axis_pos: gc,
                         width: dw,
@@ -309,6 +312,7 @@ pub fn sync_rooms(
                     room_walls[j].3.w_gaps.push((gc, dw));
                     doorway_cuts.push(DoorwayCut {
                         room_idx: i,
+                        corridor_idx: j,
                         wall_side: 2,
                         axis_pos: gc,
                         width: dw,
@@ -328,6 +332,7 @@ pub fn sync_rooms(
                     room_walls[j].3.e_gaps.push((gc, dw));
                     doorway_cuts.push(DoorwayCut {
                         room_idx: i,
+                        corridor_idx: j,
                         wall_side: 3,
                         axis_pos: gc,
                         width: dw,
@@ -433,14 +438,16 @@ pub fn sync_rooms(
     let lintel_height: f32 = 0.3;
 
     for cut in &doorway_cuts {
-        let walls = &room_walls[cut.room_idx].3;
+        let rwalls = &room_walls[cut.room_idx].3;
+        let cwalls = &room_walls[cut.corridor_idx].3;
         let room_id = room_walls[cut.room_idx].0;
         let deck = room_walls[cut.room_idx].1;
+        // Place frame centered between the room's wall and the corridor's wall
         let (fx, fz, horiz) = match cut.wall_side {
-            0 => (cut.axis_pos, walls.n_z, true),
-            1 => (cut.axis_pos, walls.s_z, true),
-            2 => (walls.e_x, cut.axis_pos, false),
-            3 => (walls.w_x, cut.axis_pos, false),
+            0 => (cut.axis_pos, (rwalls.n_z + cwalls.s_z) / 2.0, true),
+            1 => (cut.axis_pos, (rwalls.s_z + cwalls.n_z) / 2.0, true),
+            2 => ((rwalls.e_x + cwalls.w_x) / 2.0, cut.axis_pos, false),
+            3 => ((rwalls.w_x + cwalls.e_x) / 2.0, cut.axis_pos, false),
             _ => continue,
         };
         spawn_door_frame(
