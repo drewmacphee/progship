@@ -101,6 +101,7 @@ pub fn sync_rooms(
     // Each edge is a horizontal or vertical wall segment on a room boundary.
     // Shared boundaries between two rooms produce ONE edge (lower ID owns it).
     // Partial overlaps split the larger room's edge into covered and uncovered segments.
+    // Exterior edges are extended by half_thick at each uncovered end to fill corners.
     struct WallEdge {
         x: f32,
         z: f32,
@@ -112,6 +113,7 @@ pub fn sync_rooms(
 
     let mut edges: Vec<WallEdge> = Vec::new();
     let eps = 0.05;
+    let half_thick = wall_thickness / 2.0;
 
     for room in &deck_rooms {
         let rx = room.x;
@@ -123,10 +125,7 @@ pub fn sync_rooms(
         let r_top = ry - rh / 2.0;
         let r_bot = ry + rh / 2.0;
 
-        // For each side, find neighbor coverage and split into segments
         for side in 0u8..4 {
-            // edge_pos: the coordinate perpendicular to the wall
-            // edge_start..edge_end: the range along the wall axis
             let (edge_pos, edge_start, edge_end, horizontal) = match side {
                 0 => (r_top, r_left, r_right, true), // N
                 1 => (r_bot, r_left, r_right, true), // S
@@ -135,8 +134,8 @@ pub fn sync_rooms(
                 _ => unreachable!(),
             };
 
-            // Find all neighbors that share this edge
-            let mut covered: Vec<(f32, f32)> = Vec::new();
+            // Find all neighbors that share this edge (flush within eps)
+            let mut covered: Vec<(f32, f32, bool)> = Vec::new(); // (start, end, we_own)
             for other in &deck_rooms {
                 if other.id == room.id {
                     continue;
@@ -147,41 +146,102 @@ pub fn sync_rooms(
                 let o_bot = other.y + other.height / 2.0;
 
                 let (neighbor_edge, n_start, n_end) = match side {
-                    0 => (o_bot, o_left, o_right), // N: neighbor's south edge
-                    1 => (o_top, o_left, o_right), // S: neighbor's north edge
-                    2 => (o_left, o_top, o_bot),   // E: neighbor's west edge
-                    3 => (o_right, o_top, o_bot),  // W: neighbor's east edge
+                    0 => (o_bot, o_left, o_right),
+                    1 => (o_top, o_left, o_right),
+                    2 => (o_left, o_top, o_bot),
+                    3 => (o_right, o_top, o_bot),
                     _ => unreachable!(),
                 };
 
-                // Check if edges are flush
                 if (edge_pos - neighbor_edge).abs() < eps {
-                    // Compute overlap range
                     let ov_start = edge_start.max(n_start);
                     let ov_end = edge_end.min(n_end);
                     if ov_end - ov_start > eps {
-                        if room.id < other.id {
-                            // We own this shared segment — mark as covered
-                            // (we'll draw it, neighbor won't)
-                            covered.push((ov_start, ov_end));
-                        } else {
-                            // Neighbor owns it — mark as covered so we skip it
-                            covered.push((ov_start, ov_end));
-                        }
+                        covered.push((ov_start, ov_end, room.id < other.id));
                     }
                 }
             }
 
-            // Sort covered segments
+            // Also check for perpendicular neighbors at each end (for corner extension)
+            // A perpendicular neighbor at edge_start means that end is NOT exterior.
+            let perp_sides: [(f32, u8); 2] = match side {
+                0 | 1 => [(r_left, 3), (r_right, 2)], // N/S wall ends at W and E edges
+                2 | 3 => [(r_top, 0), (r_bot, 1)],    // E/W wall ends at N and S edges
+                _ => unreachable!(),
+            };
+            let mut start_has_perp_neighbor = false;
+            let mut end_has_perp_neighbor = false;
+            for other in &deck_rooms {
+                if other.id == room.id {
+                    continue;
+                }
+                let o_left = other.x - other.width / 2.0;
+                let o_right = other.x + other.width / 2.0;
+                let o_top = other.y - other.height / 2.0;
+                let o_bot = other.y + other.height / 2.0;
+
+                // Check start end
+                let (start_pos, start_side) = perp_sides[0];
+                let (perp_edge, perp_start, perp_end) = match start_side {
+                    0 => (o_bot, o_left, o_right),
+                    1 => (o_top, o_left, o_right),
+                    2 => (o_left, o_top, o_bot),
+                    3 => (o_right, o_top, o_bot),
+                    _ => unreachable!(),
+                };
+                if (start_pos - perp_edge).abs() < eps
+                    && perp_start < edge_pos + eps
+                    && perp_end > edge_pos - eps
+                {
+                    start_has_perp_neighbor = true;
+                }
+
+                // Check end end
+                let (end_pos, end_side) = perp_sides[1];
+                let (perp_edge2, perp_start2, perp_end2) = match end_side {
+                    0 => (o_bot, o_left, o_right),
+                    1 => (o_top, o_left, o_right),
+                    2 => (o_left, o_top, o_bot),
+                    3 => (o_right, o_top, o_bot),
+                    _ => unreachable!(),
+                };
+                if (end_pos - perp_edge2).abs() < eps
+                    && perp_start2 < edge_pos + eps
+                    && perp_end2 > edge_pos - eps
+                {
+                    end_has_perp_neighbor = true;
+                }
+            }
+
             covered.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-            // Split edge into uncovered (exterior) and owned-shared segments
+            // Merge overlapping covered segments
+            let mut merged: Vec<(f32, f32, bool)> = Vec::new();
+            for (cs, ce, own) in &covered {
+                if let Some(last) = merged.last_mut() {
+                    if *cs <= last.1 + eps {
+                        last.1 = last.1.max(*ce);
+                        last.2 = last.2 && *own; // we own only if we own ALL overlapping parts
+                        continue;
+                    }
+                }
+                merged.push((*cs, *ce, *own));
+            }
+
+            // Build edge segments from uncovered + owned-shared portions
             let mut cursor = edge_start;
-            for (cov_start, cov_end) in &covered {
-                // Uncovered segment before this coverage: always draw (exterior wall)
-                if *cov_start - cursor > eps {
-                    let seg_start = cursor;
-                    let seg_end = *cov_start;
+            let segment_count = merged.len();
+
+            for &(cov_start, cov_end, we_own) in &merged {
+                // Uncovered (exterior) segment before this coverage
+                if cov_start - cursor > eps {
+                    let mut seg_start = cursor;
+                    let seg_end = cov_start;
+                    // Extend at exterior ends for corner fill
+                    if seg_start <= edge_start + eps && !start_has_perp_neighbor {
+                        seg_start -= half_thick;
+                    }
+                    // Don't extend at end that abuts a covered segment
                     let length = seg_end - seg_start;
                     let center = seg_start + length / 2.0;
                     let (wx, wz) = if horizontal {
@@ -199,36 +259,8 @@ pub fn sync_rooms(
                     });
                 }
 
-                // Shared segment: only draw if we're the lower ID
-                // Find which neighbor covers this segment
-                let we_own = deck_rooms.iter().any(|other| {
-                    if other.id >= room.id {
-                        return false;
-                    }
-                    let o_left = other.x - other.width / 2.0;
-                    let o_right = other.x + other.width / 2.0;
-                    let o_top = other.y - other.height / 2.0;
-                    let o_bot = other.y + other.height / 2.0;
-                    let neighbor_edge = match side {
-                        0 => o_bot,
-                        1 => o_top,
-                        2 => o_left,
-                        3 => o_right,
-                        _ => return false,
-                    };
-                    if (edge_pos - neighbor_edge).abs() >= eps {
-                        return false;
-                    }
-                    let (n_start, n_end) = match side {
-                        0 | 1 => (o_left, o_right),
-                        2 | 3 => (o_top, o_bot),
-                        _ => return false,
-                    };
-                    n_start < *cov_end - eps && n_end > *cov_start + eps
-                });
-
-                // If a lower-ID neighbor covers this, they will draw it. Skip.
-                if !we_own {
+                // Shared segment: draw only if we're the lower-ID owner
+                if we_own {
                     let length = cov_end - cov_start;
                     let center = cov_start + length / 2.0;
                     let (wx, wz) = if horizontal {
@@ -246,13 +278,22 @@ pub fn sync_rooms(
                     });
                 }
 
-                cursor = *cov_end;
+                cursor = cov_end;
             }
 
             // Remaining uncovered segment after last coverage
             if edge_end - cursor > eps {
-                let length = edge_end - cursor;
-                let center = cursor + length / 2.0;
+                let mut seg_start = cursor;
+                let mut seg_end = edge_end;
+                // Extend at exterior end for corner fill
+                if seg_end >= edge_end - eps && !end_has_perp_neighbor {
+                    seg_end += half_thick;
+                }
+                if seg_start <= edge_start + eps && !start_has_perp_neighbor && segment_count == 0 {
+                    seg_start -= half_thick;
+                }
+                let length = seg_end - seg_start;
+                let center = seg_start + length / 2.0;
                 let (wx, wz) = if horizontal {
                     (center, edge_pos)
                 } else {
@@ -289,7 +330,6 @@ pub fn sync_rooms(
         // The door sits on a boundary between rooms.
         // Find the matching edge by position.
         let horizontal = door.wall_a == 0 || door.wall_a == 1;
-        let boundary_pos = if horizontal { door.door_y } else { door.door_x };
         let door_axis_pos = if horizontal { door.door_x } else { door.door_y };
 
         // Determine the actual boundary coordinate from the room geometry
@@ -319,7 +359,10 @@ pub fn sync_rooms(
             let seg_start = edge_center - half;
             let seg_end = edge_center + half;
             if door_axis_pos > seg_start - eps && door_axis_pos < seg_end + eps {
-                edge_gaps[i].push((door_axis_pos, door.width));
+                // Clamp door gap to leave post_w (0.2m) on each side of the edge
+                let max_gap = (edge.length - 2.0 * 0.2).max(0.5);
+                let gap_width = door.width.min(max_gap);
+                edge_gaps[i].push((door_axis_pos, gap_width));
                 break;
             }
         }
@@ -363,7 +406,14 @@ pub fn sync_rooms(
     let post_w = 0.2;
     let lintel_height = 0.3;
 
+    // Track which door IDs we've already spawned frames for
+    let mut seen_door_ids = std::collections::HashSet::new();
+
     for door in &doors {
+        // Deduplicate by unique door ID
+        if !seen_door_ids.insert(door.id) {
+            continue;
+        }
         let room_a = all_rooms.iter().find(|r| r.id == door.room_a);
         let room_b = all_rooms.iter().find(|r| r.id == door.room_b);
         if room_a.is_none() || room_b.is_none() {
@@ -380,10 +430,6 @@ pub fn sync_rooms(
         {
             continue;
         }
-        // Only spawn once per door (lower room_a)
-        if door.room_a > door.room_b {
-            continue;
-        }
 
         let horizontal = door.wall_a == 0 || door.wall_a == 1;
         let boundary = match door.wall_a {
@@ -394,6 +440,11 @@ pub fn sync_rooms(
             _ => continue,
         };
 
+        // Clamp door width for shafts: leave room for frame posts
+        let wall_span = if horizontal { ra.width } else { ra.height };
+        let max_door_w = (wall_span - 2.0 * post_w).max(0.5);
+        let clamped_width = door.width.min(max_door_w);
+
         if horizontal {
             spawn_door_frame(
                 &mut commands,
@@ -401,7 +452,7 @@ pub fn sync_rooms(
                 &frame_mat,
                 door.door_x,
                 boundary,
-                door.width,
+                clamped_width,
                 wall_height,
                 frame_depth,
                 post_w,
@@ -417,7 +468,7 @@ pub fn sync_rooms(
                 &frame_mat,
                 boundary,
                 door.door_y,
-                door.width,
+                clamped_width,
                 wall_height,
                 frame_depth,
                 post_w,
