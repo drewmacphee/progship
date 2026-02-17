@@ -10,25 +10,29 @@ use progship_client_sdk::*;
 use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewState};
 
 pub fn setup_camera(mut commands: Commands) {
-    // Camera starts top-down
+    // Camera starts top-down with bloom for emissive glow
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
+        bevy::post_process::bloom::Bloom {
+            intensity: 0.15,
+            ..default()
+        },
         PlayerCamera,
     ));
 
-    // Ambient light
+    // Ambient light — subdued to let directional and point lights create contrast
     commands.spawn(AmbientLight {
-        color: Color::srgb(0.9, 0.9, 1.0),
-        brightness: 500.0,
+        color: Color::srgb(0.8, 0.85, 0.95),
+        brightness: 150.0,
         affects_lightmapped_meshes: true,
     });
 
-    // Directional light (overhead)
+    // Directional light (overhead) with shadows
     commands.spawn((
         DirectionalLight {
-            illuminance: 2000.0,
-            shadows_enabled: false,
+            illuminance: 3000.0,
+            shadows_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 50.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
