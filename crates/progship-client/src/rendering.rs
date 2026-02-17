@@ -45,7 +45,7 @@ pub fn sync_rooms(
 
     // Despawn existing room entities (flat hierarchy, no children)
     for entity in existing.iter() {
-        if let Some(mut cmd) = commands.get_entity(entity) {
+        if let Ok(mut cmd) = commands.get_entity(entity) {
             cmd.despawn();
         }
     }
@@ -773,7 +773,7 @@ pub fn sync_people(
                 have.insert(pe.person_id);
             } else {
                 despawned.insert(pe.person_id);
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.despawn(); // recursive: also despawns indicator children
                 }
             }
@@ -781,7 +781,7 @@ pub fn sync_people(
 
         // Despawn indicators on surviving entities (will be recreated below)
         for entity in indicators.iter() {
-            if let Some(mut cmd) = commands.get_entity(entity) {
+            if let Ok(mut cmd) = commands.get_entity(entity) {
                 cmd.despawn();
             }
         }
@@ -862,7 +862,7 @@ pub fn sync_people(
                         IndicatorEntity,
                     ))
                     .id();
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.add_child(child);
                 }
             }
@@ -880,7 +880,7 @@ pub fn sync_people(
                         IndicatorEntity,
                     ))
                     .id();
-                if let Some(mut cmd) = commands.get_entity(entity) {
+                if let Ok(mut cmd) = commands.get_entity(entity) {
                     cmd.add_child(child);
                 }
             }

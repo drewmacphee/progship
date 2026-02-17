@@ -3,6 +3,7 @@
 //! Supports top-down (default) and first-person camera modes.
 //! Toggle with V key. Mouse look in first-person mode.
 
+use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 use progship_client_sdk::*;
 
@@ -17,9 +18,10 @@ pub fn setup_camera(mut commands: Commands) {
     ));
 
     // Ambient light
-    commands.insert_resource(AmbientLight {
+    commands.spawn(AmbientLight {
         color: Color::srgb(0.9, 0.9, 1.0),
         brightness: 500.0,
+        affects_lightmapped_meshes: true,
     });
 
     // Directional light (overhead)
@@ -39,8 +41,9 @@ pub fn camera_follow_player(
     mut view: ResMut<ViewState>,
     mut camera_q: Query<&mut Transform, With<PlayerCamera>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut mouse_motion: EventReader<bevy::input::mouse::MouseMotion>,
-    mut windows: Query<&mut Window>,
+    mut mouse_motion: MessageReader<bevy::input::mouse::MouseMotion>,
+    windows: Query<&Window>,
+    mut cursor_q: Query<&mut bevy::window::CursorOptions>,
 ) {
     // Toggle camera mode with V; Escape returns to top-down
     if keyboard.just_pressed(KeyCode::KeyV) {
@@ -53,14 +56,14 @@ pub fn camera_follow_player(
         view.camera_mode = CameraMode::TopDown;
     }
     // Update cursor grab based on mode
-    if let Ok(mut window) = windows.get_single_mut() {
+    if let Ok(mut cursor) = cursor_q.single_mut() {
         let (grab, visible) = match view.camera_mode {
             CameraMode::FirstPerson => (bevy::window::CursorGrabMode::Locked, false),
             CameraMode::TopDown => (bevy::window::CursorGrabMode::None, true),
         };
-        if window.cursor_options.grab_mode != grab {
-            window.cursor_options.grab_mode = grab;
-            window.cursor_options.visible = visible;
+        if cursor.grab_mode != grab {
+            cursor.grab_mode = grab;
+            cursor.visible = visible;
         }
     }
 
@@ -68,7 +71,7 @@ pub fn camera_follow_player(
         ConnectionState::Connected(c) => c,
         _ => return,
     };
-    let Ok(mut cam_tf) = camera_q.get_single_mut() else {
+    let Ok(mut cam_tf) = camera_q.single_mut() else {
         return;
     };
     let Some(pid) = player.person_id else { return };

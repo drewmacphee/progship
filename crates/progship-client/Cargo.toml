@@ -7,5 +7,5 @@ edition = "2021"
 [dependencies]
 progship-client-sdk = { path = "../progship-client-sdk" }
 progship-logic = { path = "../progship-logic" }
-bevy = "0.15"
+bevy = "0.18"
 spacetimedb-sdk = "1.12"
