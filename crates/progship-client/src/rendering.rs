@@ -144,202 +144,105 @@ pub fn sync_rooms(
         ));
     }
 
-    // --- Phase 3: Corridor intersection cuts ---
-    // Where corridors/shafts are flush, cut both shared walls open.
-    let eps: f32 = 0.05;
-    for i in 0..deck_rooms.len() {
-        let ri = deck_rooms[i];
-        if !room_types::is_plain_corridor(ri.room_type) {
-            continue;
-        }
-        let ri_l = ri.x - ri.width / 2.0;
-        let ri_r = ri.x + ri.width / 2.0;
-        let ri_t = ri.y - ri.height / 2.0;
-        let ri_b = ri.y + ri.height / 2.0;
-
-        for j in (i + 1)..deck_rooms.len() {
-            let rj = deck_rooms[j];
-            if !room_types::is_plain_corridor(rj.room_type) {
-                continue;
-            }
-            let rj_l = rj.x - rj.width / 2.0;
-            let rj_r = rj.x + rj.width / 2.0;
-            let rj_t = rj.y - rj.height / 2.0;
-            let rj_b = rj.y + rj.height / 2.0;
-
-            // ri N flush with rj S
-            if (ri_t - rj_b).abs() < eps {
-                let ol = ri_l.max(rj_l);
-                let or_ = ri_r.min(rj_r);
-                if or_ - ol > eps {
-                    let gw = (or_ - ol) - 2.0 * wt;
-                    if gw > 0.1 {
-                        let gc = (ol + or_) / 2.0;
-                        room_walls[i].3.n_gaps.push((gc, gw));
-                        room_walls[j].3.s_gaps.push((gc, gw));
-                    }
-                }
-            }
-            // ri S flush with rj N
-            if (ri_b - rj_t).abs() < eps {
-                let ol = ri_l.max(rj_l);
-                let or_ = ri_r.min(rj_r);
-                if or_ - ol > eps {
-                    let gw = (or_ - ol) - 2.0 * wt;
-                    if gw > 0.1 {
-                        let gc = (ol + or_) / 2.0;
-                        room_walls[i].3.s_gaps.push((gc, gw));
-                        room_walls[j].3.n_gaps.push((gc, gw));
-                    }
-                }
-            }
-            // ri E flush with rj W
-            if (ri_r - rj_l).abs() < eps {
-                let ot = ri_t.max(rj_t);
-                let ob = ri_b.min(rj_b);
-                if ob - ot > eps {
-                    let gh = (ob - ot) - 2.0 * wt;
-                    if gh > 0.1 {
-                        let gc = (ot + ob) / 2.0;
-                        room_walls[i].3.e_gaps.push((gc, gh));
-                        room_walls[j].3.w_gaps.push((gc, gh));
-                    }
-                }
-            }
-            // ri W flush with rj E
-            if (ri_l - rj_r).abs() < eps {
-                let ot = ri_t.max(rj_t);
-                let ob = ri_b.min(rj_b);
-                if ob - ot > eps {
-                    let gh = (ob - ot) - 2.0 * wt;
-                    if gh > 0.1 {
-                        let gc = (ot + ob) / 2.0;
-                        room_walls[i].3.w_gaps.push((gc, gh));
-                        room_walls[j].3.e_gaps.push((gc, gh));
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Phase 4: Room & shaft doorways ---
-    // For each non-plain-corridor room (including shafts), find a corridor neighbor
-    // and cut a doorway in both walls.
+    // --- Phase 3+4: Door-table-driven wall cuts ---
+    // Read the Door table to determine where to cut gaps in walls.
+    // This guarantees visual openings match server-side movement exactly.
     let post_w: f32 = 0.2;
+
+    // Build room_id → deck_rooms index map
+    let mut id_to_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for (idx, room) in deck_rooms.iter().enumerate() {
+        id_to_idx.insert(room.id, idx);
+    }
 
     struct DoorwayCut {
         room_idx: usize,
-        corridor_idx: usize,
+        other_idx: usize,
         wall_side: u8,
         axis_pos: f32,
         width: f32,
     }
     let mut doorway_cuts: Vec<DoorwayCut> = Vec::new();
 
-    for i in 0..deck_rooms.len() {
-        let ri = deck_rooms[i];
-        if room_types::is_plain_corridor(ri.room_type) {
+    // Iterate all same-deck doors (skip cross-deck doors)
+    let deck_doors: Vec<_> = conn
+        .db
+        .door()
+        .iter()
+        .filter(|d| id_to_idx.contains_key(&d.room_a) && id_to_idx.contains_key(&d.room_b))
+        .collect();
+
+    for door in &deck_doors {
+        let Some(&idx_a) = id_to_idx.get(&door.room_a) else {
+            continue;
+        };
+        let Some(&idx_b) = id_to_idx.get(&door.room_b) else {
+            continue;
+        };
+        let ra = deck_rooms[idx_a];
+        let rb = deck_rooms[idx_b];
+        let both_plain = room_types::is_plain_corridor(ra.room_type)
+            && room_types::is_plain_corridor(rb.room_type);
+
+        // Determine gap width: corridors open fully (minus wall insets),
+        // rooms/shafts use the Door table width directly.
+        let gap_w = if both_plain {
+            door.width - 2.0 * wt
+        } else {
+            door.width
+        };
+        if gap_w < 0.1 {
             continue;
         }
-        let ri_l = ri.x - ri.width / 2.0;
-        let ri_r = ri.x + ri.width / 2.0;
-        let ri_t = ri.y - ri.height / 2.0;
-        let ri_b = ri.y + ri.height / 2.0;
 
-        let mut found = false;
-        for j in 0..deck_rooms.len() {
-            if found {
-                break;
+        // Determine which wall the door is on using wall_a/wall_b
+        // wall_a is the wall side of room_a, wall_b is the wall side of room_b
+        // NORTH=0 (low Y), SOUTH=1 (high Y), EAST=2 (high X), WEST=3 (low X)
+        match door.wall_a {
+            0 => {
+                // room_a NORTH wall -> gap at door_x along x-axis
+                room_walls[idx_a].3.n_gaps.push((door.door_x, gap_w));
             }
-            let rj = deck_rooms[j];
-            if !room_types::is_plain_corridor(rj.room_type) {
-                continue;
+            1 => {
+                room_walls[idx_a].3.s_gaps.push((door.door_x, gap_w));
             }
-            let rj_l = rj.x - rj.width / 2.0;
-            let rj_r = rj.x + rj.width / 2.0;
-            let rj_t = rj.y - rj.height / 2.0;
-            let rj_b = rj.y + rj.height / 2.0;
+            2 => {
+                room_walls[idx_a].3.e_gaps.push((door.door_y, gap_w));
+            }
+            3 => {
+                room_walls[idx_a].3.w_gaps.push((door.door_y, gap_w));
+            }
+            _ => {}
+        }
+        match door.wall_b {
+            0 => {
+                room_walls[idx_b].3.n_gaps.push((door.door_x, gap_w));
+            }
+            1 => {
+                room_walls[idx_b].3.s_gaps.push((door.door_x, gap_w));
+            }
+            2 => {
+                room_walls[idx_b].3.e_gaps.push((door.door_y, gap_w));
+            }
+            3 => {
+                room_walls[idx_b].3.w_gaps.push((door.door_y, gap_w));
+            }
+            _ => {}
+        }
 
-            // N side
-            if !found && (ri_t - rj_b).abs() < eps {
-                let ol = ri_l.max(rj_l);
-                let or_ = ri_r.min(rj_r);
-                if or_ - ol > eps {
-                    let wl = or_ - ol;
-                    let dw = (2.0_f32).min(wl - 0.5).max(0.5);
-                    let gc = (ol + or_) / 2.0;
-                    room_walls[i].3.n_gaps.push((gc, dw));
-                    room_walls[j].3.s_gaps.push((gc, dw));
-                    doorway_cuts.push(DoorwayCut {
-                        room_idx: i,
-                        corridor_idx: j,
-                        wall_side: 0,
-                        axis_pos: gc,
-                        width: dw,
-                    });
-                    found = true;
-                }
-            }
-            // S side
-            if !found && (ri_b - rj_t).abs() < eps {
-                let ol = ri_l.max(rj_l);
-                let or_ = ri_r.min(rj_r);
-                if or_ - ol > eps {
-                    let wl = or_ - ol;
-                    let dw = (2.0_f32).min(wl - 0.5).max(0.5);
-                    let gc = (ol + or_) / 2.0;
-                    room_walls[i].3.s_gaps.push((gc, dw));
-                    room_walls[j].3.n_gaps.push((gc, dw));
-                    doorway_cuts.push(DoorwayCut {
-                        room_idx: i,
-                        corridor_idx: j,
-                        wall_side: 1,
-                        axis_pos: gc,
-                        width: dw,
-                    });
-                    found = true;
-                }
-            }
-            // E side
-            if !found && (ri_r - rj_l).abs() < eps {
-                let ot = ri_t.max(rj_t);
-                let ob = ri_b.min(rj_b);
-                if ob - ot > eps {
-                    let wl = ob - ot;
-                    let dw = (2.0_f32).min(wl - 0.5).max(0.5);
-                    let gc = (ot + ob) / 2.0;
-                    room_walls[i].3.e_gaps.push((gc, dw));
-                    room_walls[j].3.w_gaps.push((gc, dw));
-                    doorway_cuts.push(DoorwayCut {
-                        room_idx: i,
-                        corridor_idx: j,
-                        wall_side: 2,
-                        axis_pos: gc,
-                        width: dw,
-                    });
-                    found = true;
-                }
-            }
-            // W side
-            if !found && (ri_l - rj_r).abs() < eps {
-                let ot = ri_t.max(rj_t);
-                let ob = ri_b.min(rj_b);
-                if ob - ot > eps {
-                    let wl = ob - ot;
-                    let dw = (2.0_f32).min(wl - 0.5).max(0.5);
-                    let gc = (ot + ob) / 2.0;
-                    room_walls[i].3.w_gaps.push((gc, dw));
-                    room_walls[j].3.e_gaps.push((gc, dw));
-                    doorway_cuts.push(DoorwayCut {
-                        room_idx: i,
-                        corridor_idx: j,
-                        wall_side: 3,
-                        axis_pos: gc,
-                        width: dw,
-                    });
-                    found = true;
-                }
-            }
+        // Only add door frame cuts for non-corridor-corridor pairs
+        if !both_plain {
+            doorway_cuts.push(DoorwayCut {
+                room_idx: idx_a,
+                other_idx: idx_b,
+                wall_side: door.wall_a,
+                axis_pos: if door.wall_a < 2 {
+                    door.door_x
+                } else {
+                    door.door_y
+                },
+                width: door.width,
+            });
         }
     }
 
@@ -439,7 +342,7 @@ pub fn sync_rooms(
 
     for cut in &doorway_cuts {
         let rwalls = &room_walls[cut.room_idx].3;
-        let cwalls = &room_walls[cut.corridor_idx].3;
+        let cwalls = &room_walls[cut.other_idx].3;
         let room_id = room_walls[cut.room_idx].0;
         let deck = room_walls[cut.room_idx].1;
         // Place frame centered between the room's wall and the corridor's wall
