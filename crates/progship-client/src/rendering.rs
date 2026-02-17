@@ -116,14 +116,12 @@ pub fn sync_rooms(
     let half_thick = wall_thickness / 2.0;
 
     for room in &deck_rooms {
-        let rx = room.x;
-        let ry = room.y;
         let rw = room.width;
         let rh = room.height;
-        let r_left = rx - rw / 2.0;
-        let r_right = rx + rw / 2.0;
-        let r_top = ry - rh / 2.0;
-        let r_bot = ry + rh / 2.0;
+        let r_left = room.x - rw / 2.0;
+        let r_right = room.x + rw / 2.0;
+        let r_top = room.y - rh / 2.0;
+        let r_bot = room.y + rh / 2.0;
 
         for side in 0u8..4 {
             let (edge_pos, edge_start, edge_end, horizontal) = match side {
@@ -162,136 +160,44 @@ pub fn sync_rooms(
                 }
             }
 
-            // Also check for perpendicular neighbors at each end (for corner extension)
-            // A perpendicular neighbor at edge_start means that end is NOT exterior.
-            let perp_sides: [(f32, u8); 2] = match side {
-                0 | 1 => [(r_left, 3), (r_right, 2)], // N/S wall ends at W and E edges
-                2 | 3 => [(r_top, 0), (r_bot, 1)],    // E/W wall ends at N and S edges
-                _ => unreachable!(),
-            };
-            let mut start_has_perp_neighbor = false;
-            let mut end_has_perp_neighbor = false;
-            for other in &deck_rooms {
-                if other.id == room.id {
-                    continue;
-                }
-                let o_left = other.x - other.width / 2.0;
-                let o_right = other.x + other.width / 2.0;
-                let o_top = other.y - other.height / 2.0;
-                let o_bot = other.y + other.height / 2.0;
-
-                // Check start end
-                let (start_pos, start_side) = perp_sides[0];
-                let (perp_edge, perp_start, perp_end) = match start_side {
-                    0 => (o_bot, o_left, o_right),
-                    1 => (o_top, o_left, o_right),
-                    2 => (o_left, o_top, o_bot),
-                    3 => (o_right, o_top, o_bot),
-                    _ => unreachable!(),
-                };
-                if (start_pos - perp_edge).abs() < eps
-                    && perp_start < edge_pos + eps
-                    && perp_end > edge_pos - eps
-                {
-                    start_has_perp_neighbor = true;
-                }
-
-                // Check end end
-                let (end_pos, end_side) = perp_sides[1];
-                let (perp_edge2, perp_start2, perp_end2) = match end_side {
-                    0 => (o_bot, o_left, o_right),
-                    1 => (o_top, o_left, o_right),
-                    2 => (o_left, o_top, o_bot),
-                    3 => (o_right, o_top, o_bot),
-                    _ => unreachable!(),
-                };
-                if (end_pos - perp_edge2).abs() < eps
-                    && perp_start2 < edge_pos + eps
-                    && perp_end2 > edge_pos - eps
-                {
-                    end_has_perp_neighbor = true;
-                }
-            }
-
             covered.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             // Merge overlapping covered segments
             let mut merged: Vec<(f32, f32, bool)> = Vec::new();
-            for (cs, ce, own) in &covered {
+            for &(cs, ce, own) in &covered {
                 if let Some(last) = merged.last_mut() {
-                    if *cs <= last.1 + eps {
-                        last.1 = last.1.max(*ce);
-                        last.2 = last.2 && *own; // we own only if we own ALL overlapping parts
+                    if cs <= last.1 + eps {
+                        last.1 = last.1.max(ce);
+                        last.2 = last.2 && own;
                         continue;
                     }
                 }
-                merged.push((*cs, *ce, *own));
+                merged.push((cs, ce, own));
             }
 
-            // Build edge segments from uncovered + owned-shared portions
-            let mut cursor = edge_start;
-            let segment_count = merged.len();
+            // Helper: emit an exterior (uncovered) edge segment with corner extensions
+            let emit_exterior = |seg_start: f32, seg_end: f32, edges: &mut Vec<WallEdge>| {
+                let ext_start = seg_start - half_thick;
+                let ext_end = seg_end + half_thick;
+                let length = ext_end - ext_start;
+                let center = ext_start + length / 2.0;
+                let (wx, wz) = if horizontal {
+                    (center, edge_pos)
+                } else {
+                    (edge_pos, center)
+                };
+                edges.push(WallEdge {
+                    x: wx,
+                    z: wz,
+                    length,
+                    horizontal,
+                    room_id: room.id,
+                    deck: room.deck,
+                });
+            };
 
-            for &(cov_start, cov_end, we_own) in &merged {
-                // Uncovered (exterior) segment before this coverage
-                if cov_start - cursor > eps {
-                    let mut seg_start = cursor;
-                    let seg_end = cov_start;
-                    // Extend at exterior ends for corner fill
-                    if seg_start <= edge_start + eps && !start_has_perp_neighbor {
-                        seg_start -= half_thick;
-                    }
-                    // Don't extend at end that abuts a covered segment
-                    let length = seg_end - seg_start;
-                    let center = seg_start + length / 2.0;
-                    let (wx, wz) = if horizontal {
-                        (center, edge_pos)
-                    } else {
-                        (edge_pos, center)
-                    };
-                    edges.push(WallEdge {
-                        x: wx,
-                        z: wz,
-                        length,
-                        horizontal,
-                        room_id: room.id,
-                        deck: room.deck,
-                    });
-                }
-
-                // Shared segment: draw only if we're the lower-ID owner
-                if we_own {
-                    let length = cov_end - cov_start;
-                    let center = cov_start + length / 2.0;
-                    let (wx, wz) = if horizontal {
-                        (center, edge_pos)
-                    } else {
-                        (edge_pos, center)
-                    };
-                    edges.push(WallEdge {
-                        x: wx,
-                        z: wz,
-                        length,
-                        horizontal,
-                        room_id: room.id,
-                        deck: room.deck,
-                    });
-                }
-
-                cursor = cov_end;
-            }
-
-            // Remaining uncovered segment after last coverage
-            if edge_end - cursor > eps {
-                let mut seg_start = cursor;
-                let mut seg_end = edge_end;
-                // Extend at exterior end for corner fill
-                if seg_end >= edge_end - eps && !end_has_perp_neighbor {
-                    seg_end += half_thick;
-                }
-                if seg_start <= edge_start + eps && !start_has_perp_neighbor && segment_count == 0 {
-                    seg_start -= half_thick;
-                }
+            // Helper: emit a shared (interior) edge segment — no extensions
+            let emit_shared = |seg_start: f32, seg_end: f32, edges: &mut Vec<WallEdge>| {
                 let length = seg_end - seg_start;
                 let center = seg_start + length / 2.0;
                 let (wx, wz) = if horizontal {
@@ -307,13 +213,35 @@ pub fn sync_rooms(
                     room_id: room.id,
                     deck: room.deck,
                 });
+            };
+
+            let mut cursor = edge_start;
+
+            for &(cov_start, cov_end, we_own) in &merged {
+                // Uncovered gap before this coverage → exterior wall
+                if cov_start - cursor > eps {
+                    emit_exterior(cursor, cov_start, &mut edges);
+                }
+                // Shared segment: draw only if we own it (lower ID)
+                if we_own {
+                    emit_shared(cov_start, cov_end, &mut edges);
+                }
+                cursor = cov_end;
+            }
+
+            // Remaining uncovered segment → exterior wall
+            if edge_end - cursor > eps {
+                emit_exterior(cursor, edge_end, &mut edges);
             }
         }
     }
 
     // --- Phase 3: Assign door gaps to edges ---
     // For each door, find which edge it sits on and record the gap.
+    // Also store the clamped width per door ID for consistent frame sizing.
     let mut edge_gaps: Vec<Vec<(f32, f32)>> = vec![Vec::new(); edges.len()];
+    let mut door_clamped_widths: std::collections::HashMap<u64, f32> =
+        std::collections::HashMap::new();
 
     for door in &doors {
         let room_a = all_rooms.iter().find(|r| r.id == door.room_a);
@@ -359,10 +287,10 @@ pub fn sync_rooms(
             let seg_start = edge_center - half;
             let seg_end = edge_center + half;
             if door_axis_pos > seg_start - eps && door_axis_pos < seg_end + eps {
-                // Clamp door gap to leave post_w (0.2m) on each side of the edge
                 let max_gap = (edge.length - 2.0 * 0.2).max(0.5);
                 let gap_width = door.width.min(max_gap);
                 edge_gaps[i].push((door_axis_pos, gap_width));
+                door_clamped_widths.insert(door.id, gap_width);
                 break;
             }
         }
@@ -440,10 +368,11 @@ pub fn sync_rooms(
             _ => continue,
         };
 
-        // Clamp door width for shafts: leave room for frame posts
-        let wall_span = if horizontal { ra.width } else { ra.height };
-        let max_door_w = (wall_span - 2.0 * post_w).max(0.5);
-        let clamped_width = door.width.min(max_door_w);
+        // Use same clamped width as the wall gap (from Phase 3) for consistency
+        let clamped_width = door_clamped_widths
+            .get(&door.id)
+            .copied()
+            .unwrap_or(door.width);
 
         if horizontal {
             spawn_door_frame(
