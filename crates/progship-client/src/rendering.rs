@@ -102,14 +102,6 @@ pub fn sync_rooms(
         }
 
         let wall_color = color.with_luminance(0.3);
-        let wall_mat = materials.add(StandardMaterial {
-            base_color: wall_color,
-            ..default()
-        });
-        let re = RoomEntity {
-            room_id: room.id,
-            deck: room.deck,
-        };
 
         // Collect door gaps per wall
         let mut north_doors: Vec<(f32, f32)> = Vec::new();
@@ -139,8 +131,9 @@ pub fn sync_rooms(
             }
         }
 
-        // Half-thickness walls: each room draws its own walls inset by half_thick/2
-        // from the room edge. Adjacent rooms' walls sit side-by-side (never overlap).
+        // Half-thickness walls inset inside the floor boundary.
+        // N/S walls run the full room width. E/W walls are shortened by
+        // half_thick at each end so they fit between N and S walls.
         // N wall
         let n_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let n_wid: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
@@ -181,7 +174,8 @@ pub fn sync_rooms(
             room.id,
             room.deck,
         );
-        // E wall
+        // E wall (shortened to fit between N and S walls)
+        let ew_len = h - half_thick * 2.0;
         let e_pos: Vec<f32> = east_doors.iter().map(|d| d.0).collect();
         let e_wid: Vec<f32> = east_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -191,7 +185,7 @@ pub fn sync_rooms(
             wall_color,
             room.x + w / 2.0 - half_thick / 2.0,
             room.y,
-            h,
+            ew_len,
             wall_height,
             half_thick,
             false,
@@ -201,7 +195,7 @@ pub fn sync_rooms(
             room.id,
             room.deck,
         );
-        // W wall
+        // W wall (shortened to fit between N and S walls)
         let w_pos: Vec<f32> = west_doors.iter().map(|d| d.0).collect();
         let w_wid: Vec<f32> = west_doors.iter().map(|d| d.1).collect();
         spawn_wall_with_gaps(
@@ -211,7 +205,7 @@ pub fn sync_rooms(
             wall_color,
             room.x - w / 2.0 + half_thick / 2.0,
             room.y,
-            h,
+            ew_len,
             wall_height,
             half_thick,
             false,
@@ -221,25 +215,6 @@ pub fn sync_rooms(
             room.id,
             room.deck,
         );
-
-        // Corner posts: fill the notch at each corner of the room.
-        let corner_mesh = meshes.add(Cuboid::new(half_thick, wall_height, half_thick));
-        let corners = [
-            (-1.0_f32, -1.0_f32), // NW
-            (1.0, -1.0),          // NE
-            (-1.0, 1.0),          // SW
-            (1.0, 1.0),           // SE
-        ];
-        for (xs, zs) in corners {
-            let cx = room.x + xs * (w / 2.0 - half_thick / 2.0);
-            let cz = room.y + zs * (h / 2.0 - half_thick / 2.0);
-            commands.spawn((
-                Mesh3d(corner_mesh.clone()),
-                MeshMaterial3d(wall_mat.clone()),
-                Transform::from_xyz(cx, wall_height / 2.0, cz),
-                re.clone(),
-            ));
-        }
 
         // Door frames
         let frame_color = Color::srgb(0.55, 0.55, 0.6);
