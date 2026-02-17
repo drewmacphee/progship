@@ -50,21 +50,20 @@ pub fn sync_rooms(
         }
     }
 
-    // Collect doors and rooms for this deck
-    let doors: Vec<_> = conn.db.door().iter().collect();
+    // Collect rooms for this deck
     let all_rooms: Vec<_> = conn.db.room().iter().collect();
+    let deck_rooms: Vec<&Room> = all_rooms
+        .iter()
+        .filter(|r| r.deck == view.current_deck)
+        .collect();
 
-    for room in all_rooms.iter().filter(|r| r.deck == view.current_deck) {
+    let wall_height = 3.0;
+
+    // --- Phase 1: Spawn floors, labels, furniture (per-room) ---
+    for room in &deck_rooms {
         let color = room_color(room.room_type);
-        let w = room.width;
-        let h = room.height;
-        let wall_height = 3.0;
-        let wall_thickness = 0.3;
-        let half_thick = wall_thickness / 2.0;
-
-        // Floor
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(w, 0.2, h))),
+            Mesh3d(meshes.add(Cuboid::new(room.width, 0.2, room.height))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
                 ..default()
@@ -75,10 +74,8 @@ pub fn sync_rooms(
                 deck: room.deck,
             },
         ));
-
-        // Room label (skip corridors/infrastructure)
         if !room_types::is_corridor(room.room_type) {
-            let font_size = (w.min(h) * 2.5).clamp(8.0, 28.0);
+            let font_size = (room.width.min(room.height) * 2.5).clamp(8.0, 28.0);
             commands.spawn((
                 Text2d::new(&room.name),
                 TextFont {
@@ -94,238 +91,284 @@ pub fn sync_rooms(
                     deck: room.deck,
                 },
             ));
-        }
-
-        // Furniture props
-        if !room_types::is_corridor(room.room_type) {
             spawn_furniture(&mut commands, &mut meshes, &mut materials, room);
-        }
-
-        let wall_color = color.with_luminance(0.3);
-
-        // Collect door gaps per wall
-        let mut north_doors: Vec<(f32, f32)> = Vec::new();
-        let mut south_doors: Vec<(f32, f32)> = Vec::new();
-        let mut east_doors: Vec<(f32, f32)> = Vec::new();
-        let mut west_doors: Vec<(f32, f32)> = Vec::new();
-
-        for door in &doors {
-            let is_a = door.room_a == room.id;
-            let is_b = door.room_b == room.id;
-            if !is_a && !is_b {
-                continue;
-            }
-            let other_id = if is_a { door.room_b } else { door.room_a };
-            if let Some(other_room) = all_rooms.iter().find(|r| r.id == other_id) {
-                if other_room.deck != room.deck {
-                    continue;
-                }
-            }
-            let wall = if is_a { door.wall_a } else { door.wall_b };
-            match wall {
-                0 => north_doors.push((door.door_x, door.width)),
-                1 => south_doors.push((door.door_x, door.width)),
-                2 => east_doors.push((door.door_y, door.width)),
-                3 => west_doors.push((door.door_y, door.width)),
-                _ => {}
-            }
-        }
-
-        // Half-thickness walls inset inside the floor boundary.
-        // N/S walls run the full room width. E/W walls are shortened by
-        // half_thick at each end so they fit between N and S walls.
-        // Corridors extend N/S walls by half_thick at each end to fill
-        // junction corner gaps.
-        let is_corr = room_types::is_corridor(room.room_type);
-        let ns_len = if is_corr { w + half_thick * 2.0 } else { w };
-        // N wall
-        let n_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
-        let n_wid: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x,
-            room.y - h / 2.0 + half_thick / 2.0,
-            ns_len,
-            wall_height,
-            half_thick,
-            true,
-            &n_pos,
-            room.x,
-            &n_wid,
-            room.id,
-            room.deck,
-        );
-        // S wall
-        let s_pos: Vec<f32> = south_doors.iter().map(|d| d.0).collect();
-        let s_wid: Vec<f32> = south_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x,
-            room.y + h / 2.0 - half_thick / 2.0,
-            ns_len,
-            wall_height,
-            half_thick,
-            true,
-            &s_pos,
-            room.x,
-            &s_wid,
-            room.id,
-            room.deck,
-        );
-        // E wall (shortened to fit between N and S walls)
-        let ew_len = h - half_thick * 2.0;
-        let e_pos: Vec<f32> = east_doors.iter().map(|d| d.0).collect();
-        let e_wid: Vec<f32> = east_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x + w / 2.0 - half_thick / 2.0,
-            room.y,
-            ew_len,
-            wall_height,
-            half_thick,
-            false,
-            &e_pos,
-            room.y,
-            &e_wid,
-            room.id,
-            room.deck,
-        );
-        // W wall (shortened to fit between N and S walls)
-        let w_pos: Vec<f32> = west_doors.iter().map(|d| d.0).collect();
-        let w_wid: Vec<f32> = west_doors.iter().map(|d| d.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            room.x - w / 2.0 + half_thick / 2.0,
-            room.y,
-            ew_len,
-            wall_height,
-            half_thick,
-            false,
-            &w_pos,
-            room.y,
-            &w_wid,
-            room.id,
-            room.deck,
-        );
-
-        // Door frames
-        let frame_color = Color::srgb(0.55, 0.55, 0.6);
-        let frame_mat = materials.add(StandardMaterial {
-            base_color: frame_color,
-            ..default()
-        });
-        let frame_depth = wall_thickness + 0.1;
-        let post_w = 0.2;
-        let lintel_height = 0.3;
-
-        for door in &doors {
-            let is_a = door.room_a == room.id;
-            let is_b = door.room_b == room.id;
-            if !is_a && !is_b {
-                continue;
-            }
-            let other_id = if is_a { door.room_b } else { door.room_a };
-            let other_room = all_rooms.iter().find(|r| r.id == other_id);
-            if let Some(other) = other_room {
-                if other.deck != room.deck {
-                    continue;
-                }
-                // Skip frames for plain corridor-to-corridor
-                if room_types::is_plain_corridor(room.room_type)
-                    && room_types::is_plain_corridor(other.room_type)
-                {
-                    continue;
-                }
-                // Only the lower-ID room spawns frames to avoid duplicates
-                if room.id > other.id {
-                    continue;
-                }
-            }
-
-            let wall = if is_a { door.wall_a } else { door.wall_b };
-            let dw = door.width;
-
-            match wall {
-                0 => spawn_door_frame(
-                    &mut commands,
-                    &mut meshes,
-                    &frame_mat,
-                    door.door_x,
-                    room.y - h / 2.0,
-                    dw,
-                    wall_height,
-                    frame_depth,
-                    post_w,
-                    lintel_height,
-                    true,
-                    room.id,
-                    room.deck,
-                ),
-                1 => spawn_door_frame(
-                    &mut commands,
-                    &mut meshes,
-                    &frame_mat,
-                    door.door_x,
-                    room.y + h / 2.0,
-                    dw,
-                    wall_height,
-                    frame_depth,
-                    post_w,
-                    lintel_height,
-                    true,
-                    room.id,
-                    room.deck,
-                ),
-                2 => spawn_door_frame(
-                    &mut commands,
-                    &mut meshes,
-                    &frame_mat,
-                    room.x + w / 2.0,
-                    door.door_y,
-                    dw,
-                    wall_height,
-                    frame_depth,
-                    post_w,
-                    lintel_height,
-                    false,
-                    room.id,
-                    room.deck,
-                ),
-                3 => spawn_door_frame(
-                    &mut commands,
-                    &mut meshes,
-                    &frame_mat,
-                    room.x - w / 2.0,
-                    door.door_y,
-                    dw,
-                    wall_height,
-                    frame_depth,
-                    post_w,
-                    lintel_height,
-                    false,
-                    room.id,
-                    room.deck,
-                ),
-                _ => {}
-            }
         }
     }
 
-    // Corridor floors already rendered by their Room entries (type 17/24)
-    // The Corridor table is for data only (carries flags, connectivity), not rendering.
-    // Shaft rooms (110/111) are also rendered via their Room table entries per-deck.
+    // --- Phase 2: Per-room inset walls ---
+    // Every room gets 4 walls, each 0.15m thick, inset 0.15m from the room edge.
+    // Walls run the FULL length of each side (corners overlap at 90 deg, no gaps).
+    // Two adjacent rooms = two back-to-back 0.15m walls = 0.3m total visual thickness.
+    let wt: f32 = 0.15;
+    let inset = wt / 2.0;
+
+    struct RoomWalls {
+        n_z: f32,
+        s_z: f32,
+        e_x: f32,
+        w_x: f32,
+        h_len: f32,
+        v_len: f32,
+        cx: f32,
+        cz: f32,
+        n_gaps: Vec<(f32, f32)>,
+        s_gaps: Vec<(f32, f32)>,
+        e_gaps: Vec<(f32, f32)>,
+        w_gaps: Vec<(f32, f32)>,
+    }
+
+    let mut room_walls: Vec<(u32, i32, u8, RoomWalls)> = Vec::new();
+    for room in &deck_rooms {
+        let cx = room.x;
+        let cz = room.y;
+        let hw = room.width / 2.0;
+        let hh = room.height / 2.0;
+        room_walls.push((
+            room.id,
+            room.deck,
+            room.room_type,
+            RoomWalls {
+                n_z: cz - hh + inset,
+                s_z: cz + hh - inset,
+                e_x: cx + hw - inset,
+                w_x: cx - hw + inset,
+                h_len: room.width,
+                v_len: room.height,
+                cx,
+                cz,
+                n_gaps: Vec::new(),
+                s_gaps: Vec::new(),
+                e_gaps: Vec::new(),
+                w_gaps: Vec::new(),
+            },
+        ));
+    }
+
+    // --- Phase 3+4: Door-table-driven wall cuts ---
+    // Read the Door table to determine where to cut gaps in walls.
+    // This guarantees visual openings match server-side movement exactly.
+    let post_w: f32 = 0.2;
+
+    // Build room_id → deck_rooms index map
+    let mut id_to_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for (idx, room) in deck_rooms.iter().enumerate() {
+        id_to_idx.insert(room.id, idx);
+    }
+
+    struct DoorwayCut {
+        room_idx: usize,
+        other_idx: usize,
+        wall_side: u8,
+        axis_pos: f32,
+        width: f32,
+    }
+    let mut doorway_cuts: Vec<DoorwayCut> = Vec::new();
+
+    // Iterate all same-deck doors (skip cross-deck doors)
+    let deck_doors: Vec<_> = conn
+        .db
+        .door()
+        .iter()
+        .filter(|d| id_to_idx.contains_key(&d.room_a) && id_to_idx.contains_key(&d.room_b))
+        .collect();
+
+    for door in &deck_doors {
+        let Some(&idx_a) = id_to_idx.get(&door.room_a) else {
+            continue;
+        };
+        let Some(&idx_b) = id_to_idx.get(&door.room_b) else {
+            continue;
+        };
+        let ra = deck_rooms[idx_a];
+        let rb = deck_rooms[idx_b];
+        let both_plain = room_types::is_plain_corridor(ra.room_type)
+            && room_types::is_plain_corridor(rb.room_type);
+
+        // Determine gap width: corridors open fully (minus wall insets),
+        // rooms/shafts use the Door table width directly.
+        let gap_w = if both_plain {
+            door.width - 2.0 * wt
+        } else {
+            door.width
+        };
+        if gap_w < 0.1 {
+            continue;
+        }
+
+        // Determine which wall the door is on using wall_a/wall_b
+        // wall_a is the wall side of room_a, wall_b is the wall side of room_b
+        // NORTH=0 (low Y), SOUTH=1 (high Y), EAST=2 (high X), WEST=3 (low X)
+        match door.wall_a {
+            0 => {
+                // room_a NORTH wall -> gap at door_x along x-axis
+                room_walls[idx_a].3.n_gaps.push((door.door_x, gap_w));
+            }
+            1 => {
+                room_walls[idx_a].3.s_gaps.push((door.door_x, gap_w));
+            }
+            2 => {
+                room_walls[idx_a].3.e_gaps.push((door.door_y, gap_w));
+            }
+            3 => {
+                room_walls[idx_a].3.w_gaps.push((door.door_y, gap_w));
+            }
+            _ => {}
+        }
+        match door.wall_b {
+            0 => {
+                room_walls[idx_b].3.n_gaps.push((door.door_x, gap_w));
+            }
+            1 => {
+                room_walls[idx_b].3.s_gaps.push((door.door_x, gap_w));
+            }
+            2 => {
+                room_walls[idx_b].3.e_gaps.push((door.door_y, gap_w));
+            }
+            3 => {
+                room_walls[idx_b].3.w_gaps.push((door.door_y, gap_w));
+            }
+            _ => {}
+        }
+
+        // Only add door frame cuts for non-corridor-corridor pairs
+        if !both_plain {
+            doorway_cuts.push(DoorwayCut {
+                room_idx: idx_a,
+                other_idx: idx_b,
+                wall_side: door.wall_a,
+                axis_pos: if door.wall_a < 2 {
+                    door.door_x
+                } else {
+                    door.door_y
+                },
+                width: door.width,
+            });
+        }
+    }
+
+    // --- Phase 5: Draw walls ---
+    for (room_id, deck, room_type, walls) in &room_walls {
+        let wall_color = room_color(*room_type).with_luminance(0.3);
+        // N wall (horizontal)
+        let np: Vec<f32> = walls.n_gaps.iter().map(|g| g.0).collect();
+        let nw: Vec<f32> = walls.n_gaps.iter().map(|g| g.1).collect();
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            walls.cx,
+            walls.n_z,
+            walls.h_len,
+            wall_height,
+            wt,
+            true,
+            &np,
+            walls.cx,
+            &nw,
+            *room_id,
+            *deck,
+        );
+        // S wall
+        let sp: Vec<f32> = walls.s_gaps.iter().map(|g| g.0).collect();
+        let sw_: Vec<f32> = walls.s_gaps.iter().map(|g| g.1).collect();
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            walls.cx,
+            walls.s_z,
+            walls.h_len,
+            wall_height,
+            wt,
+            true,
+            &sp,
+            walls.cx,
+            &sw_,
+            *room_id,
+            *deck,
+        );
+        // E wall (vertical)
+        let ep: Vec<f32> = walls.e_gaps.iter().map(|g| g.0).collect();
+        let ew_: Vec<f32> = walls.e_gaps.iter().map(|g| g.1).collect();
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            walls.e_x,
+            walls.cz,
+            walls.v_len,
+            wall_height,
+            wt,
+            false,
+            &ep,
+            walls.cz,
+            &ew_,
+            *room_id,
+            *deck,
+        );
+        // W wall
+        let wp: Vec<f32> = walls.w_gaps.iter().map(|g| g.0).collect();
+        let ww: Vec<f32> = walls.w_gaps.iter().map(|g| g.1).collect();
+        spawn_wall_with_gaps(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            wall_color,
+            walls.w_x,
+            walls.cz,
+            walls.v_len,
+            wall_height,
+            wt,
+            false,
+            &wp,
+            walls.cz,
+            &ww,
+            *room_id,
+            *deck,
+        );
+    }
+
+    // --- Phase 6: Door frames ---
+    let frame_color = Color::srgb(0.55, 0.55, 0.6);
+    let frame_mat = materials.add(StandardMaterial {
+        base_color: frame_color,
+        ..default()
+    });
+    let frame_depth = 2.0 * wt + 0.1;
+    let lintel_height: f32 = 0.3;
+
+    for cut in &doorway_cuts {
+        let rwalls = &room_walls[cut.room_idx].3;
+        let cwalls = &room_walls[cut.other_idx].3;
+        let room_id = room_walls[cut.room_idx].0;
+        let deck = room_walls[cut.room_idx].1;
+        // Place frame centered between the room's wall and the corridor's wall
+        let (fx, fz, horiz) = match cut.wall_side {
+            0 => (cut.axis_pos, (rwalls.n_z + cwalls.s_z) / 2.0, true),
+            1 => (cut.axis_pos, (rwalls.s_z + cwalls.n_z) / 2.0, true),
+            2 => ((rwalls.e_x + cwalls.w_x) / 2.0, cut.axis_pos, false),
+            3 => ((rwalls.w_x + cwalls.e_x) / 2.0, cut.axis_pos, false),
+            _ => continue,
+        };
+        spawn_door_frame(
+            &mut commands,
+            &mut meshes,
+            &frame_mat,
+            fx,
+            fz,
+            cut.width,
+            wall_height,
+            frame_depth,
+            post_w,
+            lintel_height,
+            horiz,
+            room_id,
+            deck,
+        );
+    }
 }
 
 /// Spawn simple furniture props inside rooms based on room type.

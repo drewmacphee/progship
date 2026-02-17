@@ -409,7 +409,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             (ring_s_id, ring_s_grid, ring_w_id, ring_w_grid),
             (ring_s_id, ring_s_grid, ring_e_id, ring_e_grid),
         ] {
-            if let Some((dx, dy, wa, wb)) = find_shared_edge(
+            if let Some((dx, dy, wa, wb, _ol)) = find_shared_edge(
                 a_grid.0, a_grid.1, a_grid.2, a_grid.3, b_grid.0, b_grid.1, b_grid.2, b_grid.3,
             ) {
                 ctx.db.door().insert(Door {
@@ -635,7 +635,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             for &(spur_id, sx, sy, sw, sh) in &spur_rooms {
                 // Spur ↔ spine
                 for &(seg_id, seg_y0, seg_y1) in &spine_segments {
-                    if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                    if let Some((dx, dy, wa, wb, _ol)) = find_shared_edge(
                         sx,
                         sy,
                         sw,
@@ -661,7 +661,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     }
                 }
                 // Spur ↔ ring west
-                if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                if let Some((dx, dy, wa, wb, _ol)) = find_shared_edge(
                     sx,
                     sy,
                     sw,
@@ -685,7 +685,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     });
                 }
                 // Spur ↔ ring east
-                if let Some((dx, dy, wa, wb)) = find_shared_edge(
+                if let Some((dx, dy, wa, wb, _ol)) = find_shared_edge(
                     sx,
                     sy,
                     sw,
@@ -1488,7 +1488,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 if !should_have_room_door(rt_a, rt_b) {
                     continue;
                 }
-                if let Some((dx, dy, wa, wb)) = find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh) {
+                if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh)
+                {
                     ctx.db.door().insert(Door {
                         id: 0,
                         room_a: id_a,
@@ -1496,7 +1497,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         wall_a: wa,
                         wall_b: wb,
                         position_along_wall: 0.5,
-                        width: 3.0,
+                        width: door_width_from_overlap(ol),
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: dy,
@@ -1965,7 +1966,7 @@ fn create_corridor_door(
 ) -> bool {
     // Try spine segments
     for &(seg_id, seg_y0, seg_y1) in spine_segments {
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(
+        if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(
             rx,
             ry,
             rw,
@@ -1982,7 +1983,7 @@ fn create_corridor_door(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                width: door_width_from_overlap(ol),
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
@@ -1992,7 +1993,7 @@ fn create_corridor_door(
     }
     // Try cross-corridors
     for &(cr_id, cy) in cross_rooms {
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(
+        if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(
             rx,
             ry,
             rw,
@@ -2009,7 +2010,7 @@ fn create_corridor_door(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                width: door_width_from_overlap(ol),
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
@@ -2019,7 +2020,7 @@ fn create_corridor_door(
     }
     // Try spur corridors
     for &(spur_id, sx, sy, sw, sh) in spur_rooms {
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, sx, sy, sw, sh) {
+        if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(rx, ry, rw, rh, sx, sy, sw, sh) {
             ctx.db.door().insert(Door {
                 id: 0,
                 room_a: room_id,
@@ -2027,7 +2028,7 @@ fn create_corridor_door(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                width: door_width_from_overlap(ol),
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
@@ -2049,7 +2050,7 @@ fn create_corridor_door(
         (ring_s_id, ring_x0, inner_y1, ring_x1 - ring_x0, RING_WIDTH),
     ];
     for (rid, rcx, rcy, rcw, rch) in ring_checks {
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(rx, ry, rw, rh, rcx, rcy, rcw, rch) {
+        if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(rx, ry, rw, rh, rcx, rcy, rcw, rch) {
             ctx.db.door().insert(Door {
                 id: 0,
                 room_a: room_id,
@@ -2057,7 +2058,7 @@ fn create_corridor_door(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: 2.0_f32.min(rw as f32).min(rh as f32),
+                width: door_width_from_overlap(ol),
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
@@ -2156,7 +2157,7 @@ fn connect_shaft_to_corridor(
     // Try cross-corridors (full inner width)
     for &(cc_id, cy) in cross_rooms {
         let cc_w = inner_x1 - inner_x0;
-        if let Some((dx, dy, wa, wb)) =
+        if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, inner_x0, cy, cc_w, CROSS_CORRIDOR_WIDTH)
         {
             ctx.db.door().insert(Door {
@@ -2166,7 +2167,7 @@ fn connect_shaft_to_corridor(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: sw.min(sh) as f32,
+                width: door_width_from_overlap(ol),
                 access_level: access,
                 door_x: dx,
                 door_y: dy,
@@ -2178,7 +2179,7 @@ fn connect_shaft_to_corridor(
     // Try spine segments
     for &(seg_id, seg_y0, seg_y1) in spine_segments {
         let seg_h = seg_y1 - seg_y0;
-        if let Some((dx, dy, wa, wb)) =
+        if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, spine_left, seg_y0, SPINE_WIDTH, seg_h)
         {
             ctx.db.door().insert(Door {
@@ -2188,7 +2189,7 @@ fn connect_shaft_to_corridor(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: sw.min(sh) as f32,
+                width: door_width_from_overlap(ol),
                 access_level: access,
                 door_x: dx,
                 door_y: dy,
@@ -2199,7 +2200,7 @@ fn connect_shaft_to_corridor(
 
     // Try spur corridors
     for &(spur_id, spur_x, spur_y, spur_w, spur_h) in spur_rooms {
-        if let Some((dx, dy, wa, wb)) =
+        if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, spur_x, spur_y, spur_w, spur_h)
         {
             ctx.db.door().insert(Door {
@@ -2209,7 +2210,7 @@ fn connect_shaft_to_corridor(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: sw.min(sh) as f32,
+                width: door_width_from_overlap(ol),
                 access_level: access,
                 door_x: dx,
                 door_y: dy,
@@ -2221,7 +2222,7 @@ fn connect_shaft_to_corridor(
     // Try ring corridors (N, S, W, E)
     for i in 0..4 {
         let (rx, ry, rw, rh) = ring_grids[i];
-        if let Some((dx, dy, wa, wb)) = find_shared_edge(sx, sy, sw, sh, rx, ry, rw, rh) {
+        if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(sx, sy, sw, sh, rx, ry, rw, rh) {
             ctx.db.door().insert(Door {
                 id: 0,
                 room_a: shaft_room_id,
@@ -2229,7 +2230,7 @@ fn connect_shaft_to_corridor(
                 wall_a: wa,
                 wall_b: wb,
                 position_along_wall: 0.5,
-                width: sw.min(sh) as f32,
+                width: door_width_from_overlap(ol),
                 access_level: access,
                 door_x: dx,
                 door_y: dy,
@@ -2248,7 +2249,14 @@ fn connect_shaft_to_corridor(
     );
 }
 
+/// Compute door width from overlap length to match client rendering.
+/// Width = min(2.0, overlap - 0.5), clamped to at least 0.5.
+fn door_width_from_overlap(overlap: f32) -> f32 {
+    2.0_f32.min(overlap - 0.5).max(0.5)
+}
+
 /// Find shared edge between two axis-aligned rectangles.
+/// Returns (door_x, door_y, wall_a, wall_b, overlap_length).
 #[allow(clippy::too_many_arguments)]
 fn find_shared_edge(
     ax: usize,
@@ -2259,7 +2267,7 @@ fn find_shared_edge(
     by: usize,
     bw: usize,
     bh: usize,
-) -> Option<(f32, f32, u8, u8)> {
+) -> Option<(f32, f32, u8, u8, f32)> {
     if ax + aw == bx {
         let oy0 = ay.max(by);
         let oy1 = (ay + ah).min(by + bh);
@@ -2269,6 +2277,7 @@ fn find_shared_edge(
                 (oy0 + oy1) as f32 / 2.0,
                 wall_sides::EAST,
                 wall_sides::WEST,
+                (oy1 - oy0) as f32,
             ));
         }
     }
@@ -2281,6 +2290,7 @@ fn find_shared_edge(
                 (oy0 + oy1) as f32 / 2.0,
                 wall_sides::WEST,
                 wall_sides::EAST,
+                (oy1 - oy0) as f32,
             ));
         }
     }
@@ -2293,6 +2303,7 @@ fn find_shared_edge(
                 (ay + ah) as f32,
                 wall_sides::SOUTH,
                 wall_sides::NORTH,
+                (ox1 - ox0) as f32,
             ));
         }
     }
@@ -2305,6 +2316,7 @@ fn find_shared_edge(
                 ay as f32,
                 wall_sides::NORTH,
                 wall_sides::SOUTH,
+                (ox1 - ox0) as f32,
             ));
         }
     }
