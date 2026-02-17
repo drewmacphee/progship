@@ -134,6 +134,10 @@ pub fn sync_rooms(
         // Half-thickness walls inset inside the floor boundary.
         // N/S walls run the full room width. E/W walls are shortened by
         // half_thick at each end so they fit between N and S walls.
+        // Corridors extend N/S walls by half_thick at each end to fill
+        // junction corner gaps.
+        let is_corr = room_types::is_corridor(room.room_type);
+        let ns_len = if is_corr { w + half_thick * 2.0 } else { w };
         // N wall
         let n_pos: Vec<f32> = north_doors.iter().map(|d| d.0).collect();
         let n_wid: Vec<f32> = north_doors.iter().map(|d| d.1).collect();
@@ -144,7 +148,7 @@ pub fn sync_rooms(
             wall_color,
             room.x,
             room.y - h / 2.0 + half_thick / 2.0,
-            w,
+            ns_len,
             wall_height,
             half_thick,
             true,
@@ -164,7 +168,7 @@ pub fn sync_rooms(
             wall_color,
             room.x,
             room.y + h / 2.0 - half_thick / 2.0,
-            w,
+            ns_len,
             wall_height,
             half_thick,
             true,
