@@ -39,12 +39,12 @@ pub fn setup_camera(mut commands: Commands) {
     ));
 }
 
-/// Runtime GPU check: attach Solari components only if the GPU supports ray tracing.
+/// Runtime GPU check: rebuild camera with Solari if the GPU supports ray tracing.
 /// Falls back to rasterized rendering (with shadows) on unsupported hardware.
 #[cfg(feature = "solari")]
 pub fn try_enable_solari(
     camera_q: Query<
-        Entity,
+        (Entity, &Transform),
         (
             With<PlayerCamera>,
             Without<bevy::solari::prelude::SolariLighting>,
@@ -75,12 +75,24 @@ pub fn try_enable_solari(
 
     info!("Solari enabled: GPU supports hardware ray tracing.");
 
-    if let Ok(entity) = camera_q.single() {
-        commands.entity(entity).insert((
+    // Despawn original camera and respawn with full Solari component set.
+    // Inserting deferred prepass onto an existing camera breaks its render graph,
+    // so we must build a fresh entity with all components present from the start.
+    if let Ok((entity, transform)) = camera_q.single() {
+        let tf = *transform;
+        commands.entity(entity).despawn();
+        commands.spawn((
+            Camera3d::default(),
+            tf,
+            bevy::post_process::bloom::Bloom {
+                intensity: 0.15,
+                ..default()
+            },
             bevy::solari::prelude::SolariLighting::default(),
             bevy::camera::CameraMainTextureUsages::default()
                 .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
             Msaa::Off,
+            PlayerCamera,
         ));
     }
 
