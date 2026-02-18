@@ -11,8 +11,7 @@ use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewS
 
 pub fn setup_camera(mut commands: Commands) {
     // Camera starts top-down with bloom for emissive glow
-    #[allow(unused_mut)]
-    let mut cam = commands.spawn((
+    commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
         bevy::post_process::bloom::Bloom {
@@ -22,17 +21,6 @@ pub fn setup_camera(mut commands: Commands) {
         PlayerCamera,
     ));
 
-    // When Solari is enabled, add raytraced lighting components
-    #[cfg(feature = "solari")]
-    {
-        cam.insert((
-            bevy::solari::prelude::SolariLighting::default(),
-            bevy::camera::CameraMainTextureUsages::default()
-                .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
-            Msaa::Off,
-        ));
-    }
-
     // Ambient light — subdued to let directional and point lights create contrast
     commands.spawn(AmbientLight {
         color: Color::srgb(0.8, 0.85, 0.95),
@@ -40,16 +28,66 @@ pub fn setup_camera(mut commands: Commands) {
         affects_lightmapped_meshes: true,
     });
 
-    // Directional light (overhead)
-    // Solari replaces shadow mapping, so shadows are only enabled in rasterized mode
+    // Directional light (overhead) — shadows on by default, disabled if Solari activates
     commands.spawn((
         DirectionalLight {
             illuminance: 3000.0,
-            shadows_enabled: cfg!(not(feature = "solari")),
+            shadows_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 50.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+/// Runtime GPU check: attach Solari components only if the GPU supports ray tracing.
+/// Falls back to rasterized rendering (with shadows) on unsupported hardware.
+#[cfg(feature = "solari")]
+pub fn try_enable_solari(
+    camera_q: Query<
+        Entity,
+        (
+            With<PlayerCamera>,
+            Without<bevy::solari::prelude::SolariLighting>,
+        ),
+    >,
+    render_device: Option<Res<bevy::render::renderer::RenderDevice>>,
+    mut commands: Commands,
+    mut light_q: Query<&mut DirectionalLight>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(render_device) = render_device else {
+        return; // Render device not ready yet
+    };
+    *done = true;
+
+    let features = render_device.features();
+    let required = bevy::solari::prelude::SolariPlugins::required_wgpu_features();
+    if !features.contains(required) {
+        warn!(
+            "Solari disabled: GPU lacks required features: {:?}. Using rasterized fallback.",
+            required.difference(features)
+        );
+        return;
+    }
+
+    info!("Solari enabled: GPU supports hardware ray tracing.");
+
+    if let Ok(entity) = camera_q.single() {
+        commands.entity(entity).insert((
+            bevy::solari::prelude::SolariLighting::default(),
+            bevy::camera::CameraMainTextureUsages::default()
+                .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
+            Msaa::Off,
+        ));
+    }
+
+    // Disable shadow maps — Solari replaces them
+    for mut light in &mut light_q {
+        light.shadows_enabled = false;
+    }
 }
 
 pub fn camera_follow_player(
