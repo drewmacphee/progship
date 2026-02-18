@@ -10,16 +10,38 @@ use progship_client_sdk::*;
 use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewState};
 
 pub fn setup_camera(mut commands: Commands) {
-    // Camera starts top-down with bloom for emissive glow
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
-        bevy::post_process::bloom::Bloom {
+    let cam_transform =
+        Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z);
+
+    // Solari: match the official bevy_solari example camera setup exactly.
+    // No Bloom — Solari replaces the standard forward/deferred main pass.
+    #[cfg(feature = "solari")]
+    {
+        info!("Spawning camera with Solari raytraced lighting.");
+        let mut cam = commands.spawn((
+            Camera3d::default(),
+            Camera {
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                ..default()
+            },
+            cam_transform,
+            bevy::camera::CameraMainTextureUsages::default()
+                .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
+            Msaa::Off,
+            PlayerCamera,
+        ));
+        cam.insert(bevy::solari::prelude::SolariLighting::default());
+    }
+
+    // Rasterized: standard camera with bloom
+    #[cfg(not(feature = "solari"))]
+    {
+        let bloom = bevy::post_process::bloom::Bloom {
             intensity: 0.15,
             ..default()
-        },
-        PlayerCamera,
-    ));
+        };
+        commands.spawn((Camera3d::default(), cam_transform, bloom, PlayerCamera));
+    }
 
     // Ambient light — subdued to let directional and point lights create contrast
     commands.spawn(AmbientLight {
@@ -28,78 +50,15 @@ pub fn setup_camera(mut commands: Commands) {
         affects_lightmapped_meshes: true,
     });
 
-    // Directional light (overhead) — shadows on by default, disabled if Solari activates
+    // Directional light — Solari replaces shadow mapping
     commands.spawn((
         DirectionalLight {
             illuminance: 3000.0,
-            shadows_enabled: true,
+            shadows_enabled: cfg!(not(feature = "solari")),
             ..default()
         },
         Transform::from_xyz(0.0, 50.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-}
-
-/// Runtime GPU check: rebuild camera with Solari if the GPU supports ray tracing.
-/// Falls back to rasterized rendering (with shadows) on unsupported hardware.
-#[cfg(feature = "solari")]
-pub fn try_enable_solari(
-    camera_q: Query<
-        (Entity, &Transform),
-        (
-            With<PlayerCamera>,
-            Without<bevy::solari::prelude::SolariLighting>,
-        ),
-    >,
-    render_device: Option<Res<bevy::render::renderer::RenderDevice>>,
-    mut commands: Commands,
-    mut light_q: Query<&mut DirectionalLight>,
-    mut done: Local<bool>,
-) {
-    if *done {
-        return;
-    }
-    let Some(render_device) = render_device else {
-        return; // Render device not ready yet
-    };
-    *done = true;
-
-    let features = render_device.features();
-    let required = bevy::solari::prelude::SolariPlugins::required_wgpu_features();
-    if !features.contains(required) {
-        warn!(
-            "Solari disabled: GPU lacks required features: {:?}. Using rasterized fallback.",
-            required.difference(features)
-        );
-        return;
-    }
-
-    info!("Solari enabled: GPU supports hardware ray tracing.");
-
-    // Despawn original camera and respawn with full Solari component set.
-    // Inserting deferred prepass onto an existing camera breaks its render graph,
-    // so we must build a fresh entity with all components present from the start.
-    if let Ok((entity, transform)) = camera_q.single() {
-        let tf = *transform;
-        commands.entity(entity).despawn();
-        commands.spawn((
-            Camera3d::default(),
-            tf,
-            bevy::post_process::bloom::Bloom {
-                intensity: 0.15,
-                ..default()
-            },
-            bevy::solari::prelude::SolariLighting::default(),
-            bevy::camera::CameraMainTextureUsages::default()
-                .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
-            Msaa::Off,
-            PlayerCamera,
-        ));
-    }
-
-    // Disable shadow maps — Solari replaces them
-    for mut light in &mut light_q {
-        light.shadows_enabled = false;
-    }
 }
 
 pub fn camera_follow_player(

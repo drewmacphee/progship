@@ -12,6 +12,17 @@ use crate::state::{
     UiState, ViewState,
 };
 
+/// Add a mesh to assets. When Solari is enabled, generates tangents for deferred GBuffer.
+fn add_mesh(meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
+    let m: Mesh = mesh.into();
+    #[cfg(feature = "solari")]
+    let m = {
+        let backup = m.clone();
+        m.with_generated_tangents().unwrap_or(backup)
+    };
+    meshes.add(m)
+}
+
 pub fn sync_rooms(
     state: Res<ConnectionState>,
     mut view: ResMut<ViewState>,
@@ -63,7 +74,10 @@ pub fn sync_rooms(
     for room in &deck_rooms {
         let color = room_color(room.room_type);
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(room.width, 0.2, room.height))),
+            Mesh3d(add_mesh(
+                &mut meshes,
+                Cuboid::new(room.width, 0.2, room.height),
+            )),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
                 ..default()
@@ -413,7 +427,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.15, 0.15, 0.25),
                 ..default()
             });
-            let desk = meshes.add(Cuboid::new(1.5, 0.8, 0.6));
+            let desk = add_mesh(meshes, Cuboid::new(1.5, 0.8, 0.6));
             for i in 0..3 {
                 let offset = (i as f32 - 1.0) * 2.0;
                 commands.spawn((
@@ -430,7 +444,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.25, 0.30, 0.45),
                 ..default()
             });
-            let bed = meshes.add(Cuboid::new(1.0, 0.4, 2.0));
+            let bed = add_mesh(meshes, Cuboid::new(1.0, 0.4, 2.0));
             let count = if hw > 2.0 { 2 } else { 1 };
             for i in 0..count {
                 let offset = if count == 1 {
@@ -452,7 +466,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.30, 0.28, 0.42),
                 ..default()
             });
-            let bed = meshes.add(Cuboid::new(1.6, 0.4, 2.0));
+            let bed = add_mesh(meshes, Cuboid::new(1.6, 0.4, 2.0));
             commands.spawn((
                 Mesh3d(bed),
                 MeshMaterial3d(bed_mat),
@@ -466,7 +480,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.40, 0.32, 0.22),
                 ..default()
             });
-            let table = meshes.add(Cuboid::new(1.8, 0.75, 0.9));
+            let table = add_mesh(meshes, Cuboid::new(1.8, 0.75, 0.9));
             let cols = ((hw * 2.0) / 3.0).floor().max(1.0) as i32;
             let rows = ((hh * 2.0) / 3.0).floor().max(1.0) as i32;
             for r in 0..rows.min(4) {
@@ -488,7 +502,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.70, 0.72, 0.75),
                 ..default()
             });
-            let bed = meshes.add(Cuboid::new(0.9, 0.5, 1.8));
+            let bed = add_mesh(meshes, Cuboid::new(0.9, 0.5, 1.8));
             let count = ((hw * 2.0) / 2.5).floor().max(1.0) as i32;
             for i in 0..count.min(6) {
                 let x = cx - hw + 1.2 + i as f32 * 2.5;
@@ -506,7 +520,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.3, 0.3, 0.35),
                 ..default()
             });
-            let equip = meshes.add(Cuboid::new(1.0, 1.2, 0.8));
+            let equip = add_mesh(meshes, Cuboid::new(1.0, 1.2, 0.8));
             let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
             for i in 0..count.min(5) {
                 let x = cx - hw + 1.0 + i as f32 * 2.0;
@@ -524,7 +538,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.35, 0.25, 0.15),
                 ..default()
             });
-            let machine = meshes.add(Cuboid::new(2.0, 2.0, 2.0));
+            let machine = add_mesh(meshes, Cuboid::new(2.0, 2.0, 2.0));
             commands.spawn((
                 Mesh3d(machine),
                 MeshMaterial3d(mach_mat),
@@ -538,7 +552,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.15, 0.45, 0.15),
                 ..default()
             });
-            let planter = meshes.add(Cuboid::new(0.8, 0.6, room.height - 1.0));
+            let planter = add_mesh(meshes, Cuboid::new(0.8, 0.6, room.height - 1.0));
             let count = ((hw * 2.0) / 1.5).floor().max(1.0) as i32;
             for i in 0..count.min(8) {
                 let x = cx - hw + 0.6 + i as f32 * 1.5;
@@ -556,7 +570,7 @@ fn spawn_furniture(
                 base_color: Color::srgb(0.35, 0.30, 0.22),
                 ..default()
             });
-            let crate_mesh = meshes.add(Cuboid::new(1.2, 1.2, 1.2));
+            let crate_mesh = add_mesh(meshes, Cuboid::new(1.2, 1.2, 1.2));
             let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
             for i in 0..count.min(4) {
                 let x = cx - hw + 1.0 + i as f32 * 2.0;
@@ -598,14 +612,20 @@ fn spawn_wall_with_gaps(
         // No doors — solid wall (corner posts handle corner fill)
         if horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_length, wall_height, wall_thickness))),
+                Mesh3d(add_mesh(
+                    meshes,
+                    Cuboid::new(wall_length, wall_height, wall_thickness),
+                )),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, wall_length))),
+                Mesh3d(add_mesh(
+                    meshes,
+                    Cuboid::new(wall_thickness, wall_height, wall_length),
+                )),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
@@ -635,14 +655,20 @@ fn spawn_wall_with_gaps(
             let seg_center = cursor + seg_len / 2.0;
             if horizontal {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(seg_len, wall_height, wall_thickness))),
+                    Mesh3d(add_mesh(
+                        meshes,
+                        Cuboid::new(seg_len, wall_height, wall_thickness),
+                    )),
                     MeshMaterial3d(mat.clone()),
                     Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
                     RoomEntity { room_id, deck },
                 ));
             } else {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, seg_len))),
+                    Mesh3d(add_mesh(
+                        meshes,
+                        Cuboid::new(wall_thickness, wall_height, seg_len),
+                    )),
                     MeshMaterial3d(mat.clone()),
                     Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
                     RoomEntity { room_id, deck },
@@ -658,14 +684,20 @@ fn spawn_wall_with_gaps(
         let seg_center = cursor + seg_len / 2.0;
         if horizontal {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(seg_len, wall_height, wall_thickness))),
+                Mesh3d(add_mesh(
+                    meshes,
+                    Cuboid::new(seg_len, wall_height, wall_thickness),
+                )),
                 MeshMaterial3d(mat.clone()),
                 Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
                 RoomEntity { room_id, deck },
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, seg_len))),
+                Mesh3d(add_mesh(
+                    meshes,
+                    Cuboid::new(wall_thickness, wall_height, seg_len),
+                )),
                 MeshMaterial3d(mat.clone()),
                 Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
                 RoomEntity { room_id, deck },
@@ -695,7 +727,7 @@ fn spawn_door_frame(
     let re = RoomEntity { room_id, deck };
     if horizontal {
         // Wall along X: posts offset in X, frame depth in Z
-        let post_mesh = meshes.add(Cuboid::new(post_w, wall_height, frame_depth));
+        let post_mesh = add_mesh(meshes, Cuboid::new(post_w, wall_height, frame_depth));
         for sign in [-1.0_f32, 1.0] {
             commands.spawn((
                 Mesh3d(post_mesh.clone()),
@@ -705,11 +737,10 @@ fn spawn_door_frame(
                 re.clone(),
             ));
         }
-        let lintel = meshes.add(Cuboid::new(
-            door_width + post_w * 2.0,
-            lintel_height,
-            frame_depth,
-        ));
+        let lintel = add_mesh(
+            meshes,
+            Cuboid::new(door_width + post_w * 2.0, lintel_height, frame_depth),
+        );
         commands.spawn((
             Mesh3d(lintel),
             MeshMaterial3d(frame_mat.clone()),
@@ -719,7 +750,7 @@ fn spawn_door_frame(
         ));
     } else {
         // Wall along Z: posts offset in Z, frame depth in X
-        let post_mesh = meshes.add(Cuboid::new(frame_depth, wall_height, post_w));
+        let post_mesh = add_mesh(meshes, Cuboid::new(frame_depth, wall_height, post_w));
         for sign in [-1.0_f32, 1.0] {
             commands.spawn((
                 Mesh3d(post_mesh.clone()),
@@ -729,11 +760,10 @@ fn spawn_door_frame(
                 re.clone(),
             ));
         }
-        let lintel = meshes.add(Cuboid::new(
-            frame_depth,
-            lintel_height,
-            door_width + post_w * 2.0,
-        ));
+        let lintel = add_mesh(
+            meshes,
+            Cuboid::new(frame_depth, lintel_height, door_width + post_w * 2.0),
+        );
         commands.spawn((
             Mesh3d(lintel),
             MeshMaterial3d(frame_mat.clone()),
@@ -805,7 +835,7 @@ pub fn sync_people(
         }
 
         // Spawn only NEW people (not already in scene)
-        let capsule_mesh = meshes.add(Capsule3d::new(0.4, 1.2));
+        let capsule_mesh = add_mesh(&mut meshes, Capsule3d::new(0.4, 1.2));
 
         for &pid in &wanted {
             if have.contains(&pid) {
@@ -856,8 +886,8 @@ pub fn sync_people(
         }
 
         // Spawn indicators as children of surviving person entities
-        let indicator_mesh = meshes.add(Sphere::new(0.2));
-        let convo_mesh = meshes.add(Sphere::new(0.3));
+        let indicator_mesh = add_mesh(&mut meshes, Sphere::new(0.2));
+        let convo_mesh = add_mesh(&mut meshes, Sphere::new(0.3));
         for (entity, pe, _) in existing.iter() {
             let pid = pe.person_id;
             if despawned.contains(&pid) {
@@ -1069,17 +1099,11 @@ fn activity_indicator_color(activity_type: u8) -> Color {
     }
 }
 
-/// When Solari is enabled, attach `RaytracingMesh3d` to all room meshes so they
-/// participate in hardware raytracing. Runs once after rooms are synced.
+/// When Solari is enabled, attach `RaytracingMesh3d` to all mesh entities so they
+/// participate in hardware raytracing (shadows, GI, reflections).
 #[cfg(feature = "solari")]
 pub fn attach_raytracing_meshes(
-    query: Query<
-        (Entity, &Mesh3d),
-        (
-            With<RoomEntity>,
-            Without<bevy::solari::prelude::RaytracingMesh3d>,
-        ),
-    >,
+    query: Query<(Entity, &Mesh3d), Without<bevy::solari::prelude::RaytracingMesh3d>>,
     mut commands: Commands,
 ) {
     for (entity, mesh3d) in &query {
