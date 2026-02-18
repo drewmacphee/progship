@@ -82,7 +82,13 @@ fn main() {
         );
 
     #[cfg(feature = "solari")]
-    app.add_systems(Update, rendering::attach_raytracing_meshes);
+    app.add_systems(
+        Update,
+        (
+            rendering::attach_raytracing_meshes,
+            camera::try_enable_solari,
+        ),
+    );
 
     app.run();
 }
