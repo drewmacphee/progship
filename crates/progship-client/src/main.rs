@@ -41,17 +41,22 @@ fn main() {
         conn_config.server_url, conn_config.module_name
     );
 
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ProgShip - Colony Ship".to_string(),
-                resolution: bevy::window::WindowResolution::new(1280, 720),
-                present_mode: bevy::window::PresentMode::AutoVsync,
-                ..default()
-            }),
+    let mut app = App::new();
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "ProgShip - Colony Ship".to_string(),
+            resolution: bevy::window::WindowResolution::new(1280, 720),
+            present_mode: bevy::window::PresentMode::AutoVsync,
             ..default()
-        }))
-        .insert_resource(ConnectionState::Disconnected)
+        }),
+        ..default()
+    }));
+
+    #[cfg(feature = "solari")]
+    app.add_plugins(bevy::solari::prelude::SolariPlugins);
+
+    app.insert_resource(ConnectionState::Disconnected)
         .insert_resource(conn_config)
         .insert_resource(ViewState::default())
         .insert_resource(PlayerState::default())
@@ -74,6 +79,10 @@ fn main() {
         .add_systems(
             Update,
             (render_hud, render_info_panel, render_toasts, render_minimap),
-        )
-        .run();
+        );
+
+    #[cfg(feature = "solari")]
+    app.add_systems(Update, rendering::attach_raytracing_meshes);
+
+    app.run();
 }
