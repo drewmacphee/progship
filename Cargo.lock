@@ -592,7 +592,9 @@ dependencies = [
  "bevy_render 0.18.0",
  "bevy_shader",
  "bevy_utils 0.18.0",
+ "dlss_wgpu",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2698,6 +2700,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -3645,6 +3649,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
  "libloading",
+]
+
+[[package]]
+name = "dlss_wgpu"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a48466b369c931f926a628b516669404ee82a91e6788fca948de4bfea89db7a"
+dependencies = [
+ "ash",
+ "bindgen 0.72.1",
+ "bitflags 2.10.0",
+ "cc",
+ "glam 0.30.10",
+ "thiserror 2.0.18",
+ "uuid",
+ "wgpu 27.0.1",
 ]
 
 [[package]]

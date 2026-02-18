@@ -56,6 +56,12 @@ fn main() {
     #[cfg(feature = "solari")]
     app.add_plugins(bevy::solari::prelude::SolariPlugins);
 
+    // DLSS requires a unique project ID (generated UUID for ProgShip)
+    #[cfg(feature = "dlss")]
+    app.insert_resource(bevy::anti_alias::dlss::DlssProjectId(
+        bevy::asset::uuid::uuid!("a3f7e2c1-9b4d-4e8a-b6d0-1c5f3a7e9d2b"),
+    ));
+
     app.insert_resource(ConnectionState::Disconnected)
         .insert_resource(conn_config)
         .insert_resource(ViewState::default())
