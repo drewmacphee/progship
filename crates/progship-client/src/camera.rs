@@ -9,7 +9,12 @@ use progship_client_sdk::*;
 
 use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewState};
 
-pub fn setup_camera(mut commands: Commands) {
+pub fn setup_camera(
+    mut commands: Commands,
+    #[cfg(feature = "dlss")] dlss_rr_supported: Option<
+        Res<bevy::anti_alias::dlss::DlssRayReconstructionSupported>,
+    >,
+) {
     let cam_transform =
         Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z);
 
@@ -31,6 +36,19 @@ pub fn setup_camera(mut commands: Commands) {
             PlayerCamera,
         ));
         cam.insert(bevy::solari::prelude::SolariLighting::default());
+
+        // DLSS Ray Reconstruction provides denoising + upscaling for Solari
+        #[cfg(feature = "dlss")]
+        if dlss_rr_supported.is_some() {
+            info!("DLSS Ray Reconstruction enabled.");
+            cam.insert(bevy::anti_alias::dlss::Dlss::<
+                bevy::anti_alias::dlss::DlssRayReconstructionFeature,
+            > {
+                perf_quality_mode: Default::default(),
+                reset: Default::default(),
+                _phantom_data: Default::default(),
+            });
+        }
     }
 
     // Rasterized: standard camera with bloom

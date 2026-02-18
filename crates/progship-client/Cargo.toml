@@ -13,3 +13,4 @@ spacetimedb-sdk = "1.12"
 [features]
 default = []
 solari = ["bevy/bevy_solari"]
+dlss = ["solari", "bevy/dlss"]
