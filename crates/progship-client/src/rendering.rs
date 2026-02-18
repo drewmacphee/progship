@@ -1068,3 +1068,23 @@ fn activity_indicator_color(activity_type: u8) -> Color {
         _ => Color::srgb(0.5, 0.5, 0.5),
     }
 }
+
+/// When Solari is enabled, attach `RaytracingMesh3d` to all room meshes so they
+/// participate in hardware raytracing. Runs once after rooms are synced.
+#[cfg(feature = "solari")]
+pub fn attach_raytracing_meshes(
+    query: Query<
+        (Entity, &Mesh3d),
+        (
+            With<RoomEntity>,
+            Without<bevy::solari::prelude::RaytracingMesh3d>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, mesh3d) in &query {
+        if let Ok(mut cmd) = commands.get_entity(entity) {
+            cmd.insert(bevy::solari::prelude::RaytracingMesh3d(mesh3d.0.clone()));
+        }
+    }
+}

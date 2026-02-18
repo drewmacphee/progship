@@ -9,3 +9,7 @@ progship-client-sdk = { path = "../progship-client-sdk" }
 progship-logic = { path = "../progship-logic" }
 bevy = "0.18"
 spacetimedb-sdk = "1.12"
+
+[features]
+default = []
+solari = ["bevy/bevy_solari"]

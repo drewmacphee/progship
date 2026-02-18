@@ -11,7 +11,8 @@ use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewS
 
 pub fn setup_camera(mut commands: Commands) {
     // Camera starts top-down with bloom for emissive glow
-    commands.spawn((
+    #[allow(unused_mut)]
+    let mut cam = commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 150.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::NEG_Z),
         bevy::post_process::bloom::Bloom {
@@ -21,6 +22,17 @@ pub fn setup_camera(mut commands: Commands) {
         PlayerCamera,
     ));
 
+    // When Solari is enabled, add raytraced lighting components
+    #[cfg(feature = "solari")]
+    {
+        cam.insert((
+            bevy::solari::prelude::SolariLighting::default(),
+            bevy::camera::CameraMainTextureUsages::default()
+                .with(bevy::render::render_resource::TextureUsages::STORAGE_BINDING),
+            Msaa::Off,
+        ));
+    }
+
     // Ambient light — subdued to let directional and point lights create contrast
     commands.spawn(AmbientLight {
         color: Color::srgb(0.8, 0.85, 0.95),
@@ -28,11 +40,12 @@ pub fn setup_camera(mut commands: Commands) {
         affects_lightmapped_meshes: true,
     });
 
-    // Directional light (overhead) with shadows
+    // Directional light (overhead)
+    // Solari replaces shadow mapping, so shadows are only enabled in rasterized mode
     commands.spawn((
         DirectionalLight {
             illuminance: 3000.0,
-            shadows_enabled: true,
+            shadows_enabled: cfg!(not(feature = "solari")),
             ..default()
         },
         Transform::from_xyz(0.0, 50.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
