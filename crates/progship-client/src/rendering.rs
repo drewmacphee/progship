@@ -8,8 +8,8 @@ use progship_logic::constants::room_types;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState, RoomEntity, RoomLabel,
-    UiState, ViewState,
+    BlinkingLight, ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState,
+    PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
 };
 
 /// Add a mesh to assets. When Solari is enabled, generates tangents for deferred GBuffer.
@@ -602,12 +602,18 @@ fn spawn_furniture(
                         re.clone(),
                     ));
                 }
-                // Screen panel tilted back
+                // Screen panel tilted back (pulses)
                 commands.spawn((
                     Mesh3d(screen.clone()),
                     MeshMaterial3d(screen_mat.clone()),
                     Transform::from_xyz(dx, 1.05, dz - 0.3)
                         .with_rotation(Quat::from_rotation_x(-0.25)),
+                    PulsingEmissive {
+                        rate: 0.3 + i as f32 * 0.15,
+                        phase: i as f32 * 0.33,
+                        min_mul: 0.4,
+                        max_mul: 1.2,
+                    },
                     re.clone(),
                 ));
             }
@@ -879,6 +885,25 @@ fn spawn_furniture(
                     Mesh3d(pipe.clone()),
                     MeshMaterial3d(pipe_mat.clone()),
                     Transform::from_xyz(cx + px, 1.0, cz + pz),
+                    re.clone(),
+                ));
+            }
+            // Blinking status lights on machinery
+            let status_light = add_mesh(meshes, Sphere::new(0.06));
+            let light_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.3, 0.1),
+                emissive: Color::srgb(2.0, 0.6, 0.2).into(),
+                ..default()
+            });
+            for (i, (lx, lz)) in [(0.6, 0.0), (-0.6, 0.0)].iter().enumerate() {
+                commands.spawn((
+                    Mesh3d(status_light.clone()),
+                    MeshMaterial3d(light_mat.clone()),
+                    Transform::from_xyz(cx + lx, 1.7, cz + lz),
+                    BlinkingLight {
+                        rate: 0.8 + i as f32 * 0.4,
+                        phase: i as f32 * 0.5,
+                    },
                     re.clone(),
                 ));
             }
@@ -1732,6 +1757,35 @@ pub fn attach_raytracing_meshes(
     for (entity, mesh3d) in &query {
         if let Ok(mut cmd) = commands.get_entity(entity) {
             cmd.insert(bevy::solari::prelude::RaytracingMesh3d(mesh3d.0.clone()));
+        }
+    }
+}
+
+/// Animate blinking lights and pulsing emissive elements.
+pub fn animate_details(
+    time: Res<Time>,
+    blink_query: Query<(&BlinkingLight, &MeshMaterial3d<StandardMaterial>)>,
+    pulse_query: Query<(&PulsingEmissive, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let t = time.elapsed_secs();
+
+    for (blink, mat_handle) in &blink_query {
+        if let Some(mat) = materials.get_mut(mat_handle) {
+            let phase = t * blink.rate + blink.phase * std::f32::consts::TAU;
+            let on = phase.sin() > 0.0;
+            let mul = if on { 1.0 } else { 0.05 };
+            mat.emissive = LinearRgba::new(2.0 * mul, 0.6 * mul, 0.2 * mul, 1.0);
+        }
+    }
+
+    for (pulse, mat_handle) in &pulse_query {
+        if let Some(mat) = materials.get_mut(mat_handle) {
+            let phase =
+                t * pulse.rate * std::f32::consts::TAU + pulse.phase * std::f32::consts::TAU;
+            let factor =
+                pulse.min_mul + (pulse.max_mul - pulse.min_mul) * (0.5 + 0.5 * phase.sin());
+            mat.emissive = LinearRgba::new(0.05 * factor, 0.15 * factor, 0.35 * factor, 1.0);
         }
     }
 }

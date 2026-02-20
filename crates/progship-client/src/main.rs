@@ -30,7 +30,7 @@ use camera::{camera_follow_player, setup_camera};
 use input::player_input;
 use minimap::{minimap_toggle, render_minimap, MinimapState};
 use networking::{auto_join_game, connect_to_server, process_messages};
-use rendering::{sync_people, sync_rooms};
+use rendering::{animate_details, sync_people, sync_rooms};
 use state::{ConnectionConfig, ConnectionState, PlayerState, UiState, ViewState};
 use ui::{render_hud, render_info_panel, render_toasts, setup_ui};
 
@@ -80,6 +80,7 @@ fn main() {
                 camera_follow_player,
                 sync_rooms,
                 sync_people,
+                animate_details,
             ),
         )
         .add_systems(
