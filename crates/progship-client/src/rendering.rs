@@ -144,12 +144,7 @@ pub fn sync_rooms(
         }
 
         // Lighting — distributed point lights for all rooms including corridors
-        spawn_room_lights(&mut commands, room);
-
-        // Greeble surface detail on walls
-        if let Some(ref lib) = greeble_lib {
-            crate::greeble::spawn_room_greebles(&mut commands, lib, room, wall_height);
-        }
+        spawn_room_lights(&mut commands, &mut meshes, &mut materials, room);
 
         // Dust motes in atmospheric rooms (engineering, cargo, corridors)
         if matches!(room.room_type, 60..=71 | 80..=86 | 90..=95 | 100..=102) {
@@ -311,6 +306,20 @@ pub fn sync_rooms(
                 },
                 width: door.width,
             });
+        }
+    }
+
+    // --- Phase 4.5: Greeble surface detail (after door gaps are known) ---
+    if let Some(ref lib) = greeble_lib {
+        for (idx, room) in deck_rooms.iter().enumerate() {
+            let w = &room_walls[idx].3;
+            let gaps = crate::greeble::WallGaps {
+                n: w.n_gaps.clone(),
+                s: w.s_gaps.clone(),
+                e: w.e_gaps.clone(),
+                w: w.w_gaps.clone(),
+            };
+            crate::greeble::spawn_room_greebles(&mut commands, &mut meshes, lib, room, &gaps);
         }
     }
 
@@ -1762,20 +1771,30 @@ fn zone_stripe_color(room_type: u8) -> Color {
 /// Distributed ceiling lights for a room. Places multiple point lights based on
 /// room size: small rooms get 1, medium get 2, large get 3-4. Corridors get
 /// strip lighting every 3-4m along their length.
-fn spawn_room_lights(commands: &mut Commands, room: &Room) {
+///
+/// In Solari mode, spawns emissive mesh panels instead of PointLights since
+/// Solari only supports DirectionalLight + emissive meshes for lighting.
+fn spawn_room_lights(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    room: &Room,
+) {
     let (color, intensity) = room_light(room.room_type);
     let is_corridor = room_types::is_corridor(room.room_type);
     let y = 2.8;
 
+    // Collect light positions and per-light intensities
+    let mut positions: Vec<(f32, f32, f32)> = Vec::new();
+    let mut light_intensities: Vec<f32> = Vec::new();
+
     if is_corridor {
-        // Corridor strip lighting — dim, evenly spaced along the long axis
         let corridor_intensity = intensity * 600.0;
         let spacing = 3.5;
         let long = room.width.max(room.height);
         let is_horizontal = room.width >= room.height;
         let count = ((long / spacing).ceil() as i32).max(1);
         let start_offset = -(long / 2.0) + spacing / 2.0;
-        let range = spacing * 1.2;
 
         for i in 0..count {
             let offset = start_offset + i as f32 * spacing;
@@ -1784,97 +1803,98 @@ fn spawn_room_lights(commands: &mut Commands, room: &Room) {
             } else {
                 (room.x, room.y + offset)
             };
-            commands.spawn((
-                PointLight {
-                    color,
-                    intensity: corridor_intensity,
-                    range,
-                    shadows_enabled: false,
-                    ..default()
-                },
-                Transform::from_xyz(lx, y, lz),
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
+            positions.push((lx, y, lz));
+            light_intensities.push(corridor_intensity);
         }
     } else {
-        // Room lighting — distribute based on size
         let room_intensity = intensity * 1000.0;
         let w = room.width;
         let h = room.height;
         let long = w.max(h);
-        let range = long.min(8.0);
-
-        // Enable shadows on one key light per room (the first one)
-        let shadow_first = !cfg!(feature = "solari");
 
         if long < 5.0 {
-            // Small room: single centered light
-            commands.spawn((
-                PointLight {
-                    color,
-                    intensity: room_intensity,
-                    range,
-                    shadows_enabled: shadow_first,
-                    ..default()
-                },
-                Transform::from_xyz(room.x, y, room.y),
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
+            positions.push((room.x, y, room.y));
+            light_intensities.push(room_intensity);
         } else if long < 10.0 {
-            // Medium room: 2 lights at 1/3 and 2/3
             let per_light = room_intensity * 0.6;
             let is_wide = w >= h;
-            for (i, frac) in [0.33, 0.67].iter().enumerate() {
+            for frac in [0.33, 0.67] {
                 let offset = long * (frac - 0.5);
                 let (lx, lz) = if is_wide {
                     (room.x + offset, room.y)
                 } else {
                     (room.x, room.y + offset)
                 };
-                commands.spawn((
-                    PointLight {
-                        color,
-                        intensity: per_light,
-                        range,
-                        shadows_enabled: shadow_first && i == 0,
-                        ..default()
-                    },
-                    Transform::from_xyz(lx, y, lz),
-                    RoomEntity {
-                        room_id: room.id,
-                        deck: room.deck,
-                    },
-                ));
+                positions.push((lx, y, lz));
+                light_intensities.push(per_light);
             }
         } else {
-            // Large room: 4 lights in a grid
             let per_light = room_intensity * 0.4;
             let offsets_x = [w * -0.25, w * 0.25];
             let offsets_z = [h * -0.25, h * 0.25];
-            for (i, &ox) in offsets_x.iter().enumerate() {
+            for &ox in &offsets_x {
                 for &oz in &offsets_z {
-                    commands.spawn((
-                        PointLight {
-                            color,
-                            intensity: per_light,
-                            range,
-                            shadows_enabled: shadow_first && i == 0 && oz == offsets_z[0],
-                            ..default()
-                        },
-                        Transform::from_xyz(room.x + ox, y, room.y + oz),
-                        RoomEntity {
-                            room_id: room.id,
-                            deck: room.deck,
-                        },
-                    ));
+                    positions.push((room.x + ox, y, room.y + oz));
+                    light_intensities.push(per_light);
                 }
             }
+        }
+    }
+
+    let re = RoomEntity {
+        room_id: room.id,
+        deck: room.deck,
+    };
+
+    // Solari: emissive ceiling panels (Solari ignores PointLight)
+    #[cfg(feature = "solari")]
+    {
+        let color_lin = color.to_linear();
+        let panel_mesh = add_mesh(meshes, Cuboid::new(0.4, 0.04, 0.4));
+        for (i, &(lx, ly, lz)) in positions.iter().enumerate() {
+            // Scale emissive power to match visual brightness expectations
+            let emissive_power = light_intensities[i] * 40.0;
+            let emissive = LinearRgba::new(
+                color_lin.red * emissive_power,
+                color_lin.green * emissive_power,
+                color_lin.blue * emissive_power,
+                1.0,
+            );
+            let mat = materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                emissive,
+                unlit: false,
+                ..default()
+            });
+            commands.spawn((
+                Mesh3d(panel_mesh.clone()),
+                MeshMaterial3d(mat),
+                Transform::from_xyz(lx, ly, lz),
+                re.clone(),
+            ));
+        }
+    }
+
+    // Rasterized: traditional point lights
+    #[cfg(not(feature = "solari"))]
+    {
+        let range_base = if is_corridor {
+            3.5 * 1.2
+        } else {
+            room.width.max(room.height).min(8.0)
+        };
+        for (i, &(lx, ly, lz)) in positions.iter().enumerate() {
+            commands.spawn((
+                PointLight {
+                    color,
+                    intensity: light_intensities[i],
+                    range: range_base,
+                    shadows_enabled: !is_corridor && i == 0,
+                    ..default()
+                },
+                Transform::from_xyz(lx, ly, lz),
+                re.clone(),
+            ));
         }
     }
 }

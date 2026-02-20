@@ -109,7 +109,7 @@ impl Default for ViewState {
             people_sync_timer: 0.0,
             hud_timer: 0.0,
             info_timer: 0.0,
-            camera_mode: CameraMode::TopDown,
+            camera_mode: CameraMode::FirstPerson,
             fps_yaw: 0.0,
             fps_pitch: 0.0,
         }

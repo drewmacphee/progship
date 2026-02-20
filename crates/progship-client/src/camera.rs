@@ -79,10 +79,15 @@ pub fn setup_camera(
     }
 
     // Minimal ambient — light comes from fixtures, not magic fill.
-    // Just enough to prevent pitch-black corners.
+    // Solari needs higher ambient since it doesn't have rasterized fill light.
+    let ambient_brightness = if cfg!(feature = "solari") {
+        200.0
+    } else {
+        20.0
+    };
     commands.spawn(AmbientLight {
         color: Color::srgb(0.7, 0.75, 0.85),
-        brightness: 20.0,
+        brightness: ambient_brightness,
         affects_lightmapped_meshes: true,
     });
 }
