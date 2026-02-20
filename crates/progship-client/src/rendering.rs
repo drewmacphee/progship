@@ -8,8 +8,8 @@ use progship_logic::constants::room_types;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    BlinkingLight, ConnectionState, DoorMarker, IndicatorEntity, PersonEntity, PlayerState,
-    PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
+    BlinkingLight, ConnectionState, DoorMarker, DustMote, IndicatorEntity, PersonEntity,
+    PlayerState, PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
 };
 
 /// Add a mesh to assets. When Solari is enabled, generates tangents for deferred GBuffer.
@@ -149,6 +149,17 @@ pub fn sync_rooms(
         // Greeble surface detail on walls
         if let Some(ref lib) = greeble_lib {
             crate::greeble::spawn_room_greebles(&mut commands, lib, room, wall_height);
+        }
+
+        // Dust motes in atmospheric rooms (engineering, cargo, corridors)
+        if matches!(room.room_type, 60..=71 | 80..=86 | 90..=95 | 100..=102) {
+            spawn_dust_motes(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                room,
+                wall_height,
+            );
         }
     }
 
@@ -1953,5 +1964,85 @@ pub fn animate_details(
                 pulse.min_mul + (pulse.max_mul - pulse.min_mul) * (0.5 + 0.5 * phase.sin());
             mat.emissive = LinearRgba::new(0.05 * factor, 0.15 * factor, 0.35 * factor, 1.0);
         }
+    }
+}
+
+/// Spawn a handful of floating dust motes in atmospheric rooms.
+fn spawn_dust_motes(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    room: &Room,
+    wall_height: f32,
+) {
+    let dust_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.7, 0.7, 0.6, 0.4),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    let mote = add_mesh(meshes, Sphere::new(0.02));
+    let re = RoomEntity {
+        room_id: room.id,
+        deck: room.deck,
+    };
+
+    let area = room.width * room.height;
+    let count = ((area / 8.0).floor() as i32).clamp(2, 12);
+    let mut seed = room.id.wrapping_mul(48271).max(1);
+    let hw = room.width / 2.0 - 0.3;
+    let hh = room.height / 2.0 - 0.3;
+
+    for _ in 0..count {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let fx = (seed & 0xFFFF) as f32 / 65536.0;
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let fz = (seed & 0xFFFF) as f32 / 65536.0;
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let fy = (seed & 0xFFFF) as f32 / 65536.0;
+
+        let x = room.x + (fx - 0.5) * 2.0 * hw;
+        let z = room.y + (fz - 0.5) * 2.0 * hh;
+        let y = 0.5 + fy * (wall_height - 1.0);
+
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let drift_x = ((seed & 0xFF) as f32 / 255.0 - 0.5) * 0.02;
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let drift_z = ((seed & 0xFF) as f32 / 255.0 - 0.5) * 0.02;
+
+        commands.spawn((
+            Mesh3d(mote.clone()),
+            MeshMaterial3d(dust_mat.clone()),
+            Transform::from_xyz(x, y, z),
+            DustMote {
+                drift: Vec3::new(drift_x, 0.015, drift_z),
+                lifetime: 8.0 + fy * 6.0,
+                age: fy * 8.0,
+            },
+            re.clone(),
+        ));
+    }
+}
+
+/// Animate dust motes: drift upward and wrap when lifetime expires.
+pub fn animate_dust_motes(time: Res<Time>, mut query: Query<(&mut DustMote, &mut Transform)>) {
+    let dt = time.delta_secs();
+    for (mut mote, mut tf) in &mut query {
+        mote.age += dt;
+        if mote.age >= mote.lifetime {
+            mote.age -= mote.lifetime;
+            tf.translation.y -= mote.drift.y * mote.lifetime;
+        }
+        tf.translation += mote.drift * dt;
     }
 }
