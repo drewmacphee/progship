@@ -70,9 +70,16 @@ pub fn sync_rooms(
 
     let wall_height = 3.0;
 
-    // --- Phase 1: Spawn floors, labels, furniture (per-room) ---
+    // --- Phase 1: Spawn floors, ceilings, labels, furniture (per-room) ---
+    let ceiling_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.22, 0.22, 0.25),
+        perceptual_roughness: 0.7,
+        metallic: 0.1,
+        ..default()
+    });
     for room in &deck_rooms {
         let color = room_color(room.room_type);
+        // Floor
         commands.spawn((
             Mesh3d(add_mesh(
                 &mut meshes,
@@ -80,6 +87,19 @@ pub fn sync_rooms(
             )),
             MeshMaterial3d(materials.add(floor_material(color, room.room_type))),
             Transform::from_xyz(room.x, 0.0, room.y),
+            RoomEntity {
+                room_id: room.id,
+                deck: room.deck,
+            },
+        ));
+        // Ceiling
+        commands.spawn((
+            Mesh3d(add_mesh(
+                &mut meshes,
+                Cuboid::new(room.width, 0.12, room.height),
+            )),
+            MeshMaterial3d(ceiling_mat.clone()),
+            Transform::from_xyz(room.x, wall_height, room.y),
             RoomEntity {
                 room_id: room.id,
                 deck: room.deck,
