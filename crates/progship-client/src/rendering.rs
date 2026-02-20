@@ -126,6 +126,17 @@ pub fn sync_rooms(
             spawn_floor_markings(&mut commands, &mut meshes, &mut materials, room);
         }
 
+        // Shaft interior geometry (ladders, elevator cars)
+        if matches!(room.room_type, 110..=112) {
+            spawn_shaft_interior(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                room,
+                wall_height,
+            );
+        }
+
         // Lighting — distributed point lights for all rooms including corridors
         spawn_room_lights(&mut commands, room);
     }
@@ -1563,6 +1574,150 @@ fn spawn_floor_markings(
                 re.clone(),
             ));
         }
+    }
+}
+
+/// Spawn interior geometry for shaft rooms: ladders, elevator cars, call panels.
+fn spawn_shaft_interior(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    room: &Room,
+    wall_height: f32,
+) {
+    let cx = room.x;
+    let cz = room.y;
+    let re = RoomEntity {
+        room_id: room.id,
+        deck: room.deck,
+    };
+
+    match room.room_type {
+        // Ladder shaft (111) — vertical rails + rungs
+        111 => {
+            let rail_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.25, 0.50, 0.30),
+                metallic: 0.8,
+                perceptual_roughness: 0.3,
+                ..default()
+            });
+            let rung_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.35, 0.38),
+                metallic: 0.85,
+                perceptual_roughness: 0.25,
+                ..default()
+            });
+            // Two vertical rails on opposite sides of the shaft
+            let rail = add_mesh(meshes, Cuboid::new(0.06, wall_height, 0.06));
+            let rail_offset = room.width.min(room.height) / 2.0 - 0.4;
+            for dx in [-0.25, 0.25] {
+                commands.spawn((
+                    Mesh3d(rail.clone()),
+                    MeshMaterial3d(rail_mat.clone()),
+                    Transform::from_xyz(cx + dx, wall_height / 2.0, cz - rail_offset),
+                    re.clone(),
+                ));
+            }
+            // Rungs every 0.3m
+            let rung = add_mesh(meshes, Cylinder::new(0.025, 0.5));
+            let rung_count = (wall_height / 0.3).floor() as i32;
+            for i in 1..rung_count {
+                let y = i as f32 * 0.3;
+                commands.spawn((
+                    Mesh3d(rung.clone()),
+                    MeshMaterial3d(rung_mat.clone()),
+                    Transform::from_xyz(cx, y, cz - rail_offset)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    re.clone(),
+                ));
+            }
+        }
+        // Elevator shaft (110) / Service elevator (112) — car platform + guide rails
+        110 | 112 => {
+            let car_color = if room.room_type == 110 {
+                Color::srgb(0.20, 0.30, 0.55)
+            } else {
+                Color::srgb(0.55, 0.35, 0.15)
+            };
+            let car_mat = materials.add(StandardMaterial {
+                base_color: car_color,
+                metallic: 0.7,
+                perceptual_roughness: 0.35,
+                ..default()
+            });
+            let rail_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.3, 0.35),
+                metallic: 0.85,
+                perceptual_roughness: 0.2,
+                ..default()
+            });
+            let panel_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.08, 0.08, 0.12),
+                emissive: Color::srgb(0.02, 0.06, 0.15).into(),
+                metallic: 0.3,
+                perceptual_roughness: 0.15,
+                ..default()
+            });
+
+            // Elevator car platform (sitting at floor level)
+            let car_w = room.width.min(room.height) - 0.8;
+            commands.spawn((
+                Mesh3d(add_mesh(meshes, Cuboid::new(car_w, 0.1, car_w))),
+                MeshMaterial3d(car_mat.clone()),
+                Transform::from_xyz(cx, 0.15, cz),
+                re.clone(),
+            ));
+            // Low walls on car (waist-height railing)
+            let rail_h = 1.0;
+            let rail_panel = add_mesh(meshes, Cuboid::new(car_w, rail_h, 0.04));
+            let side_panel = add_mesh(meshes, Cuboid::new(0.04, rail_h, car_w));
+            // Back wall of car
+            commands.spawn((
+                Mesh3d(rail_panel.clone()),
+                MeshMaterial3d(car_mat.clone()),
+                Transform::from_xyz(cx, 0.2 + rail_h / 2.0, cz + car_w / 2.0 - 0.02),
+                re.clone(),
+            ));
+            // Side panels
+            for dx in [-1.0, 1.0] {
+                commands.spawn((
+                    Mesh3d(side_panel.clone()),
+                    MeshMaterial3d(car_mat.clone()),
+                    Transform::from_xyz(cx + dx * (car_w / 2.0 - 0.02), 0.2 + rail_h / 2.0, cz),
+                    re.clone(),
+                ));
+            }
+            // Guide rails in corners (floor to ceiling)
+            let guide = add_mesh(meshes, Cuboid::new(0.08, wall_height, 0.08));
+            let corner = room.width.min(room.height) / 2.0 - 0.15;
+            for (gx, gz) in [
+                (-corner, -corner),
+                (corner, -corner),
+                (-corner, corner),
+                (corner, corner),
+            ] {
+                commands.spawn((
+                    Mesh3d(guide.clone()),
+                    MeshMaterial3d(rail_mat.clone()),
+                    Transform::from_xyz(cx + gx, wall_height / 2.0, cz + gz),
+                    re.clone(),
+                ));
+            }
+            // Control panel on back wall
+            commands.spawn((
+                Mesh3d(add_mesh(meshes, Cuboid::new(0.4, 0.6, 0.04))),
+                MeshMaterial3d(panel_mat),
+                Transform::from_xyz(cx, 1.3, cz + car_w / 2.0 - 0.06),
+                PulsingEmissive {
+                    rate: 0.2,
+                    phase: 0.0,
+                    min_mul: 0.5,
+                    max_mul: 1.5,
+                },
+                re.clone(),
+            ));
+        }
+        _ => {}
     }
 }
 
