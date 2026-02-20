@@ -61,22 +61,13 @@ pub fn setup_camera(
         commands.spawn((Camera3d::default(), cam_transform, bloom, PlayerCamera));
     }
 
-    // Ambient light — subdued to let directional and point lights create contrast
+    // Minimal ambient — light comes from fixtures, not magic fill.
+    // Just enough to prevent pitch-black corners.
     commands.spawn(AmbientLight {
-        color: Color::srgb(0.8, 0.85, 0.95),
-        brightness: 150.0,
+        color: Color::srgb(0.7, 0.75, 0.85),
+        brightness: 20.0,
         affects_lightmapped_meshes: true,
     });
-
-    // Directional light — Solari replaces shadow mapping
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 3000.0,
-            shadows_enabled: cfg!(not(feature = "solari")),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 50.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
 }
 
 pub fn camera_follow_player(

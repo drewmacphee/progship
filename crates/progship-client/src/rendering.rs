@@ -106,25 +106,10 @@ pub fn sync_rooms(
                 },
             ));
             spawn_furniture(&mut commands, &mut meshes, &mut materials, room);
-
-            // Per-room ceiling light
-            let (light_color, intensity) = room_light(room.room_type);
-            let range = room.width.max(room.height) * 1.5;
-            commands.spawn((
-                PointLight {
-                    color: light_color,
-                    intensity: intensity * 1000.0,
-                    range,
-                    shadows_enabled: false,
-                    ..default()
-                },
-                Transform::from_xyz(room.x, 2.8, room.y),
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
         }
+
+        // Lighting — distributed point lights for all rooms including corridors
+        spawn_room_lights(&mut commands, room);
     }
 
     // --- Phase 2: Per-room inset walls ---
@@ -1056,6 +1041,126 @@ fn room_color(room_type: u8) -> Color {
 }
 
 /// Returns (color, intensity_multiplier) for per-room point lights.
+/// Distributed ceiling lights for a room. Places multiple point lights based on
+/// room size: small rooms get 1, medium get 2, large get 3-4. Corridors get
+/// strip lighting every 3-4m along their length.
+fn spawn_room_lights(commands: &mut Commands, room: &Room) {
+    let (color, intensity) = room_light(room.room_type);
+    let is_corridor = room_types::is_corridor(room.room_type);
+    let y = 2.8;
+
+    if is_corridor {
+        // Corridor strip lighting — dim, evenly spaced along the long axis
+        let corridor_intensity = intensity * 600.0;
+        let spacing = 3.5;
+        let long = room.width.max(room.height);
+        let is_horizontal = room.width >= room.height;
+        let count = ((long / spacing).ceil() as i32).max(1);
+        let start_offset = -(long / 2.0) + spacing / 2.0;
+        let range = spacing * 1.2;
+
+        for i in 0..count {
+            let offset = start_offset + i as f32 * spacing;
+            let (lx, lz) = if is_horizontal {
+                (room.x + offset, room.y)
+            } else {
+                (room.x, room.y + offset)
+            };
+            commands.spawn((
+                PointLight {
+                    color,
+                    intensity: corridor_intensity,
+                    range,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                Transform::from_xyz(lx, y, lz),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        }
+    } else {
+        // Room lighting — distribute based on size
+        let room_intensity = intensity * 1000.0;
+        let w = room.width;
+        let h = room.height;
+        let long = w.max(h);
+        let range = long.min(8.0);
+
+        // Enable shadows on one key light per room (the first one)
+        let shadow_first = !cfg!(feature = "solari");
+
+        if long < 5.0 {
+            // Small room: single centered light
+            commands.spawn((
+                PointLight {
+                    color,
+                    intensity: room_intensity,
+                    range,
+                    shadows_enabled: shadow_first,
+                    ..default()
+                },
+                Transform::from_xyz(room.x, y, room.y),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        } else if long < 10.0 {
+            // Medium room: 2 lights at 1/3 and 2/3
+            let per_light = room_intensity * 0.6;
+            let is_wide = w >= h;
+            for (i, frac) in [0.33, 0.67].iter().enumerate() {
+                let offset = long * (frac - 0.5);
+                let (lx, lz) = if is_wide {
+                    (room.x + offset, room.y)
+                } else {
+                    (room.x, room.y + offset)
+                };
+                commands.spawn((
+                    PointLight {
+                        color,
+                        intensity: per_light,
+                        range,
+                        shadows_enabled: shadow_first && i == 0,
+                        ..default()
+                    },
+                    Transform::from_xyz(lx, y, lz),
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
+        } else {
+            // Large room: 4 lights in a grid
+            let per_light = room_intensity * 0.4;
+            let offsets_x = [w * -0.25, w * 0.25];
+            let offsets_z = [h * -0.25, h * 0.25];
+            for (i, &ox) in offsets_x.iter().enumerate() {
+                for &oz in &offsets_z {
+                    commands.spawn((
+                        PointLight {
+                            color,
+                            intensity: per_light,
+                            range,
+                            shadows_enabled: shadow_first && i == 0 && oz == offsets_z[0],
+                            ..default()
+                        },
+                        Transform::from_xyz(room.x + ox, y, room.y + oz),
+                        RoomEntity {
+                            room_id: room.id,
+                            deck: room.deck,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+}
+
 fn room_light(room_type: u8) -> (Color, f32) {
     match room_type {
         // Command — cool white, bright
@@ -1070,12 +1175,14 @@ fn room_light(room_type: u8) -> (Color, f32) {
         30..=37 => (Color::srgb(0.95, 0.97, 1.0), 4.0),
         // Recreation — warm daylight
         40..=56 => (Color::srgb(0.95, 0.92, 0.85), 2.0),
-        // Engineering — amber/industrial
-        60..=71 => (Color::srgb(1.0, 0.75, 0.40), 2.0),
+        // Engineering — deep amber/industrial, darker pools
+        60..=71 => (Color::srgb(1.0, 0.65, 0.25), 1.5),
         // Life support — cyan tint
         80..=86 => (Color::srgb(0.80, 0.95, 1.0), 2.0),
-        // Cargo — dim utility
-        90..=95 => (Color::srgb(0.90, 0.85, 0.75), 1.0),
+        // Cargo — dim utility, widely spaced
+        90..=95 => (Color::srgb(0.90, 0.85, 0.75), 0.8),
+        // Corridors — neutral cool white, dim
+        100..=115 => (Color::srgb(0.85, 0.88, 0.95), 1.0),
         // Fallback
         _ => (Color::srgb(0.90, 0.90, 0.90), 1.5),
     }
