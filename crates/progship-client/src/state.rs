@@ -209,3 +209,19 @@ pub struct InfoPanel;
 
 #[derive(Component)]
 pub struct ToastContainer;
+
+/// Marker for emissive elements that blink on/off (status lights on machinery).
+#[derive(Component)]
+pub struct BlinkingLight {
+    pub rate: f32,  // blinks per second
+    pub phase: f32, // offset (0.0–1.0) for visual variety
+}
+
+/// Marker for emissive elements that pulse smoothly (reactor glow, bridge displays).
+#[derive(Component)]
+pub struct PulsingEmissive {
+    pub rate: f32, // cycles per second
+    pub phase: f32,
+    pub min_mul: f32, // minimum emissive multiplier
+    pub max_mul: f32, // maximum emissive multiplier
+}
