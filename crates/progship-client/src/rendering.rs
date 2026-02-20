@@ -388,7 +388,8 @@ pub fn sync_rooms(
     }
 }
 
-/// Spawn simple furniture props inside rooms based on room type.
+/// Spawn composed furniture props inside rooms based on room type.
+/// Uses multi-primitive compositions for visual interest.
 fn spawn_furniture(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -398,7 +399,7 @@ fn spawn_furniture(
     let rt = room.room_type;
     let cx = room.x;
     let cz = room.y;
-    let hw = room.width / 2.0 - 0.5; // half-width with margin
+    let hw = room.width / 2.0 - 0.5;
     let hh = room.height / 2.0 - 0.5;
     let re = RoomEntity {
         room_id: room.id,
@@ -406,7 +407,7 @@ fn spawn_furniture(
     };
 
     match rt {
-        // Bridge / CIC — console desks in a semicircle
+        // Bridge / CIC — console desks: slab top + angled screen + leg supports
         0 | 2 => {
             let desk_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.15, 0.25),
@@ -414,25 +415,62 @@ fn spawn_furniture(
                 perceptual_roughness: 0.35,
                 ..default()
             });
-            let desk = add_mesh(meshes, Cuboid::new(1.5, 0.8, 0.6));
+            let screen_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.02, 0.05, 0.12),
+                emissive: Color::srgb(0.05, 0.15, 0.35).into(),
+                metallic: 0.2,
+                perceptual_roughness: 0.1,
+                ..default()
+            });
+            let top = add_mesh(meshes, Cuboid::new(1.5, 0.08, 0.7));
+            let leg = add_mesh(meshes, Cuboid::new(0.08, 0.7, 0.08));
+            let screen = add_mesh(meshes, Cuboid::new(1.2, 0.6, 0.04));
             for i in 0..3 {
                 let offset = (i as f32 - 1.0) * 2.0;
+                let dx = cx + offset;
+                let dz = cz - hh * 0.5;
+                // Desk top
                 commands.spawn((
-                    Mesh3d(desk.clone()),
+                    Mesh3d(top.clone()),
                     MeshMaterial3d(desk_mat.clone()),
-                    Transform::from_xyz(cx + offset, 0.4, cz - hh * 0.5),
+                    Transform::from_xyz(dx, 0.72, dz),
+                    re.clone(),
+                ));
+                // Two legs
+                for lx in [-0.6, 0.6] {
+                    commands.spawn((
+                        Mesh3d(leg.clone()),
+                        MeshMaterial3d(desk_mat.clone()),
+                        Transform::from_xyz(dx + lx, 0.35, dz),
+                        re.clone(),
+                    ));
+                }
+                // Screen panel tilted back
+                commands.spawn((
+                    Mesh3d(screen.clone()),
+                    MeshMaterial3d(screen_mat.clone()),
+                    Transform::from_xyz(dx, 1.05, dz - 0.3)
+                        .with_rotation(Quat::from_rotation_x(-0.25)),
                     re.clone(),
                 ));
             }
         }
-        // Cabins / Quarters — beds
+        // Cabins / Quarters — bed frame + mattress + headboard
         10 | 14 | 15 | 16 => {
-            let bed_mat = materials.add(StandardMaterial {
+            let frame_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.18, 0.18, 0.22),
+                metallic: 0.7,
+                perceptual_roughness: 0.4,
+                ..default()
+            });
+            let mattress_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.25, 0.30, 0.45),
                 perceptual_roughness: 0.95,
                 ..default()
             });
-            let bed = add_mesh(meshes, Cuboid::new(1.0, 0.4, 2.0));
+            let frame = add_mesh(meshes, Cuboid::new(1.0, 0.15, 2.0));
+            let mattress = add_mesh(meshes, Cuboid::new(0.9, 0.18, 1.85));
+            let headboard = add_mesh(meshes, Cuboid::new(1.0, 0.5, 0.06));
             let count = if hw > 2.0 { 2 } else { 1 };
             for i in 0..count {
                 let offset = if count == 1 {
@@ -440,30 +478,63 @@ fn spawn_furniture(
                 } else {
                     (i as f32 - 0.5) * 2.5
                 };
+                let bx = cx + offset;
+                let bz = cz + hh * 0.4;
                 commands.spawn((
-                    Mesh3d(bed.clone()),
-                    MeshMaterial3d(bed_mat.clone()),
-                    Transform::from_xyz(cx + offset, 0.2, cz + hh * 0.4),
+                    Mesh3d(frame.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(bx, 0.12, bz),
+                    re.clone(),
+                ));
+                commands.spawn((
+                    Mesh3d(mattress.clone()),
+                    MeshMaterial3d(mattress_mat.clone()),
+                    Transform::from_xyz(bx, 0.28, bz),
+                    re.clone(),
+                ));
+                commands.spawn((
+                    Mesh3d(headboard.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(bx, 0.4, bz + 0.97),
                     re.clone(),
                 ));
             }
         }
-        // Cabin Double / Family Suite / VIP — bigger bed
+        // Cabin Double / Family / VIP — larger bed with frame + mattress + headboard
         11..=13 => {
-            let bed_mat = materials.add(StandardMaterial {
+            let frame_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.22, 0.20, 0.28),
+                metallic: 0.6,
+                perceptual_roughness: 0.4,
+                ..default()
+            });
+            let mattress_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.30, 0.28, 0.42),
                 perceptual_roughness: 0.92,
                 ..default()
             });
-            let bed = add_mesh(meshes, Cuboid::new(1.6, 0.4, 2.0));
+            let bx = cx;
+            let bz = cz + hh * 0.4;
             commands.spawn((
-                Mesh3d(bed),
-                MeshMaterial3d(bed_mat),
-                Transform::from_xyz(cx, 0.2, cz + hh * 0.4),
+                Mesh3d(add_mesh(meshes, Cuboid::new(1.6, 0.15, 2.0))),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(bx, 0.12, bz),
+                re.clone(),
+            ));
+            commands.spawn((
+                Mesh3d(add_mesh(meshes, Cuboid::new(1.5, 0.2, 1.85))),
+                MeshMaterial3d(mattress_mat),
+                Transform::from_xyz(bx, 0.3, bz),
+                re.clone(),
+            ));
+            commands.spawn((
+                Mesh3d(add_mesh(meshes, Cuboid::new(1.6, 0.6, 0.06))),
+                MeshMaterial3d(frame_mat),
+                Transform::from_xyz(bx, 0.45, bz + 0.97),
                 re.clone(),
             ));
         }
-        // Mess Hall / Wardroom / Cafe — tables with chairs
+        // Mess Hall / Wardroom / Cafe — table (top + 4 legs) + benches
         20 | 21 | 25 => {
             let table_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.32, 0.22),
@@ -471,101 +542,236 @@ fn spawn_furniture(
                 reflectance: 0.3,
                 ..default()
             });
-            let table = add_mesh(meshes, Cuboid::new(1.8, 0.75, 0.9));
+            let bench_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.32, 0.28, 0.22),
+                perceptual_roughness: 0.8,
+                ..default()
+            });
+            let top = add_mesh(meshes, Cuboid::new(1.8, 0.06, 0.9));
+            let t_leg = add_mesh(meshes, Cuboid::new(0.06, 0.72, 0.06));
+            let bench = add_mesh(meshes, Cuboid::new(1.6, 0.06, 0.3));
+            let b_leg = add_mesh(meshes, Cuboid::new(0.05, 0.42, 0.05));
             let cols = ((hw * 2.0) / 3.0).floor().max(1.0) as i32;
             let rows = ((hh * 2.0) / 3.0).floor().max(1.0) as i32;
             for r in 0..rows.min(4) {
                 for c in 0..cols.min(6) {
                     let x = cx - hw + 1.5 + c as f32 * 3.0;
                     let z = cz - hh + 1.5 + r as f32 * 3.0;
+                    // Table top
                     commands.spawn((
-                        Mesh3d(table.clone()),
+                        Mesh3d(top.clone()),
                         MeshMaterial3d(table_mat.clone()),
-                        Transform::from_xyz(x, 0.375, z),
+                        Transform::from_xyz(x, 0.75, z),
                         re.clone(),
                     ));
+                    // 4 table legs
+                    for (lx, lz) in [(-0.8, -0.35), (0.8, -0.35), (-0.8, 0.35), (0.8, 0.35)] {
+                        commands.spawn((
+                            Mesh3d(t_leg.clone()),
+                            MeshMaterial3d(table_mat.clone()),
+                            Transform::from_xyz(x + lx, 0.36, z + lz),
+                            re.clone(),
+                        ));
+                    }
+                    // Benches on each side
+                    for bz_off in [-0.7, 0.7] {
+                        commands.spawn((
+                            Mesh3d(bench.clone()),
+                            MeshMaterial3d(bench_mat.clone()),
+                            Transform::from_xyz(x, 0.45, z + bz_off),
+                            re.clone(),
+                        ));
+                        for lx in [-0.7, 0.7] {
+                            commands.spawn((
+                                Mesh3d(b_leg.clone()),
+                                MeshMaterial3d(bench_mat.clone()),
+                                Transform::from_xyz(x + lx, 0.21, z + bz_off),
+                                re.clone(),
+                            ));
+                        }
+                    }
                 }
             }
         }
-        // Hospital / Surgery / Medbay — beds in rows
+        // Hospital / Surgery / Medbay — bed frame + mattress + side rails
         30 | 31 | 37 => {
-            let bed_mat = materials.add(StandardMaterial {
+            let frame_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.70, 0.72, 0.75),
                 metallic: 0.3,
                 perceptual_roughness: 0.25,
                 reflectance: 0.5,
                 ..default()
             });
-            let bed = add_mesh(meshes, Cuboid::new(0.9, 0.5, 1.8));
+            let mattress_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.85, 0.85, 0.88),
+                perceptual_roughness: 0.9,
+                ..default()
+            });
+            let base = add_mesh(meshes, Cuboid::new(0.9, 0.3, 1.8));
+            let mattress = add_mesh(meshes, Cuboid::new(0.8, 0.1, 1.7));
+            let rail = add_mesh(meshes, Cuboid::new(0.04, 0.3, 1.4));
             let count = ((hw * 2.0) / 2.5).floor().max(1.0) as i32;
             for i in 0..count.min(6) {
                 let x = cx - hw + 1.2 + i as f32 * 2.5;
                 commands.spawn((
-                    Mesh3d(bed.clone()),
-                    MeshMaterial3d(bed_mat.clone()),
-                    Transform::from_xyz(x, 0.25, cz),
+                    Mesh3d(base.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(x, 0.15, cz),
                     re.clone(),
                 ));
+                commands.spawn((
+                    Mesh3d(mattress.clone()),
+                    MeshMaterial3d(mattress_mat.clone()),
+                    Transform::from_xyz(x, 0.35, cz),
+                    re.clone(),
+                ));
+                // Side rails
+                for rx in [-0.47, 0.47] {
+                    commands.spawn((
+                        Mesh3d(rail.clone()),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(x + rx, 0.5, cz),
+                        re.clone(),
+                    ));
+                }
             }
         }
-        // Gym — equipment blocks
+        // Gym — equipment: frame + cylinder bar + weight plates
         40 => {
-            let equip_mat = materials.add(StandardMaterial {
+            let frame_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.3, 0.3, 0.35),
                 metallic: 0.7,
                 perceptual_roughness: 0.4,
                 ..default()
             });
-            let equip = add_mesh(meshes, Cuboid::new(1.0, 1.2, 0.8));
+            let weight_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.15, 0.15, 0.18),
+                metallic: 0.9,
+                perceptual_roughness: 0.3,
+                ..default()
+            });
+            let post = add_mesh(meshes, Cuboid::new(0.08, 1.4, 0.08));
+            let bar = add_mesh(meshes, Cylinder::new(0.03, 1.0));
+            let plate = add_mesh(meshes, Cylinder::new(0.2, 0.04));
             let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
             for i in 0..count.min(5) {
                 let x = cx - hw + 1.0 + i as f32 * 2.0;
+                let z = cz + hh * 0.3;
+                // Two upright posts
+                for px in [-0.4, 0.4] {
+                    commands.spawn((
+                        Mesh3d(post.clone()),
+                        MeshMaterial3d(frame_mat.clone()),
+                        Transform::from_xyz(x + px, 0.7, z),
+                        re.clone(),
+                    ));
+                }
+                // Horizontal bar
                 commands.spawn((
-                    Mesh3d(equip.clone()),
-                    MeshMaterial3d(equip_mat.clone()),
-                    Transform::from_xyz(x, 0.6, cz + hh * 0.3),
+                    Mesh3d(bar.clone()),
+                    MeshMaterial3d(frame_mat.clone()),
+                    Transform::from_xyz(x, 1.2, z)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
                     re.clone(),
                 ));
+                // Weight plates on each end
+                for px in [-0.5, 0.5] {
+                    commands.spawn((
+                        Mesh3d(plate.clone()),
+                        MeshMaterial3d(weight_mat.clone()),
+                        Transform::from_xyz(x + px, 1.2, z)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                        re.clone(),
+                    ));
+                }
             }
         }
-        // Engineering / Reactor — large machinery blocks
+        // Engineering / Reactor — base + body + pipe cylinders
         60..=63 => {
-            let mach_mat = materials.add(StandardMaterial {
+            let body_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.35, 0.25, 0.15),
                 metallic: 0.9,
                 perceptual_roughness: 0.25,
                 reflectance: 0.7,
                 ..default()
             });
-            let machine = add_mesh(meshes, Cuboid::new(2.0, 2.0, 2.0));
+            let pipe_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.45, 0.40, 0.35),
+                metallic: 0.85,
+                perceptual_roughness: 0.2,
+                ..default()
+            });
+            // Main body
             commands.spawn((
-                Mesh3d(machine),
-                MeshMaterial3d(mach_mat),
-                Transform::from_xyz(cx, 1.0, cz),
+                Mesh3d(add_mesh(meshes, Cuboid::new(2.0, 1.6, 2.0))),
+                MeshMaterial3d(body_mat.clone()),
+                Transform::from_xyz(cx, 0.8, cz),
                 re.clone(),
             ));
+            // Base plate
+            commands.spawn((
+                Mesh3d(add_mesh(meshes, Cuboid::new(2.4, 0.15, 2.4))),
+                MeshMaterial3d(body_mat),
+                Transform::from_xyz(cx, 0.075, cz),
+                re.clone(),
+            ));
+            // Vertical pipe columns
+            let pipe = add_mesh(meshes, Cylinder::new(0.12, 2.0));
+            for (px, pz) in [(-0.8, -0.8), (0.8, -0.8), (-0.8, 0.8), (0.8, 0.8)] {
+                commands.spawn((
+                    Mesh3d(pipe.clone()),
+                    MeshMaterial3d(pipe_mat.clone()),
+                    Transform::from_xyz(cx + px, 1.0, cz + pz),
+                    re.clone(),
+                ));
+            }
         }
-        // Hydroponics — planter rows
+        // Hydroponics — planter troughs with soil + green tops
         80 => {
+            let trough_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.3, 0.32),
+                metallic: 0.4,
+                perceptual_roughness: 0.6,
+                ..default()
+            });
+            let soil_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.18, 0.12, 0.08),
+                perceptual_roughness: 0.95,
+                ..default()
+            });
             let plant_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.45, 0.15),
                 perceptual_roughness: 0.85,
                 reflectance: 0.2,
                 ..default()
             });
-            let planter = add_mesh(meshes, Cuboid::new(0.8, 0.6, room.height - 1.0));
+            let trough = add_mesh(meshes, Cuboid::new(0.8, 0.5, room.height - 1.0));
+            let soil = add_mesh(meshes, Cuboid::new(0.7, 0.08, room.height - 1.2));
+            let plants = add_mesh(meshes, Cuboid::new(0.6, 0.35, room.height - 1.4));
             let count = ((hw * 2.0) / 1.5).floor().max(1.0) as i32;
             for i in 0..count.min(8) {
                 let x = cx - hw + 0.6 + i as f32 * 1.5;
                 commands.spawn((
-                    Mesh3d(planter.clone()),
+                    Mesh3d(trough.clone()),
+                    MeshMaterial3d(trough_mat.clone()),
+                    Transform::from_xyz(x, 0.25, cz),
+                    re.clone(),
+                ));
+                commands.spawn((
+                    Mesh3d(soil.clone()),
+                    MeshMaterial3d(soil_mat.clone()),
+                    Transform::from_xyz(x, 0.52, cz),
+                    re.clone(),
+                ));
+                commands.spawn((
+                    Mesh3d(plants.clone()),
                     MeshMaterial3d(plant_mat.clone()),
-                    Transform::from_xyz(x, 0.3, cz),
+                    Transform::from_xyz(x, 0.75, cz),
                     re.clone(),
                 ));
             }
         }
-        // Cargo Bay — stacked crates
+        // Cargo Bay — stacked crates of varying sizes
         90 | 91 => {
             let crate_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.35, 0.30, 0.22),
@@ -573,14 +779,30 @@ fn spawn_furniture(
                 perceptual_roughness: 0.7,
                 ..default()
             });
-            let crate_mesh = add_mesh(meshes, Cuboid::new(1.2, 1.2, 1.2));
+            let crate_dark = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.25, 0.22, 0.18),
+                metallic: 0.35,
+                perceptual_roughness: 0.75,
+                ..default()
+            });
+            let big = add_mesh(meshes, Cuboid::new(1.2, 1.0, 1.2));
+            let small = add_mesh(meshes, Cuboid::new(0.8, 0.6, 0.8));
             let count = ((hw * 2.0) / 2.0).floor().max(1.0) as i32;
             for i in 0..count.min(4) {
                 let x = cx - hw + 1.0 + i as f32 * 2.0;
+                let z = cz - hh * 0.3;
+                // Bottom crate
                 commands.spawn((
-                    Mesh3d(crate_mesh.clone()),
+                    Mesh3d(big.clone()),
                     MeshMaterial3d(crate_mat.clone()),
-                    Transform::from_xyz(x, 0.6, cz - hh * 0.3),
+                    Transform::from_xyz(x, 0.5, z),
+                    re.clone(),
+                ));
+                // Stacked smaller crate (offset for visual interest)
+                commands.spawn((
+                    Mesh3d(small.clone()),
+                    MeshMaterial3d(crate_dark.clone()),
+                    Transform::from_xyz(x + 0.15, 1.3, z - 0.1),
                     re.clone(),
                 ));
             }
