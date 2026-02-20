@@ -78,10 +78,7 @@ pub fn sync_rooms(
                 &mut meshes,
                 Cuboid::new(room.width, 0.2, room.height),
             )),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                ..default()
-            })),
+            MeshMaterial3d(materials.add(floor_material(color, room.room_type))),
             Transform::from_xyz(room.x, 0.0, room.y),
             RoomEntity {
                 room_id: room.id,
@@ -352,6 +349,9 @@ pub fn sync_rooms(
     let frame_color = Color::srgb(0.55, 0.55, 0.6);
     let frame_mat = materials.add(StandardMaterial {
         base_color: frame_color,
+        metallic: 0.85,
+        perceptual_roughness: 0.3,
+        reflectance: 0.6,
         ..default()
     });
     let frame_depth = 2.0 * wt + 0.1;
@@ -410,6 +410,8 @@ fn spawn_furniture(
         0 | 2 => {
             let desk_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.15, 0.25),
+                metallic: 0.6,
+                perceptual_roughness: 0.35,
                 ..default()
             });
             let desk = add_mesh(meshes, Cuboid::new(1.5, 0.8, 0.6));
@@ -427,6 +429,7 @@ fn spawn_furniture(
         10 | 14 | 15 | 16 => {
             let bed_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.25, 0.30, 0.45),
+                perceptual_roughness: 0.95,
                 ..default()
             });
             let bed = add_mesh(meshes, Cuboid::new(1.0, 0.4, 2.0));
@@ -449,6 +452,7 @@ fn spawn_furniture(
         11..=13 => {
             let bed_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.30, 0.28, 0.42),
+                perceptual_roughness: 0.92,
                 ..default()
             });
             let bed = add_mesh(meshes, Cuboid::new(1.6, 0.4, 2.0));
@@ -463,6 +467,8 @@ fn spawn_furniture(
         20 | 21 | 25 => {
             let table_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.32, 0.22),
+                perceptual_roughness: 0.75,
+                reflectance: 0.3,
                 ..default()
             });
             let table = add_mesh(meshes, Cuboid::new(1.8, 0.75, 0.9));
@@ -485,6 +491,9 @@ fn spawn_furniture(
         30 | 31 | 37 => {
             let bed_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.70, 0.72, 0.75),
+                metallic: 0.3,
+                perceptual_roughness: 0.25,
+                reflectance: 0.5,
                 ..default()
             });
             let bed = add_mesh(meshes, Cuboid::new(0.9, 0.5, 1.8));
@@ -503,6 +512,8 @@ fn spawn_furniture(
         40 => {
             let equip_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.3, 0.3, 0.35),
+                metallic: 0.7,
+                perceptual_roughness: 0.4,
                 ..default()
             });
             let equip = add_mesh(meshes, Cuboid::new(1.0, 1.2, 0.8));
@@ -521,6 +532,9 @@ fn spawn_furniture(
         60..=63 => {
             let mach_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.35, 0.25, 0.15),
+                metallic: 0.9,
+                perceptual_roughness: 0.25,
+                reflectance: 0.7,
                 ..default()
             });
             let machine = add_mesh(meshes, Cuboid::new(2.0, 2.0, 2.0));
@@ -535,6 +549,8 @@ fn spawn_furniture(
         80 => {
             let plant_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.45, 0.15),
+                perceptual_roughness: 0.85,
+                reflectance: 0.2,
                 ..default()
             });
             let planter = add_mesh(meshes, Cuboid::new(0.8, 0.6, room.height - 1.0));
@@ -553,6 +569,8 @@ fn spawn_furniture(
         90 | 91 => {
             let crate_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.35, 0.30, 0.22),
+                metallic: 0.4,
+                perceptual_roughness: 0.7,
                 ..default()
             });
             let crate_mesh = add_mesh(meshes, Cuboid::new(1.2, 1.2, 1.2));
@@ -588,10 +606,7 @@ fn spawn_wall_with_gaps(
     room_id: u32,
     deck: i32,
 ) {
-    let mat = materials.add(StandardMaterial {
-        base_color: color,
-        ..default()
-    });
+    let mat = materials.add(wall_material(color));
 
     if door_positions.is_empty() {
         // No doors — solid wall (corner posts handle corner fill)
@@ -1037,6 +1052,42 @@ fn room_color(room_type: u8) -> Color {
         120 => Color::srgb(0.12, 0.12, 0.15), // Service Deck
 
         _ => Color::srgb(0.25, 0.25, 0.25), // Unknown - neutral gray
+    }
+}
+
+/// PBR floor material tuned by room zone.
+fn floor_material(color: Color, room_type: u8) -> StandardMaterial {
+    let (roughness, metallic) = match room_type {
+        // Medical: smooth clinical tile
+        30..=37 => (0.3, 0.0),
+        // Engineering/propulsion: industrial grating
+        60..=71 => (0.65, 0.5),
+        // Hydroponics: slightly damp concrete
+        80..=86 => (0.8, 0.0),
+        // Cargo: rough industrial
+        90..=95 => (0.85, 0.15),
+        // Corridors/infrastructure: worn non-slip
+        100..=120 => (0.75, 0.1),
+        // Habitation/recreation: carpet/composite
+        _ => (0.9, 0.0),
+    };
+    StandardMaterial {
+        base_color: color,
+        perceptual_roughness: roughness,
+        metallic,
+        reflectance: 0.3,
+        ..default()
+    }
+}
+
+/// PBR wall material — painted steel panels with slight sheen.
+fn wall_material(color: Color) -> StandardMaterial {
+    StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 0.65,
+        metallic: 0.15,
+        reflectance: 0.4,
+        ..default()
     }
 }
 
