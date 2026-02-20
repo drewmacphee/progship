@@ -123,6 +123,7 @@ pub fn sync_rooms(
                 },
             ));
             spawn_furniture(&mut commands, &mut meshes, &mut materials, room);
+            spawn_floor_markings(&mut commands, &mut meshes, &mut materials, room);
         }
 
         // Lighting — distributed point lights for all rooms including corridors
@@ -1330,6 +1331,92 @@ fn wall_material(color: Color) -> StandardMaterial {
         metallic: 0.15,
         reflectance: 0.4,
         ..default()
+    }
+}
+
+/// Spawn floor border strips and hazard markings for rooms.
+/// Non-corridor rooms get a thin colored perimeter strip; engineering/cargo get hazard striping.
+fn spawn_floor_markings(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    room: &Room,
+) {
+    let re = RoomEntity {
+        room_id: room.id,
+        deck: room.deck,
+    };
+    let hw = room.width / 2.0;
+    let hh = room.height / 2.0;
+    let y = 0.11; // just above floor
+    let stripe_w = 0.08;
+
+    // Zone-colored perimeter border strip
+    let zone_color = zone_stripe_color(room.room_type);
+    let stripe_mat = materials.add(StandardMaterial {
+        base_color: zone_color,
+        emissive: zone_color.into(),
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+    // North + south strips
+    let h_strip = add_mesh(meshes, Cuboid::new(room.width - 0.4, 0.01, stripe_w));
+    for z_off in [-(hh - 0.2), hh - 0.2] {
+        commands.spawn((
+            Mesh3d(h_strip.clone()),
+            MeshMaterial3d(stripe_mat.clone()),
+            Transform::from_xyz(room.x, y, room.y + z_off),
+            re.clone(),
+        ));
+    }
+    // East + west strips
+    let v_strip = add_mesh(meshes, Cuboid::new(stripe_w, 0.01, room.height - 0.4));
+    for x_off in [-(hw - 0.2), hw - 0.2] {
+        commands.spawn((
+            Mesh3d(v_strip.clone()),
+            MeshMaterial3d(stripe_mat.clone()),
+            Transform::from_xyz(room.x + x_off, y, room.y),
+            re.clone(),
+        ));
+    }
+
+    // Hazard striping for dangerous rooms (engineering, cargo, airlock)
+    let is_hazard = matches!(room.room_type, 60..=71 | 90..=94);
+    if is_hazard {
+        let yellow = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.9, 0.75, 0.0),
+            emissive: Color::srgb(0.15, 0.12, 0.0).into(),
+            perceptual_roughness: 0.6,
+            ..default()
+        });
+        let dash = add_mesh(meshes, Cuboid::new(0.5, 0.01, stripe_w * 2.0));
+        // Hazard dashes along north edge
+        let n_z = room.y - hh + 0.5;
+        let count = (room.width / 1.2).floor() as i32;
+        for i in 0..count.min(20) {
+            let x = room.x - hw + 0.8 + i as f32 * 1.2;
+            commands.spawn((
+                Mesh3d(dash.clone()),
+                MeshMaterial3d(yellow.clone()),
+                Transform::from_xyz(x, y + 0.005, n_z),
+                re.clone(),
+            ));
+        }
+    }
+}
+
+/// Zone stripe color — bright tinted guide strips per zone type.
+fn zone_stripe_color(room_type: u8) -> Color {
+    match room_type {
+        0..=8 => Color::srgb(0.3, 0.3, 0.8),    // Command: blue
+        10..=18 => Color::srgb(0.2, 0.5, 0.6),  // Habitation: teal
+        20..=27 => Color::srgb(0.7, 0.55, 0.1), // Food: warm yellow
+        30..=37 => Color::srgb(0.5, 0.8, 0.9),  // Medical: cyan
+        40..=56 => Color::srgb(0.2, 0.6, 0.3),  // Recreation: green
+        60..=71 => Color::srgb(0.8, 0.4, 0.1),  // Engineering: orange
+        80..=86 => Color::srgb(0.1, 0.6, 0.4),  // Life support: teal-green
+        90..=95 => Color::srgb(0.5, 0.4, 0.2),  // Cargo: brown
+        _ => Color::srgb(0.3, 0.3, 0.3),        // Infrastructure: gray
     }
 }
 
