@@ -225,3 +225,11 @@ pub struct PulsingEmissive {
     pub min_mul: f32, // minimum emissive multiplier
     pub max_mul: f32, // maximum emissive multiplier
 }
+
+/// Floating dust mote particle — drifts slowly upward and fades.
+#[derive(Component)]
+pub struct DustMote {
+    pub drift: Vec3,   // velocity per second
+    pub lifetime: f32, // total lifetime in seconds
+    pub age: f32,      // current age
+}
