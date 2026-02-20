@@ -23,6 +23,11 @@ fn add_mesh(meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
     meshes.add(m)
 }
 
+/// Public version of add_mesh for use by greeble module.
+pub fn add_mesh_pub(meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
+    add_mesh(meshes, mesh)
+}
+
 pub fn sync_rooms(
     state: Res<ConnectionState>,
     mut view: ResMut<ViewState>,
@@ -30,6 +35,7 @@ pub fn sync_rooms(
     existing: Query<Entity, With<RoomEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    greeble_lib: Option<Res<crate::greeble::GreebleLibrary>>,
 ) {
     let conn = match &*state {
         ConnectionState::Connected(c) => c,
@@ -139,6 +145,11 @@ pub fn sync_rooms(
 
         // Lighting — distributed point lights for all rooms including corridors
         spawn_room_lights(&mut commands, room);
+
+        // Greeble surface detail on walls
+        if let Some(ref lib) = greeble_lib {
+            crate::greeble::spawn_room_greebles(&mut commands, lib, room, wall_height);
+        }
     }
 
     // --- Phase 2: Per-room inset walls ---

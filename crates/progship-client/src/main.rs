@@ -19,6 +19,7 @@
 use bevy::prelude::*;
 
 mod camera;
+mod greeble;
 mod input;
 mod minimap;
 mod networking;
@@ -68,7 +69,10 @@ fn main() {
         .insert_resource(PlayerState::default())
         .insert_resource(UiState::default())
         .insert_resource(MinimapState::default())
-        .add_systems(Startup, (setup_camera, setup_ui))
+        .add_systems(
+            Startup,
+            (setup_camera, setup_ui, greeble::init_greeble_library),
+        )
         .add_systems(
             Update,
             (
