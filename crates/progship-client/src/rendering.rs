@@ -407,6 +407,142 @@ pub fn sync_rooms(
             deck,
         );
     }
+
+    // --- Phase 7: Hull windows on ring corridors ---
+    // Ring corridors' outer walls face space. Add window frames + glass panes.
+    let window_frame_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.5, 0.5, 0.55),
+        metallic: 0.85,
+        perceptual_roughness: 0.25,
+        reflectance: 0.6,
+        ..default()
+    });
+    let glass_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.05, 0.05, 0.12, 0.2),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.05,
+        metallic: 0.1,
+        reflectance: 0.8,
+        ..default()
+    });
+    let win_w = 1.4;
+    let win_h = 1.0;
+    let win_sill = 1.0;
+    let win_frame_t = 0.06;
+    let win_spacing = 5.0;
+
+    for room in &deck_rooms {
+        if room.room_type != 100 || !room.name.starts_with("Ring ") {
+            continue;
+        }
+        let re = RoomEntity {
+            room_id: room.id,
+            deck: room.deck,
+        };
+        let outer_dir = if room.name.contains("North") {
+            Some(0)
+        } else if room.name.contains("South") {
+            Some(1)
+        } else if room.name.contains("East") {
+            Some(2)
+        } else if room.name.contains("West") {
+            Some(3)
+        } else {
+            None
+        };
+        let Some(dir) = outer_dir else { continue };
+        let hw = room.width / 2.0;
+        let hh = room.height / 2.0;
+
+        let (wall_len, wall_z, wall_x, horiz) = match dir {
+            0 => (room.width, room.y - hh + wt / 2.0, room.x, true),
+            1 => (room.width, room.y + hh - wt / 2.0, room.x, true),
+            2 => (room.height, room.y, room.x + hw - wt / 2.0, false),
+            3 => (room.height, room.y, room.x - hw + wt / 2.0, false),
+            _ => continue,
+        };
+
+        let count = ((wall_len - 1.0) / win_spacing).floor().max(1.0) as i32;
+        let start_offset = (wall_len - (count as f32 - 1.0) * win_spacing) / 2.0;
+
+        for i in 0..count {
+            let along = -wall_len / 2.0 + start_offset + i as f32 * win_spacing;
+            let (wx, wz) = if horiz {
+                (wall_x + along, wall_z)
+            } else {
+                (wall_x, wall_z + along)
+            };
+            let wy = win_sill + win_h / 2.0;
+
+            // Glass pane
+            if horiz {
+                commands.spawn((
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(win_w, win_h, 0.02))),
+                    MeshMaterial3d(glass_mat.clone()),
+                    Transform::from_xyz(wx, wy, wz),
+                    re.clone(),
+                ));
+            } else {
+                commands.spawn((
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(0.02, win_h, win_w))),
+                    MeshMaterial3d(glass_mat.clone()),
+                    Transform::from_xyz(wx, wy, wz),
+                    re.clone(),
+                ));
+            }
+
+            // Window frame: 4 bars around the pane
+            let fw = win_w + win_frame_t * 2.0;
+            let fh = win_h + win_frame_t * 2.0;
+            if horiz {
+                for dy in [-(win_h + win_frame_t) / 2.0, (win_h + win_frame_t) / 2.0] {
+                    commands.spawn((
+                        Mesh3d(add_mesh(
+                            &mut meshes,
+                            Cuboid::new(fw, win_frame_t, win_frame_t),
+                        )),
+                        MeshMaterial3d(window_frame_mat.clone()),
+                        Transform::from_xyz(wx, wy + dy, wz),
+                        re.clone(),
+                    ));
+                }
+                for dx in [-(win_w + win_frame_t) / 2.0, (win_w + win_frame_t) / 2.0] {
+                    commands.spawn((
+                        Mesh3d(add_mesh(
+                            &mut meshes,
+                            Cuboid::new(win_frame_t, fh, win_frame_t),
+                        )),
+                        MeshMaterial3d(window_frame_mat.clone()),
+                        Transform::from_xyz(wx + dx, wy, wz),
+                        re.clone(),
+                    ));
+                }
+            } else {
+                for dy in [-(win_h + win_frame_t) / 2.0, (win_h + win_frame_t) / 2.0] {
+                    commands.spawn((
+                        Mesh3d(add_mesh(
+                            &mut meshes,
+                            Cuboid::new(win_frame_t, win_frame_t, fw),
+                        )),
+                        MeshMaterial3d(window_frame_mat.clone()),
+                        Transform::from_xyz(wx, wy + dy, wz),
+                        re.clone(),
+                    ));
+                }
+                for dz in [-(win_w + win_frame_t) / 2.0, (win_w + win_frame_t) / 2.0] {
+                    commands.spawn((
+                        Mesh3d(add_mesh(
+                            &mut meshes,
+                            Cuboid::new(win_frame_t, fh, win_frame_t),
+                        )),
+                        MeshMaterial3d(window_frame_mat.clone()),
+                        Transform::from_xyz(wx, wy, wz + dz),
+                        re.clone(),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// Spawn composed furniture props inside rooms based on room type.
