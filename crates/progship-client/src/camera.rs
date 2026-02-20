@@ -44,7 +44,7 @@ pub fn setup_camera(
             cam.insert(bevy::anti_alias::dlss::Dlss::<
                 bevy::anti_alias::dlss::DlssRayReconstructionFeature,
             > {
-                perf_quality_mode: Default::default(),
+                perf_quality_mode: bevy::anti_alias::dlss::DlssPerfQualityMode::Dlaa,
                 reset: Default::default(),
                 _phantom_data: Default::default(),
             });
