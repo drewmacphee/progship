@@ -51,14 +51,28 @@ pub fn setup_camera(
         }
     }
 
-    // Rasterized: standard camera with bloom
+    // Rasterized: standard camera with bloom, SSAO, and distance fog
     #[cfg(not(feature = "solari"))]
     {
-        let bloom = bevy::post_process::bloom::Bloom {
-            intensity: 0.15,
-            ..default()
-        };
-        commands.spawn((Camera3d::default(), cam_transform, bloom, PlayerCamera));
+        commands.spawn((
+            Camera3d::default(),
+            cam_transform,
+            Msaa::Off,
+            bevy::post_process::bloom::Bloom {
+                intensity: 0.15,
+                ..default()
+            },
+            bevy::pbr::ScreenSpaceAmbientOcclusion {
+                quality_level: bevy::pbr::ScreenSpaceAmbientOcclusionQualityLevel::High,
+                constant_object_thickness: 0.25,
+            },
+            bevy::pbr::DistanceFog {
+                color: Color::srgba(0.05, 0.05, 0.08, 1.0),
+                falloff: bevy::pbr::FogFalloff::Exponential { density: 0.015 },
+                ..default()
+            },
+            PlayerCamera,
+        ));
     }
 
     // Minimal ambient — light comes from fixtures, not magic fill.
