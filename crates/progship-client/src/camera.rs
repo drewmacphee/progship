@@ -25,6 +25,9 @@ pub fn setup_camera(
         info!("Spawning camera with Solari raytraced lighting.");
         let mut cam = commands.spawn((
             Camera3d::default(),
+            bevy::render::camera::CameraRenderGraph::new(
+                bevy::core_pipeline::core_3d::graph::Core3d,
+            ),
             Camera {
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
                 ..default()
