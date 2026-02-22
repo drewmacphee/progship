@@ -239,6 +239,11 @@ fn spawn_corridor_greebles(
         room_id: room.id,
         deck: room.deck,
     };
+    let ch = if room.ceiling_height > 0.0 {
+        room.ceiling_height
+    } else {
+        3.5
+    };
     let room_center = if is_horizontal { room.x } else { room.y };
     let long_half = if is_horizontal { hw } else { hh };
     let wall_start = room_center - long_half;
@@ -259,7 +264,7 @@ fn spawn_corridor_greebles(
         let wall_gaps = gaps.get(wall_id);
         let segments = compute_wall_segments(wall_start, wall_end, wall_gaps, 0.1);
 
-        // Ceiling trim: thin edge strip at ceiling-wall junction (Y=2.88)
+        // Ceiling trim: thin edge strip at ceiling-wall junction
         spawn_segmented_run(
             commands,
             meshes,
@@ -269,12 +274,12 @@ fn spawn_corridor_greebles(
             wall_pos,
             sign,
             0.02,
-            2.88,
+            ch - 0.12,
             0.03,
             &segments,
         );
 
-        // Conduit tray: cable management channel (Y=2.65)
+        // Conduit tray: cable management channel
         spawn_segmented_run(
             commands,
             meshes,
@@ -284,7 +289,7 @@ fn spawn_corridor_greebles(
             wall_pos,
             sign,
             0.08,
-            2.65,
+            ch - 0.35,
             0.04,
             &segments,
         );
@@ -321,7 +326,7 @@ fn spawn_corridor_greebles(
                 commands.spawn((
                     Mesh3d(lib.conduit_bracket.clone()),
                     MeshMaterial3d(lib.mat_mid.clone()),
-                    Transform::from_xyz(x, 2.58, z),
+                    Transform::from_xyz(x, ch - 0.42, z),
                     re.clone(),
                 ));
             }
@@ -393,7 +398,7 @@ fn spawn_corridor_greebles(
             commands.spawn((
                 Mesh3d(pipe_mesh),
                 MeshMaterial3d(lib.mat_pipe.clone()),
-                Transform::from_xyz(x, 2.90, z).with_rotation(rot),
+                Transform::from_xyz(x, ch - 0.10, z).with_rotation(rot),
                 re.clone(),
             ));
         }
@@ -414,6 +419,11 @@ fn spawn_room_wall_greebles(
     let re = RoomEntity {
         room_id: room.id,
         deck: room.deck,
+    };
+    let ch = if room.ceiling_height > 0.0 {
+        room.ceiling_height
+    } else {
+        3.5
     };
 
     let has_conduit = matches!(room.room_type, 60..=71 | 80..=86 | 90..=95);
@@ -471,7 +481,7 @@ fn spawn_room_wall_greebles(
                 wall_coord,
                 sign,
                 0.06,
-                2.60,
+                ch - 0.40,
                 0.03,
                 &segments,
             );

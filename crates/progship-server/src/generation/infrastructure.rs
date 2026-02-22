@@ -12,6 +12,7 @@ use super::doors::should_have_room_door;
 use super::hull::{hull_length, hull_width};
 use super::treemap::RoomRequest;
 use crate::tables::*;
+use progship_logic::constants::deck_heights;
 use spacetimedb::{ReducerContext, Table};
 
 // Grid cell type markers
@@ -350,6 +351,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             width: ring_n_w,
             height: RING_WIDTH as f32,
             capacity: 0,
+            ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+            deck_span: 1,
         });
         let ring_s_id = next_id();
         ctx.db.room().insert(Room {
@@ -363,6 +366,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             width: ring_n_w,
             height: RING_WIDTH as f32,
             capacity: 0,
+            ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+            deck_span: 1,
         });
         let ring_w_id = next_id();
         let ring_side_h = (inner_y1 - inner_y0) as f32;
@@ -377,6 +382,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             width: RING_WIDTH as f32,
             height: ring_side_h,
             capacity: 0,
+            ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+            deck_span: 1,
         });
         let ring_e_id = next_id();
         ctx.db.room().insert(Room {
@@ -390,6 +397,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             width: RING_WIDTH as f32,
             height: ring_side_h,
             capacity: 0,
+            ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+            deck_span: 1,
         });
 
         // Ring corner doors (N↔W, N↔E, S↔W, S↔E) — use find_shared_edge for correct walls
@@ -481,6 +490,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     width: SPINE_WIDTH as f32,
                     height: (y1 - y0) as f32,
                     capacity: 0,
+                    ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+                    deck_span: 1,
                 });
                 spine_segments.push((seg_id, y0, y1));
             }
@@ -529,6 +540,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 width: cc_w as f32,
                 height: CROSS_CORRIDOR_WIDTH as f32,
                 capacity: 0,
+                ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+                deck_span: 1,
             });
             ctx.db.corridor().insert(Corridor {
                 id: 0,
@@ -598,6 +611,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         width: spur_len as f32,
                         height: SPUR_WIDTH as f32,
                         capacity: 0,
+                        ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+                        deck_span: 1,
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
@@ -626,6 +641,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         width: spur_len as f32,
                         height: SPUR_WIDTH as f32,
                         capacity: 0,
+                        ceiling_height: deck_heights::MIN_DECK_HEIGHT,
+                        deck_span: 1,
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
@@ -873,6 +890,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 width: sp.w as f32,
                 height: sp.h as f32,
                 capacity: 0,
+                ceiling_height: deck_heights::room_ceiling_height(srt),
+                deck_span: deck_heights::room_deck_span(srt),
             });
 
             if global_idx < shaft_infos.len() {
@@ -1074,6 +1093,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     width: *rw as f32,
                     height: *rh as f32,
                     capacity: req.capacity,
+                    ceiling_height: deck_heights::room_ceiling_height(req.room_type),
+                    deck_span: deck_heights::room_deck_span(req.room_type),
                 });
 
                 create_corridor_door(
@@ -1229,6 +1250,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 width: rw as f32,
                                 height: rh as f32,
                                 capacity: req.capacity,
+                                ceiling_height: deck_heights::room_ceiling_height(req.room_type),
+                                deck_span: deck_heights::room_deck_span(req.room_type),
                             });
 
                             create_corridor_door(
@@ -1349,6 +1372,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 width: rw as f32,
                                 height: rh as f32,
                                 capacity: fcap,
+                                ceiling_height: deck_heights::room_ceiling_height(frt),
+                                deck_span: deck_heights::room_deck_span(frt),
                             });
                             placed_rooms.push((room_id, x, y, rw, rh, frt));
 

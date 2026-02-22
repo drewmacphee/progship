@@ -17,6 +17,8 @@ pub struct Room {
     pub width: f32,
     pub height: f32,
     pub capacity: u32,
+    pub ceiling_height: f32,
+    pub deck_span: u8,
 }
 
 impl __sdk::InModule for Room {
@@ -37,6 +39,8 @@ pub struct RoomCols {
     pub width: __sdk::__query_builder::Col<Room, f32>,
     pub height: __sdk::__query_builder::Col<Room, f32>,
     pub capacity: __sdk::__query_builder::Col<Room, u32>,
+    pub ceiling_height: __sdk::__query_builder::Col<Room, f32>,
+    pub deck_span: __sdk::__query_builder::Col<Room, u8>,
 }
 
 impl __sdk::__query_builder::HasCols for Room {
@@ -53,6 +57,8 @@ impl __sdk::__query_builder::HasCols for Room {
             width: __sdk::__query_builder::Col::new(table_name, "width"),
             height: __sdk::__query_builder::Col::new(table_name, "height"),
             capacity: __sdk::__query_builder::Col::new(table_name, "capacity"),
+            ceiling_height: __sdk::__query_builder::Col::new(table_name, "ceiling_height"),
+            deck_span: __sdk::__query_builder::Col::new(table_name, "deck_span"),
         }
     }
 }
