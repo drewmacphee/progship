@@ -74,7 +74,7 @@ pub fn sync_rooms(
         .filter(|r| r.deck == view.current_deck)
         .collect();
 
-    let wall_height = 3.0;
+    let default_ceiling = 3.5_f32;
 
     // --- Phase 1: Spawn floors, ceilings, labels, furniture (per-room) ---
     let ceiling_mat = materials.add(StandardMaterial {
@@ -85,6 +85,11 @@ pub fn sync_rooms(
     });
     for room in &deck_rooms {
         let color = room_color(room.room_type);
+        let wh = if room.ceiling_height > 0.0 {
+            room.ceiling_height
+        } else {
+            default_ceiling
+        };
         // Floor
         commands.spawn((
             Mesh3d(add_mesh(
@@ -105,7 +110,7 @@ pub fn sync_rooms(
                 Cuboid::new(room.width, 0.12, room.height),
             )),
             MeshMaterial3d(ceiling_mat.clone()),
-            Transform::from_xyz(room.x, wall_height, room.y),
+            Transform::from_xyz(room.x, wh, room.y),
             RoomEntity {
                 room_id: room.id,
                 deck: room.deck,
@@ -134,13 +139,7 @@ pub fn sync_rooms(
 
         // Shaft interior geometry (ladders, elevator cars)
         if matches!(room.room_type, 110..=112) {
-            spawn_shaft_interior(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                room,
-                wall_height,
-            );
+            spawn_shaft_interior(&mut commands, &mut meshes, &mut materials, room, wh);
         }
 
         // Lighting — distributed point lights for all rooms including corridors
@@ -148,13 +147,7 @@ pub fn sync_rooms(
 
         // Dust motes in atmospheric rooms (engineering, cargo, corridors)
         if matches!(room.room_type, 60..=71 | 80..=86 | 90..=95 | 100..=102) {
-            spawn_dust_motes(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                room,
-                wall_height,
-            );
+            spawn_dust_motes(&mut commands, &mut meshes, &mut materials, room, wh);
         }
     }
 
@@ -174,6 +167,7 @@ pub fn sync_rooms(
         v_len: f32,
         cx: f32,
         cz: f32,
+        ceiling_height: f32,
         n_gaps: Vec<(f32, f32)>,
         s_gaps: Vec<(f32, f32)>,
         e_gaps: Vec<(f32, f32)>,
@@ -199,6 +193,7 @@ pub fn sync_rooms(
                 v_len: room.height,
                 cx,
                 cz,
+                ceiling_height: room.ceiling_height,
                 n_gaps: Vec::new(),
                 s_gaps: Vec::new(),
                 e_gaps: Vec::new(),
@@ -325,6 +320,7 @@ pub fn sync_rooms(
 
     // --- Phase 5: Draw walls ---
     for (room_id, deck, room_type, walls) in &room_walls {
+        let wh = walls.ceiling_height;
         let wall_color = room_color(*room_type).with_luminance(0.3);
         // N wall (horizontal)
         let np: Vec<f32> = walls.n_gaps.iter().map(|g| g.0).collect();
@@ -337,7 +333,7 @@ pub fn sync_rooms(
             walls.cx,
             walls.n_z,
             walls.h_len,
-            wall_height,
+            wh,
             wt,
             true,
             &np,
@@ -357,7 +353,7 @@ pub fn sync_rooms(
             walls.cx,
             walls.s_z,
             walls.h_len,
-            wall_height,
+            wh,
             wt,
             true,
             &sp,
@@ -377,7 +373,7 @@ pub fn sync_rooms(
             walls.e_x,
             walls.cz,
             walls.v_len,
-            wall_height,
+            wh,
             wt,
             false,
             &ep,
@@ -397,7 +393,7 @@ pub fn sync_rooms(
             walls.w_x,
             walls.cz,
             walls.v_len,
-            wall_height,
+            wh,
             wt,
             false,
             &wp,
@@ -418,13 +414,16 @@ pub fn sync_rooms(
         ..default()
     });
     let frame_depth = 2.0 * wt + 0.1;
-    let lintel_height: f32 = 0.3;
 
     for cut in &doorway_cuts {
         let rwalls = &room_walls[cut.room_idx].3;
         let cwalls = &room_walls[cut.other_idx].3;
         let room_id = room_walls[cut.room_idx].0;
         let deck = room_walls[cut.room_idx].1;
+        let rt_a = room_walls[cut.room_idx].2;
+        let rt_b = room_walls[cut.other_idx].2;
+        let door_h = progship_logic::constants::deck_heights::door_opening_height(rt_a, rt_b);
+        let wh = rwalls.ceiling_height;
         // Place frame centered between the room's wall and the corridor's wall
         let (fx, fz, horiz) = match cut.wall_side {
             0 => (cut.axis_pos, (rwalls.n_z + cwalls.s_z) / 2.0, true),
@@ -440,10 +439,10 @@ pub fn sync_rooms(
             fx,
             fz,
             cut.width,
-            wall_height,
+            door_h,
+            wh,
             frame_depth,
             post_w,
-            lintel_height,
             horiz,
             room_id,
             deck,
@@ -1152,7 +1151,8 @@ fn spawn_wall_with_gaps(
     }
 }
 
-/// Spawn a door frame (two posts + lintel) at the given position.
+/// Spawn a door frame (two posts + lintel + transom) at the given position.
+/// `door_height`: height of the door opening. `wall_height`: full ceiling height.
 /// `horizontal`: true if the wall runs along X (N/S walls), false for Z (E/W walls).
 #[allow(clippy::too_many_arguments)]
 fn spawn_door_frame(
@@ -1162,61 +1162,90 @@ fn spawn_door_frame(
     x: f32,
     z: f32,
     door_width: f32,
+    door_height: f32,
     wall_height: f32,
     frame_depth: f32,
     post_w: f32,
-    lintel_height: f32,
     horizontal: bool,
     room_id: u32,
     deck: i32,
 ) {
     let re = RoomEntity { room_id, deck };
+    let lintel_h: f32 = 0.12;
+    let transom_h = wall_height - door_height - lintel_h;
     if horizontal {
         // Wall along X: posts offset in X, frame depth in Z
-        let post_mesh = add_mesh(meshes, Cuboid::new(post_w, wall_height, frame_depth));
+        let post_mesh = add_mesh(meshes, Cuboid::new(post_w, door_height, frame_depth));
         for sign in [-1.0_f32, 1.0] {
             commands.spawn((
                 Mesh3d(post_mesh.clone()),
                 MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(x + sign * door_width / 2.0, wall_height / 2.0, z),
+                Transform::from_xyz(x + sign * door_width / 2.0, door_height / 2.0, z),
                 DoorMarker,
                 re.clone(),
             ));
         }
         let lintel = add_mesh(
             meshes,
-            Cuboid::new(door_width + post_w * 2.0, lintel_height, frame_depth),
+            Cuboid::new(door_width + post_w * 2.0, lintel_h, frame_depth),
         );
         commands.spawn((
             Mesh3d(lintel),
             MeshMaterial3d(frame_mat.clone()),
-            Transform::from_xyz(x, wall_height - lintel_height / 2.0, z),
+            Transform::from_xyz(x, door_height + lintel_h / 2.0, z),
             DoorMarker,
-            re,
+            re.clone(),
         ));
+        // Transom wall above door opening
+        if transom_h > 0.05 {
+            let transom = add_mesh(
+                meshes,
+                Cuboid::new(door_width + post_w * 2.0, transom_h, frame_depth),
+            );
+            commands.spawn((
+                Mesh3d(transom),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(x, door_height + lintel_h + transom_h / 2.0, z),
+                DoorMarker,
+                re,
+            ));
+        }
     } else {
         // Wall along Z: posts offset in Z, frame depth in X
-        let post_mesh = add_mesh(meshes, Cuboid::new(frame_depth, wall_height, post_w));
+        let post_mesh = add_mesh(meshes, Cuboid::new(frame_depth, door_height, post_w));
         for sign in [-1.0_f32, 1.0] {
             commands.spawn((
                 Mesh3d(post_mesh.clone()),
                 MeshMaterial3d(frame_mat.clone()),
-                Transform::from_xyz(x, wall_height / 2.0, z + sign * door_width / 2.0),
+                Transform::from_xyz(x, door_height / 2.0, z + sign * door_width / 2.0),
                 DoorMarker,
                 re.clone(),
             ));
         }
         let lintel = add_mesh(
             meshes,
-            Cuboid::new(frame_depth, lintel_height, door_width + post_w * 2.0),
+            Cuboid::new(frame_depth, lintel_h, door_width + post_w * 2.0),
         );
         commands.spawn((
             Mesh3d(lintel),
             MeshMaterial3d(frame_mat.clone()),
-            Transform::from_xyz(x, wall_height - lintel_height / 2.0, z),
+            Transform::from_xyz(x, door_height + lintel_h / 2.0, z),
             DoorMarker,
-            re,
+            re.clone(),
         ));
+        if transom_h > 0.05 {
+            let transom = add_mesh(
+                meshes,
+                Cuboid::new(frame_depth, transom_h, door_width + post_w * 2.0),
+            );
+            commands.spawn((
+                Mesh3d(transom),
+                MeshMaterial3d(frame_mat.clone()),
+                Transform::from_xyz(x, door_height + lintel_h + transom_h / 2.0, z),
+                DoorMarker,
+                re,
+            ));
+        }
     }
 }
 
@@ -1782,7 +1811,11 @@ fn spawn_room_lights(
 ) {
     let (color, intensity) = room_light(room.room_type);
     let is_corridor = room_types::is_corridor(room.room_type);
-    let y = 2.8;
+    let y = if room.ceiling_height > 0.0 {
+        room.ceiling_height - 0.2
+    } else {
+        3.3
+    };
 
     // Collect light positions and per-light intensities
     let mut positions: Vec<(f32, f32, f32)> = Vec::new();

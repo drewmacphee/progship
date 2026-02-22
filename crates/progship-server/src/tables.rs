@@ -237,6 +237,10 @@ pub struct Room {
     pub height: f32,
     /// Maximum occupancy capacity of the room.
     pub capacity: u32,
+    /// Ceiling height in meters (floor to ceiling for this room).
+    pub ceiling_height: f32,
+    /// Number of decks this room spans (1 = normal, 2 = double-height).
+    pub deck_span: u8,
 }
 
 /// Logical graph node representing any functional entity in the ship's network.

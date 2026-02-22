@@ -172,6 +172,70 @@ pub mod room_types {
     }
 }
 
+pub mod deck_heights {
+    use super::room_types;
+
+    /// Minimum deck height in meters (floor-to-ceiling for standard rooms).
+    pub const MIN_DECK_HEIGHT: f32 = 3.5;
+
+    /// Standard personnel door opening height in meters.
+    pub const STANDARD_DOOR_HEIGHT: f32 = 2.4;
+
+    /// Equipment / large-access door opening height in meters.
+    pub const EQUIPMENT_DOOR_HEIGHT: f32 = 3.0;
+
+    /// Returns the ceiling height for a given room type, in meters.
+    ///
+    /// Multi-deck rooms (reactor, engine room, cargo bay, shuttle bay) get
+    /// double height. All other rooms use the base deck height.
+    pub fn room_ceiling_height(room_type: u8) -> f32 {
+        let span = room_deck_span(room_type) as f32;
+        MIN_DECK_HEIGHT * span
+    }
+
+    /// Returns how many decks a room of this type spans (1 or 2).
+    pub fn room_deck_span(room_type: u8) -> u8 {
+        match room_type {
+            room_types::REACTOR
+            | room_types::ENGINE_ROOM
+            | room_types::CARGO_BAY
+            | room_types::SHUTTLE_BAY => 2,
+            _ => 1,
+        }
+    }
+
+    /// Returns the door opening height for a doorway between two room types.
+    ///
+    /// Equipment-height doors are used when either side is an engineering,
+    /// cargo, maintenance, or shuttle room. All others get standard height.
+    pub fn door_opening_height(rt_a: u8, rt_b: u8) -> f32 {
+        if is_equipment_door_room(rt_a) || is_equipment_door_room(rt_b) {
+            EQUIPMENT_DOOR_HEIGHT
+        } else {
+            STANDARD_DOOR_HEIGHT
+        }
+    }
+
+    /// Returns true if doors to/from this room type should use equipment height.
+    fn is_equipment_door_room(rt: u8) -> bool {
+        matches!(
+            rt,
+            room_types::ENGINEERING
+                | room_types::REACTOR
+                | room_types::BACKUP_REACTOR
+                | room_types::ENGINE_ROOM
+                | room_types::MACHINE_SHOP
+                | room_types::FUEL_STORAGE
+                | room_types::ROBOTICS_BAY
+                | room_types::MAINTENANCE_BAY
+                | room_types::COOLING_PLANT
+                | room_types::CARGO_BAY
+                | room_types::SHUTTLE_BAY
+                | room_types::AIRLOCK
+        )
+    }
+}
+
 pub mod shifts {
     pub const ALPHA: u8 = 0; // 0600-1400
     pub const BETA: u8 = 1; // 1400-2200
@@ -239,4 +303,53 @@ pub mod event_types {
     pub const ALTERCATION: u8 = 6;
     pub const RESOURCE_SHORTAGE: u8 = 7;
     pub const DEATH: u8 = 8;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deck_heights::*;
+    use super::room_types;
+
+    #[test]
+    fn standard_rooms_single_deck() {
+        assert_eq!(room_deck_span(room_types::BRIDGE), 1);
+        assert_eq!(room_deck_span(room_types::CABIN_SINGLE), 1);
+        assert_eq!(room_deck_span(room_types::CORRIDOR), 1);
+        assert_eq!(room_deck_span(room_types::GYM), 1);
+    }
+
+    #[test]
+    fn multi_deck_rooms() {
+        assert_eq!(room_deck_span(room_types::REACTOR), 2);
+        assert_eq!(room_deck_span(room_types::ENGINE_ROOM), 2);
+        assert_eq!(room_deck_span(room_types::CARGO_BAY), 2);
+        assert_eq!(room_deck_span(room_types::SHUTTLE_BAY), 2);
+    }
+
+    #[test]
+    fn ceiling_heights() {
+        assert!((room_ceiling_height(room_types::BRIDGE) - 3.5).abs() < 0.001);
+        assert!((room_ceiling_height(room_types::REACTOR) - 7.0).abs() < 0.001);
+        assert!((room_ceiling_height(room_types::CORRIDOR) - 3.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn door_heights_standard() {
+        let h = door_opening_height(room_types::CORRIDOR, room_types::CABIN_SINGLE);
+        assert!((h - STANDARD_DOOR_HEIGHT).abs() < 0.001);
+    }
+
+    #[test]
+    fn door_heights_equipment() {
+        let h = door_opening_height(room_types::CORRIDOR, room_types::CARGO_BAY);
+        assert!((h - EQUIPMENT_DOOR_HEIGHT).abs() < 0.001);
+        let h2 = door_opening_height(room_types::ENGINE_ROOM, room_types::CORRIDOR);
+        assert!((h2 - EQUIPMENT_DOOR_HEIGHT).abs() < 0.001);
+    }
+
+    #[test]
+    fn door_heights_both_standard() {
+        let h = door_opening_height(room_types::MESS_HALL, room_types::GALLEY);
+        assert!((h - STANDARD_DOOR_HEIGHT).abs() < 0.001);
+    }
 }
