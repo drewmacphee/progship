@@ -1,8 +1,15 @@
 //! Greeble system — procedural surface detail on walls.
 //!
 //! Spawns after door gaps are computed so greebles never overlap openings.
-//! Corridors get continuous engineered runs (conduit trays, pipe bundles, trim).
-//! Rooms get zone-appropriate detail at logical height bands.
+//! All linear elements (conduit trays, trim strips, pipes) are segmented —
+//! they break at every door opening and corridor intersection.
+//!
+//! Corridor elements (what they represent):
+//! - Ceiling trim: edge moulding where ceiling meets wall
+//! - Conduit tray: overhead cable management channel
+//! - Pipes: coolant/air/water lines running along ceiling center
+//! - Vent grilles: air recirculation intake/exhaust (flush with wall)
+//! - Control panels: door access panels placed beside door openings
 
 use bevy::prelude::*;
 use progship_client_sdk::Room;
@@ -24,6 +31,7 @@ impl Rng {
         self.0 ^= self.0 << 5;
         self.0
     }
+    #[allow(dead_code)]
     fn f32(&mut self) -> f32 {
         (self.next() & 0x00FF_FFFF) as f32 / 16_777_216.0
     }
@@ -39,36 +47,60 @@ pub struct WallGaps {
 }
 
 impl WallGaps {
-    /// Check if a position along a wall overlaps any gap (with margin).
-    fn overlaps(&self, wall: u8, pos: f32, half_extent: f32) -> bool {
-        let margin = 0.15;
-        let gaps = match wall {
+    fn get(&self, wall: u8) -> &[(f32, f32)] {
+        match wall {
             0 => &self.n,
             1 => &self.s,
             2 => &self.e,
             _ => &self.w,
-        };
-        for &(gap_pos, gap_w) in gaps {
-            let gap_half = gap_w / 2.0 + margin;
-            if (pos - gap_pos).abs() < gap_half + half_extent {
-                return true;
+        }
+    }
+}
+
+/// Compute solid wall segments by subtracting gap regions from a range.
+/// Returns list of (segment_start, segment_end) in world coordinates.
+fn compute_wall_segments(
+    wall_start: f32,
+    wall_end: f32,
+    gaps: &[(f32, f32)],
+    margin: f32,
+) -> Vec<(f32, f32)> {
+    let mut cuts: Vec<(f32, f32)> = gaps
+        .iter()
+        .map(|&(pos, w)| (pos - w / 2.0 - margin, pos + w / 2.0 + margin))
+        .collect();
+    cuts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    let mut segments = Vec::new();
+    let mut cursor = wall_start;
+    for (cut_start, cut_end) in &cuts {
+        if *cut_start > cursor {
+            let seg_start = cursor.max(wall_start);
+            let seg_end = cut_start.min(wall_end);
+            if seg_end - seg_start > 0.15 {
+                segments.push((seg_start, seg_end));
             }
         }
-        false
+        cursor = cursor.max(*cut_end);
     }
+    if cursor < wall_end && wall_end - cursor > 0.15 {
+        segments.push((cursor, wall_end));
+    }
+    segments
 }
 
 #[derive(Resource)]
 pub struct GreebleLibrary {
-    pub junction_box: Handle<Mesh>,
     pub vent_grille: Handle<Mesh>,
-    pub bracket: Handle<Mesh>,
+    pub control_panel: Handle<Mesh>,
+    pub conduit_bracket: Handle<Mesh>,
     // Materials
     pub mat_dark: Handle<StandardMaterial>,
     pub mat_mid: Handle<StandardMaterial>,
     pub mat_pipe: Handle<StandardMaterial>,
     pub mat_vent: Handle<StandardMaterial>,
     pub mat_trim: Handle<StandardMaterial>,
+    pub mat_panel: Handle<StandardMaterial>,
 }
 
 pub fn init_greeble_library(
@@ -106,21 +138,30 @@ pub fn init_greeble_library(
         perceptual_roughness: 0.3,
         ..default()
     });
+    let mat_panel = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.28, 0.32),
+        metallic: 0.5,
+        perceptual_roughness: 0.6,
+        ..default()
+    });
 
-    // Punctual meshes — shared across all corridors/rooms
-    let junction_box = add_mesh_pub(&mut meshes, Cuboid::new(0.2, 0.15, 0.08));
-    let vent_grille = add_mesh_pub(&mut meshes, Cuboid::new(0.35, 0.12, 0.02));
-    let bracket = add_mesh_pub(&mut meshes, Cuboid::new(0.06, 0.06, 0.05));
+    // Vent grille: thin flush-mounted air vent
+    let vent_grille = add_mesh_pub(&mut meshes, Cuboid::new(0.30, 0.08, 0.005));
+    // Control panel: small wall-mounted door access panel
+    let control_panel = add_mesh_pub(&mut meshes, Cuboid::new(0.12, 0.18, 0.02));
+    // Conduit bracket: support under conduit tray
+    let conduit_bracket = add_mesh_pub(&mut meshes, Cuboid::new(0.04, 0.04, 0.04));
 
     commands.insert_resource(GreebleLibrary {
-        junction_box,
         vent_grille,
-        bracket,
+        control_panel,
+        conduit_bracket,
         mat_dark,
         mat_mid,
         mat_pipe,
         mat_vent,
         mat_trim,
+        mat_panel,
     });
 }
 
@@ -147,7 +188,43 @@ pub fn spawn_room_greebles(
 
 const WALL_INSET: f32 = 0.15;
 
-/// Corridor greebles: continuous engineered runs along the long axis.
+/// Spawn a segmented linear run: one mesh per solid wall segment between gaps.
+fn spawn_segmented_run(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mat: &Handle<StandardMaterial>,
+    re: &RoomEntity,
+    is_horizontal: bool,
+    wall_pos: f32,
+    sign: f32,
+    depth: f32,
+    y: f32,
+    height: f32,
+    segments: &[(f32, f32)],
+) {
+    for &(seg_start, seg_end) in segments {
+        let seg_len = seg_end - seg_start;
+        let seg_center = (seg_start + seg_end) / 2.0;
+        let mesh = add_mesh_pub(meshes, Cuboid::new(seg_len, height, depth));
+        let (x, z, rot) = if is_horizontal {
+            (seg_center, wall_pos + sign * depth / 2.0, Quat::IDENTITY)
+        } else {
+            (
+                wall_pos + sign * depth / 2.0,
+                seg_center,
+                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
+        };
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(mat.clone()),
+            Transform::from_xyz(x, y, z).with_rotation(rot),
+            re.clone(),
+        ));
+    }
+}
+
+/// Corridor greebles: segmented runs that break at every door opening.
 fn spawn_corridor_greebles(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -158,205 +235,165 @@ fn spawn_corridor_greebles(
     let hw = room.width / 2.0;
     let hh = room.height / 2.0;
     let is_horizontal = room.width >= room.height;
-    let long_len = room.width.max(room.height);
     let re = RoomEntity {
         room_id: room.id,
         deck: room.deck,
     };
+    let room_center = if is_horizontal { room.x } else { room.y };
+    let long_half = if is_horizontal { hw } else { hh };
+    let wall_start = room_center - long_half;
+    let wall_end = room_center + long_half;
 
-    // Long walls: for horizontal corridors = N(0) and S(1); vertical = E(2) and W(3)
+    // Long walls
     let (wall_a_pos, wall_b_pos, wall_a_id, wall_b_id) = if is_horizontal {
         (room.y - hh + WALL_INSET, room.y + hh - WALL_INSET, 0u8, 1u8)
     } else {
         (room.x + hw - WALL_INSET, room.x - hw + WALL_INSET, 2u8, 3u8)
     };
 
-    let protrude = 0.04;
-    let room_center = if is_horizontal { room.x } else { room.y };
-
-    // --- Ceiling trim strip (continuous, full length, both sides) ---
-    let trim_mesh = add_mesh_pub(meshes, Cuboid::new(long_len, 0.03, 0.02));
-    for side in 0..2 {
+    for side in 0..2u8 {
         let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
         let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let (x, z, rot) = if is_horizontal {
-            (room.x, wall_pos + sign * 0.01, Quat::IDENTITY)
-        } else {
-            (
-                wall_pos + sign * 0.01,
-                room.y,
-                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            )
-        };
-        commands.spawn((
-            Mesh3d(trim_mesh.clone()),
-            MeshMaterial3d(lib.mat_trim.clone()),
-            Transform::from_xyz(x, 2.88, z).with_rotation(rot),
-            re.clone(),
-        ));
+        let wall_id = if side == 0 { wall_a_id } else { wall_b_id };
+
+        let wall_gaps = gaps.get(wall_id);
+        let segments = compute_wall_segments(wall_start, wall_end, wall_gaps, 0.1);
+
+        // Ceiling trim: thin edge strip at ceiling-wall junction (Y=2.88)
+        spawn_segmented_run(
+            commands,
+            meshes,
+            &lib.mat_trim,
+            &re,
+            is_horizontal,
+            wall_pos,
+            sign,
+            0.02,
+            2.88,
+            0.03,
+            &segments,
+        );
+
+        // Conduit tray: cable management channel (Y=2.65)
+        spawn_segmented_run(
+            commands,
+            meshes,
+            &lib.mat_dark,
+            &re,
+            is_horizontal,
+            wall_pos,
+            sign,
+            0.08,
+            2.65,
+            0.04,
+            &segments,
+        );
+
+        // Baseboard: floor-wall edge strip (Y=0.025)
+        spawn_segmented_run(
+            commands,
+            meshes,
+            &lib.mat_dark,
+            &re,
+            is_horizontal,
+            wall_pos,
+            sign,
+            0.015,
+            0.025,
+            0.05,
+            &segments,
+        );
+
+        // Conduit brackets: every 2.5m within solid segments only
+        for &(seg_start, seg_end) in &segments {
+            let seg_len = seg_end - seg_start;
+            let bracket_count = (seg_len / 2.5).floor() as i32;
+            for i in 0..bracket_count {
+                let pos = seg_start + 1.25 + i as f32 * 2.5;
+                if pos > seg_end - 0.3 {
+                    break;
+                }
+                let (x, z) = if is_horizontal {
+                    (pos, wall_pos + sign * 0.04)
+                } else {
+                    (wall_pos + sign * 0.04, pos)
+                };
+                commands.spawn((
+                    Mesh3d(lib.conduit_bracket.clone()),
+                    MeshMaterial3d(lib.mat_mid.clone()),
+                    Transform::from_xyz(x, 2.58, z),
+                    re.clone(),
+                ));
+            }
+        }
+
+        // Vent grilles: every 4m within solid segments (flush, Y=0.20)
+        for &(seg_start, seg_end) in &segments {
+            let seg_len = seg_end - seg_start;
+            let vent_count = (seg_len / 4.0).floor() as i32;
+            for i in 0..vent_count {
+                let pos = seg_start + 2.0 + i as f32 * 4.0;
+                if pos > seg_end - 0.5 {
+                    break;
+                }
+                let (x, z) = if is_horizontal {
+                    (pos, wall_pos + sign * 0.003)
+                } else {
+                    (wall_pos + sign * 0.003, pos)
+                };
+                commands.spawn((
+                    Mesh3d(lib.vent_grille.clone()),
+                    MeshMaterial3d(lib.mat_vent.clone()),
+                    Transform::from_xyz(x, 0.20, z),
+                    re.clone(),
+                ));
+            }
+        }
+
+        // Control panels: beside each door opening on this wall
+        for &(gap_pos, gap_w) in wall_gaps {
+            let panel_pos = gap_pos + gap_w / 2.0 + 0.25;
+            if panel_pos < wall_end - 0.1 {
+                let (x, z) = if is_horizontal {
+                    (panel_pos, wall_pos + sign * 0.01)
+                } else {
+                    (wall_pos + sign * 0.01, panel_pos)
+                };
+                commands.spawn((
+                    Mesh3d(lib.control_panel.clone()),
+                    MeshMaterial3d(lib.mat_panel.clone()),
+                    Transform::from_xyz(x, 1.30, z),
+                    re.clone(),
+                ));
+            }
+        }
     }
 
-    // --- Floor baseboard strip (continuous, both sides) ---
-    let baseboard_mesh = add_mesh_pub(meshes, Cuboid::new(long_len, 0.05, 0.015));
-    for side in 0..2 {
-        let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-        let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let (x, z, rot) = if is_horizontal {
-            (room.x, wall_pos + sign * 0.008, Quat::IDENTITY)
-        } else {
-            (
-                wall_pos + sign * 0.008,
-                room.y,
-                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            )
-        };
-        commands.spawn((
-            Mesh3d(baseboard_mesh.clone()),
-            MeshMaterial3d(lib.mat_dark.clone()),
-            Transform::from_xyz(x, 0.025, z).with_rotation(rot),
-            re.clone(),
-        ));
-    }
-
-    // --- Overhead conduit tray (full length, both sides, Y=2.65) ---
-    let conduit_mesh = add_mesh_pub(meshes, Cuboid::new(long_len, 0.04, 0.10));
-    for side in 0..2 {
-        let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-        let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let (x, z, rot) = if is_horizontal {
-            (room.x, wall_pos + sign * (protrude + 0.05), Quat::IDENTITY)
-        } else {
-            (
-                wall_pos + sign * (protrude + 0.05),
-                room.y,
-                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            )
-        };
-        commands.spawn((
-            Mesh3d(conduit_mesh.clone()),
-            MeshMaterial3d(lib.mat_dark.clone()),
-            Transform::from_xyz(x, 2.65, z).with_rotation(rot),
-            re.clone(),
-        ));
-    }
-
-    // --- Pipe bundle (2 parallel pipes, full length, Y=2.45) ---
-    for pipe_offset in [0.0f32, 0.05] {
-        let pipe_mesh = add_mesh_pub(meshes, Cylinder::new(0.02, long_len));
-        for side in 0..2 {
-            let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-            let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-            let depth = protrude + 0.03 + pipe_offset;
+    // --- Ceiling pipes: run along corridor centerline ---
+    // Pipes route across the ceiling center, above doorway height,
+    // so they don't need to break at wall openings.
+    let short_half = if is_horizontal { hh } else { hw };
+    if short_half > 0.8 {
+        let pipe_len = wall_end - wall_start;
+        for pipe_offset in [-0.15f32, 0.15] {
+            let pipe_mesh = add_mesh_pub(meshes, Cylinder::new(0.02, pipe_len));
             let (x, z, rot) = if is_horizontal {
                 (
-                    room.x,
-                    wall_pos + sign * depth,
+                    room_center,
+                    room.y + pipe_offset,
                     Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
                 )
             } else {
                 (
-                    wall_pos + sign * depth,
-                    room.y,
+                    room.x + pipe_offset,
+                    room_center,
                     Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
                 )
             };
             commands.spawn((
-                Mesh3d(pipe_mesh.clone()),
+                Mesh3d(pipe_mesh),
                 MeshMaterial3d(lib.mat_pipe.clone()),
-                Transform::from_xyz(x, 2.45, z).with_rotation(rot),
-                re.clone(),
-            ));
-        }
-    }
-
-    // --- Support brackets under conduit (every 2m, gap-aware) ---
-    let bracket_spacing = 2.0;
-    let bracket_count = (long_len / bracket_spacing).floor() as i32;
-    for side in 0..2u8 {
-        let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-        let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let wall_id = if side == 0 { wall_a_id } else { wall_b_id };
-
-        for i in 0..bracket_count {
-            let along_offset =
-                -(long_len / 2.0) + bracket_spacing / 2.0 + i as f32 * bracket_spacing;
-            let along_world = room_center + along_offset;
-
-            if gaps.overlaps(wall_id, along_world, 0.03) {
-                continue;
-            }
-
-            let (x, z) = if is_horizontal {
-                (along_world, wall_pos + sign * protrude)
-            } else {
-                (wall_pos + sign * protrude, along_world)
-            };
-            commands.spawn((
-                Mesh3d(lib.bracket.clone()),
-                MeshMaterial3d(lib.mat_mid.clone()),
-                Transform::from_xyz(x, 2.58, z),
-                re.clone(),
-            ));
-        }
-    }
-
-    // --- Vent grilles (every 4m, floor level, gap-aware) ---
-    let vent_spacing = 4.0;
-    let vent_count = (long_len / vent_spacing).floor() as i32;
-    for side in 0..2u8 {
-        let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-        let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let wall_id = if side == 0 { wall_a_id } else { wall_b_id };
-
-        for i in 0..vent_count {
-            let along_offset = -(long_len / 2.0) + vent_spacing / 2.0 + i as f32 * vent_spacing;
-            let along_world = room_center + along_offset;
-
-            if gaps.overlaps(wall_id, along_world, 0.175) {
-                continue;
-            }
-
-            let (x, z) = if is_horizontal {
-                (along_world, wall_pos + sign * protrude)
-            } else {
-                (wall_pos + sign * protrude, along_world)
-            };
-            commands.spawn((
-                Mesh3d(lib.vent_grille.clone()),
-                MeshMaterial3d(lib.mat_vent.clone()),
-                Transform::from_xyz(x, 0.25, z),
-                re.clone(),
-            ));
-        }
-    }
-
-    // --- Junction boxes (only near corridor ends, within 0.6m of short walls) ---
-    let mut rng = Rng::new(room.id.wrapping_mul(2654435761));
-    let end_zone = 0.6;
-    for side in 0..2u8 {
-        let wall_pos = if side == 0 { wall_a_pos } else { wall_b_pos };
-        let sign: f32 = if side == 0 { 1.0 } else { -1.0 };
-        let wall_id = if side == 0 { wall_a_id } else { wall_b_id };
-
-        for end in 0..2 {
-            let along_world = if end == 0 {
-                room_center - long_len / 2.0 + end_zone * rng.f32().max(0.3)
-            } else {
-                room_center + long_len / 2.0 - end_zone * rng.f32().max(0.3)
-            };
-            if gaps.overlaps(wall_id, along_world, 0.1) {
-                continue;
-            }
-            let jy = 1.4 + (rng.f32() - 0.5) * 0.3;
-            let (x, z) = if is_horizontal {
-                (along_world, wall_pos + sign * protrude)
-            } else {
-                (wall_pos + sign * protrude, along_world)
-            };
-            commands.spawn((
-                Mesh3d(lib.junction_box.clone()),
-                MeshMaterial3d(lib.mat_mid.clone()),
-                Transform::from_xyz(x, jy, z),
+                Transform::from_xyz(x, 2.90, z).with_rotation(rot),
                 re.clone(),
             ));
         }
@@ -372,28 +409,15 @@ fn spawn_room_wall_greebles(
     room: &Room,
     gaps: &WallGaps,
 ) {
-    let mut rng = Rng::new(room.id.wrapping_mul(2654435761));
     let hw = room.width / 2.0;
     let hh = room.height / 2.0;
-    let protrude = 0.03;
     let re = RoomEntity {
         room_id: room.id,
         deck: room.deck,
     };
 
-    let density = match room.room_type {
-        60..=71 => 0.6,  // Engineering: dense
-        90..=95 => 0.4,  // Cargo: moderate
-        80..=86 => 0.4,  // Life support: moderate
-        0..=8 => 0.15,   // Command: sparse
-        30..=37 => 0.1,  // Medical: very sparse
-        10..=18 => 0.05, // Habitation: minimal
-        _ => 0.25,
-    };
+    let has_conduit = matches!(room.room_type, 60..=71 | 80..=86 | 90..=95);
 
-    let has_upper = matches!(room.room_type, 60..=71 | 80..=86 | 90..=95);
-
-    // Walls: N(0), S(1), E(2), W(3)
     for wall in 0..4u8 {
         let (wall_len, horiz) = match wall {
             0 | 1 => (room.width, true),
@@ -412,101 +436,86 @@ fn spawn_room_wall_greebles(
             _ => -1.0,
         };
         let room_center = if horiz { room.x } else { room.y };
+        let wall_start = room_center - wall_len / 2.0;
+        let wall_end = room_center + wall_len / 2.0;
+        let wall_gaps = gaps.get(wall);
+        let segments = compute_wall_segments(wall_start, wall_end, wall_gaps, 0.1);
 
-        let corner_margin = 0.3;
-        let usable = wall_len - 2.0 * corner_margin;
-        if usable < 0.5 {
+        if wall_len < 0.8 {
             continue;
         }
 
-        // --- Baseboard trim (continuous, full wall length) ---
-        let baseboard_mesh = add_mesh_pub(meshes, Cuboid::new(wall_len, 0.04, 0.012));
-        let (bx, bz, brot) = if horiz {
-            (room_center, wall_coord + sign * 0.006, Quat::IDENTITY)
-        } else {
-            (
-                wall_coord + sign * 0.006,
-                room_center,
-                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            )
-        };
-        commands.spawn((
-            Mesh3d(baseboard_mesh),
-            MeshMaterial3d(lib.mat_dark.clone()),
-            Transform::from_xyz(bx, 0.02, bz).with_rotation(brot),
-            re.clone(),
-        ));
+        // Baseboard trim: segmented at door openings
+        spawn_segmented_run(
+            commands,
+            meshes,
+            &lib.mat_dark,
+            &re,
+            horiz,
+            wall_coord,
+            sign,
+            0.012,
+            0.02,
+            0.04,
+            &segments,
+        );
 
-        // --- Upper band (conduit bracket, 2.4-2.6m) — industrial rooms only ---
-        if has_upper {
-            let spacing = 2.5;
-            let count = (usable / spacing).floor() as i32;
-            for i in 0..count {
-                let along_offset = -usable / 2.0 + spacing / 2.0 + i as f32 * spacing;
-                let along_world = room_center + along_offset;
-                if gaps.overlaps(wall, along_world, 0.03) {
-                    continue;
+        // Conduit tray in industrial rooms (segmented)
+        if has_conduit {
+            spawn_segmented_run(
+                commands,
+                meshes,
+                &lib.mat_dark,
+                &re,
+                horiz,
+                wall_coord,
+                sign,
+                0.06,
+                2.60,
+                0.03,
+                &segments,
+            );
+        }
+
+        // Vent grilles: every 3.5m within solid segments (flush, Y=0.20)
+        for &(seg_start, seg_end) in &segments {
+            let seg_len = seg_end - seg_start;
+            let vent_count = (seg_len / 3.5).floor() as i32;
+            for i in 0..vent_count {
+                let pos = seg_start + 1.75 + i as f32 * 3.5;
+                if pos > seg_end - 0.5 {
+                    break;
                 }
                 let (x, z) = if horiz {
-                    (along_world, wall_coord + sign * protrude)
+                    (pos, wall_coord + sign * 0.003)
                 } else {
-                    (wall_coord + sign * protrude, along_world)
+                    (wall_coord + sign * 0.003, pos)
                 };
                 commands.spawn((
-                    Mesh3d(lib.bracket.clone()),
-                    MeshMaterial3d(lib.mat_mid.clone()),
-                    Transform::from_xyz(x, 2.5, z),
+                    Mesh3d(lib.vent_grille.clone()),
+                    MeshMaterial3d(lib.mat_vent.clone()),
+                    Transform::from_xyz(x, 0.20, z),
                     re.clone(),
                 ));
             }
         }
 
-        // --- Mid band (junction boxes, 1.0-1.8m) — density-based ---
-        let mid_count = (usable * density).round() as i32;
-        for _ in 0..mid_count {
-            let along_offset = -usable / 2.0 + rng.f32() * usable;
-            let along_world = room_center + along_offset;
-            if gaps.overlaps(wall, along_world, 0.1) {
-                continue;
-            }
-            let jy = 1.2 + rng.f32() * 0.6;
-            let (x, z) = if horiz {
-                (along_world, wall_coord + sign * protrude)
-            } else {
-                (wall_coord + sign * protrude, along_world)
-            };
-            commands.spawn((
-                Mesh3d(lib.junction_box.clone()),
-                MeshMaterial3d(if rng.f32() > 0.5 {
-                    lib.mat_dark.clone()
+        // Control panels beside doors in this room
+        for &(gap_pos, gap_w) in wall_gaps {
+            let panel_pos = gap_pos + gap_w / 2.0 + 0.20;
+            if panel_pos < wall_end - 0.1 {
+                let (x, z) = if horiz {
+                    (panel_pos, wall_coord + sign * 0.01)
                 } else {
-                    lib.mat_mid.clone()
-                }),
-                Transform::from_xyz(x, jy, z),
-                re.clone(),
-            ));
-        }
-
-        // --- Lower band (vents, 0.2-0.4m) — regular spacing ---
-        let vent_spacing = 3.5;
-        let vent_count = (usable / vent_spacing).floor() as i32;
-        for i in 0..vent_count {
-            let along_offset = -usable / 2.0 + vent_spacing / 2.0 + i as f32 * vent_spacing;
-            let along_world = room_center + along_offset;
-            if gaps.overlaps(wall, along_world, 0.175) {
-                continue;
+                    (wall_coord + sign * 0.01, panel_pos)
+                };
+                commands.spawn((
+                    Mesh3d(lib.control_panel.clone()),
+                    MeshMaterial3d(lib.mat_panel.clone()),
+                    Transform::from_xyz(x, 1.30, z),
+                    re.clone(),
+                ));
             }
-            let (x, z) = if horiz {
-                (along_world, wall_coord + sign * protrude)
-            } else {
-                (wall_coord + sign * protrude, along_world)
-            };
-            commands.spawn((
-                Mesh3d(lib.vent_grille.clone()),
-                MeshMaterial3d(lib.mat_vent.clone()),
-                Transform::from_xyz(x, 0.3, z),
-                re.clone(),
-            ));
         }
     }
 }
