@@ -3,8 +3,8 @@
 //! Supports top-down (default) and first-person camera modes.
 //! Toggle with V key. Mouse look in first-person mode.
 
-use bevy::prelude::MessageReader;
 use bevy::prelude::*;
+use bevy::prelude::{MessageReader, MessageWriter};
 use progship_client_sdk::*;
 
 use crate::state::{CameraMode, ConnectionState, PlayerCamera, PlayerState, ViewState};
@@ -102,15 +102,16 @@ pub fn camera_follow_player(
     windows: Query<&Window>,
     mut cursor_q: Query<&mut bevy::window::CursorOptions>,
 ) {
-    // Toggle camera mode with V; Escape returns to top-down
+    // Toggle camera mode with V; Escape releases cursor (FPS→TopDown), second Escape quits
     if keyboard.just_pressed(KeyCode::KeyV) {
         view.camera_mode = match view.camera_mode {
             CameraMode::TopDown => CameraMode::FirstPerson,
             CameraMode::FirstPerson => CameraMode::TopDown,
         };
-    } else if keyboard.just_pressed(KeyCode::Escape) && view.camera_mode == CameraMode::FirstPerson
-    {
-        view.camera_mode = CameraMode::TopDown;
+    } else if keyboard.just_pressed(KeyCode::Escape) {
+        if view.camera_mode == CameraMode::FirstPerson {
+            view.camera_mode = CameraMode::TopDown;
+        }
     }
     // Update cursor grab based on mode
     if let Ok(mut cursor) = cursor_q.single_mut() {
@@ -161,5 +162,22 @@ pub fn camera_follow_player(
             // Apply yaw and pitch rotation
             cam_tf.rotation = Quat::from_euler(EulerRot::YXZ, view.fps_yaw, view.fps_pitch, 0.0);
         }
+    }
+}
+
+/// Quit the app on Escape (when cursor is free) or Ctrl+Q.
+pub fn handle_quit(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    view: Res<ViewState>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    if ctrl && keyboard.just_pressed(KeyCode::KeyQ) {
+        exit.write(AppExit::Success);
+        return;
+    }
+    // Escape in TopDown mode (cursor already free) quits
+    if keyboard.just_pressed(KeyCode::Escape) && view.camera_mode == CameraMode::TopDown {
+        exit.write(AppExit::Success);
     }
 }
