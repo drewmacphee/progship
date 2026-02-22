@@ -27,7 +27,7 @@ mod rendering;
 mod state;
 mod ui;
 
-use camera::{camera_follow_player, setup_camera};
+use camera::{camera_follow_player, handle_quit, setup_camera};
 use input::player_input;
 use minimap::{minimap_toggle, render_minimap, MinimapState};
 use networking::{auto_join_game, connect_to_server, process_messages};
@@ -82,6 +82,7 @@ fn main() {
                 player_input,
                 minimap_toggle,
                 camera_follow_player,
+                handle_quit,
                 sync_rooms,
                 sync_people,
                 animate_details,
