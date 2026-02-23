@@ -77,6 +77,7 @@ pub mod room_types {
     pub const SHOPS: u8 = 56;
     // Engineering & Propulsion
     pub const ENGINEERING: u8 = 60;
+    pub const MAIN_ENGINEERING: u8 = 60; // alias for clarity in deck_heights
     pub const REACTOR: u8 = 61;
     pub const BACKUP_REACTOR: u8 = 62;
     pub const ENGINE_ROOM: u8 = 63;
@@ -193,13 +194,20 @@ pub mod deck_heights {
         MIN_DECK_HEIGHT * span
     }
 
-    /// Returns how many decks a room of this type spans (1 or 2).
+    /// Returns how many decks a room of this type spans (1, 2, or 3).
     pub fn room_deck_span(room_type: u8) -> u8 {
         match room_type {
+            room_types::SHUTTLE_BAY => 3,
             room_types::REACTOR
             | room_types::ENGINE_ROOM
             | room_types::CARGO_BAY
-            | room_types::SHUTTLE_BAY => 2,
+            | room_types::MAIN_ENGINEERING
+            | room_types::BACKUP_REACTOR
+            | room_types::FUEL_STORAGE
+            | room_types::HYDROPONICS
+            | room_types::ARBORETUM
+            | room_types::THEATRE
+            | room_types::POOL => 2,
             _ => 1,
         }
     }
@@ -233,6 +241,65 @@ pub mod deck_heights {
                 | room_types::SHUTTLE_BAY
                 | room_types::AIRLOCK
         )
+    }
+}
+
+/// Room placement constraints for generation.
+///
+/// Encoded as u8 for compactness and serialization.
+pub mod placement {
+    use super::room_types;
+
+    pub const NONE: u8 = 0;
+    pub const HULL_FACING: u8 = 1; // Must touch ship exterior (perimeter ring)
+    pub const INTERIOR: u8 = 2; // Must NOT touch hull (protected/shielded)
+    pub const AFT: u8 = 3; // Prefer aft (high-Y) section
+    pub const FORWARD: u8 = 4; // Prefer forward (low-Y) section
+
+    /// Returns the placement constraint for a room type.
+    pub fn room_placement(room_type: u8) -> u8 {
+        match room_type {
+            // Hull-facing: viewports, launch doors, exhaust, antennas, radiators, venting
+            room_types::OBSERVATORY
+            | room_types::OBSERVATION_LOUNGE
+            | room_types::COMMS_ROOM
+            | room_types::VIP_SUITE
+            | room_types::SHUTTLE_BAY
+            | room_types::AIRLOCK
+            | room_types::CARGO_BAY
+            | room_types::FUEL_STORAGE
+            | room_types::COOLING_PLANT => HULL_FACING,
+
+            // Interior/protected: shielding, security, contamination containment
+            room_types::REACTOR
+            | room_types::CIC
+            | room_types::BRIG
+            | room_types::ARMORY
+            | room_types::WATER_PURIFICATION
+            | room_types::QUARANTINE
+            | room_types::WATER_RECYCLING
+            | room_types::WASTE_PROCESSING
+            | room_types::HOLODECK => INTERIOR,
+
+            // Aft section: propulsion, engineering
+            room_types::ENGINE_ROOM | room_types::ENGINEERING => AFT,
+
+            // Forward: command
+            room_types::BRIDGE => FORWARD,
+
+            _ => NONE,
+        }
+    }
+
+    /// Parses a placement string from the manifest JSON.
+    pub fn from_str(s: &str) -> u8 {
+        match s {
+            "hull_facing" => HULL_FACING,
+            "interior" => INTERIOR,
+            "aft" => AFT,
+            "forward" => FORWARD,
+            _ => NONE,
+        }
     }
 }
 
@@ -323,7 +390,14 @@ mod tests {
         assert_eq!(room_deck_span(room_types::REACTOR), 2);
         assert_eq!(room_deck_span(room_types::ENGINE_ROOM), 2);
         assert_eq!(room_deck_span(room_types::CARGO_BAY), 2);
-        assert_eq!(room_deck_span(room_types::SHUTTLE_BAY), 2);
+        assert_eq!(room_deck_span(room_types::SHUTTLE_BAY), 3);
+        assert_eq!(room_deck_span(room_types::ENGINEERING), 2);
+        assert_eq!(room_deck_span(room_types::BACKUP_REACTOR), 2);
+        assert_eq!(room_deck_span(room_types::FUEL_STORAGE), 2);
+        assert_eq!(room_deck_span(room_types::HYDROPONICS), 2);
+        assert_eq!(room_deck_span(room_types::ARBORETUM), 2);
+        assert_eq!(room_deck_span(room_types::THEATRE), 2);
+        assert_eq!(room_deck_span(room_types::POOL), 2);
     }
 
     #[test]
@@ -331,6 +405,7 @@ mod tests {
         assert!((room_ceiling_height(room_types::BRIDGE) - 3.5).abs() < 0.001);
         assert!((room_ceiling_height(room_types::REACTOR) - 7.0).abs() < 0.001);
         assert!((room_ceiling_height(room_types::CORRIDOR) - 3.5).abs() < 0.001);
+        assert!((room_ceiling_height(room_types::SHUTTLE_BAY) - 10.5).abs() < 0.001);
     }
 
     #[test]
@@ -351,5 +426,41 @@ mod tests {
     fn door_heights_both_standard() {
         let h = door_opening_height(room_types::MESS_HALL, room_types::GALLEY);
         assert!((h - STANDARD_DOOR_HEIGHT).abs() < 0.001);
+    }
+
+    #[test]
+    fn placement_constraints() {
+        use super::placement;
+        assert_eq!(
+            placement::room_placement(room_types::SHUTTLE_BAY),
+            placement::HULL_FACING
+        );
+        assert_eq!(
+            placement::room_placement(room_types::REACTOR),
+            placement::INTERIOR
+        );
+        assert_eq!(
+            placement::room_placement(room_types::ENGINE_ROOM),
+            placement::AFT
+        );
+        assert_eq!(
+            placement::room_placement(room_types::BRIDGE),
+            placement::FORWARD
+        );
+        assert_eq!(
+            placement::room_placement(room_types::CABIN_SINGLE),
+            placement::NONE
+        );
+    }
+
+    #[test]
+    fn placement_from_str() {
+        use super::placement;
+        assert_eq!(placement::from_str("hull_facing"), placement::HULL_FACING);
+        assert_eq!(placement::from_str("interior"), placement::INTERIOR);
+        assert_eq!(placement::from_str("aft"), placement::AFT);
+        assert_eq!(placement::from_str("forward"), placement::FORWARD);
+        assert_eq!(placement::from_str("none"), placement::NONE);
+        assert_eq!(placement::from_str(""), placement::NONE);
     }
 }

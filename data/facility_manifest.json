@@ -2,92 +2,102 @@
   {
     "name": "Bridge",
     "room_type": 0,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 10,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "forward"
   },
   {
     "name": "CIC",
     "room_type": 2,
-    "target_area": 50.0,
+    "target_area": 80.0,
     "capacity": 8,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "interior"
   },
   {
     "name": "Conference Room",
     "room_type": 1,
-    "target_area": 45.0,
+    "target_area": 50.0,
     "capacity": 12,
     "count": 4,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "none"
   },
   {
     "name": "Captain's Ready Room",
     "room_type": 4,
-    "target_area": 35.0,
+    "target_area": 40.0,
     "capacity": 2,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "none"
   },
   {
     "name": "Observatory",
     "room_type": 8,
-    "target_area": 80.0,
+    "target_area": 150.0,
     "capacity": 6,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "hull_facing"
   },
   {
     "name": "Comms Room",
     "room_type": 3,
-    "target_area": 35.0,
+    "target_area": 50.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "hull_facing"
   },
   {
     "name": "Security Office",
     "room_type": 5,
-    "target_area": 45.0,
+    "target_area": 60.0,
     "capacity": 6,
     "count": 2,
     "deck_zone": 0,
-    "group": 1
+    "group": 1,
+    "placement": "none"
   },
   {
     "name": "Admin Office",
     "room_type": 7,
-    "target_area": 45.0,
+    "target_area": 50.0,
     "capacity": 8,
     "count": 2,
     "deck_zone": 0,
-    "group": 0
+    "group": 0,
+    "placement": "none"
   },
   {
     "name": "Brig",
     "room_type": 6,
-    "target_area": 40.0,
+    "target_area": 50.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 0,
-    "group": 1
+    "group": 1,
+    "placement": "interior"
   },
   {
     "name": "Officer Quarters",
     "room_type": 15,
-    "target_area": 22.0,
+    "target_area": 25.0,
     "capacity": 1,
     "count": 20,
     "deck_zone": 0,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Single Cabin",
@@ -96,7 +106,8 @@
     "capacity": 1,
     "count": 200,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Double Cabin",
@@ -105,34 +116,38 @@
     "capacity": 2,
     "count": 50,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Family Suite",
     "room_type": 12,
-    "target_area": 35.0,
+    "target_area": 40.0,
     "capacity": 4,
     "count": 30,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Shared Bathroom",
     "room_type": 17,
-    "target_area": 9.0,
+    "target_area": 12.0,
     "capacity": 4,
     "count": 50,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Shared Laundry",
     "room_type": 18,
-    "target_area": 18.0,
+    "target_area": 20.0,
     "capacity": 3,
     "count": 10,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Cafe",
@@ -141,34 +156,38 @@
     "capacity": 20,
     "count": 8,
     "deck_zone": 1,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Crew Quarters",
     "room_type": 14,
-    "target_area": 14.0,
+    "target_area": 16.0,
     "capacity": 1,
     "count": 60,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "Crew Lounge",
     "room_type": 55,
-    "target_area": 50.0,
+    "target_area": 60.0,
     "capacity": 20,
     "count": 4,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "none"
   },
   {
     "name": "VIP Suite",
     "room_type": 13,
-    "target_area": 55.0,
+    "target_area": 60.0,
     "capacity": 2,
     "count": 6,
     "deck_zone": 1,
-    "group": 2
+    "group": 2,
+    "placement": "hull_facing"
   },
   {
     "name": "Mess Hall",
@@ -177,7 +196,8 @@
     "capacity": 200,
     "count": 4,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Galley",
@@ -186,70 +206,88 @@
     "capacity": 6,
     "count": 4,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Hospital Ward",
     "room_type": 30,
-    "target_area": 250.0,
+    "target_area": 300.0,
     "capacity": 20,
     "count": 1,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Surgery",
     "room_type": 31,
-    "target_area": 55.0,
+    "target_area": 70.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Dental Clinic",
     "room_type": 32,
-    "target_area": 35.0,
+    "target_area": 40.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Pharmacy",
     "room_type": 33,
-    "target_area": 35.0,
+    "target_area": 40.0,
     "capacity": 3,
     "count": 2,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Mental Health",
     "room_type": 34,
-    "target_area": 35.0,
+    "target_area": 40.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Quarantine",
     "room_type": 35,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 10,
     "count": 1,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "interior"
   },
   {
     "name": "Morgue",
     "room_type": 36,
-    "target_area": 35.0,
+    "target_area": 45.0,
     "capacity": 2,
     "count": 1,
     "deck_zone": 2,
-    "group": 4
+    "group": 4,
+    "placement": "none"
+  },
+  {
+    "name": "Medbay",
+    "room_type": 37,
+    "target_area": 60.0,
+    "capacity": 6,
+    "count": 3,
+    "deck_zone": 2,
+    "group": 4,
+    "placement": "none"
   },
   {
     "name": "Food Storage Cold",
@@ -258,7 +296,8 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Food Storage Dry",
@@ -267,25 +306,28 @@
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Bakery",
     "room_type": 26,
-    "target_area": 40.0,
+    "target_area": 45.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Water Purification",
     "room_type": 27,
-    "target_area": 80.0,
+    "target_area": 100.0,
     "capacity": 3,
     "count": 1,
     "deck_zone": 2,
-    "group": 9
+    "group": 9,
+    "placement": "interior"
   },
   {
     "name": "Wardroom",
@@ -294,25 +336,28 @@
     "capacity": 20,
     "count": 2,
     "deck_zone": 2,
-    "group": 3
+    "group": 3,
+    "placement": "none"
   },
   {
     "name": "Gym",
     "room_type": 40,
-    "target_area": 250.0,
+    "target_area": 300.0,
     "capacity": 30,
     "count": 4,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Theatre",
     "room_type": 41,
-    "target_area": 350.0,
+    "target_area": 400.0,
     "capacity": 200,
     "count": 1,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Library",
@@ -321,16 +366,18 @@
     "capacity": 30,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Bar",
     "room_type": 45,
-    "target_area": 50.0,
+    "target_area": 60.0,
     "capacity": 25,
     "count": 4,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Chapel",
@@ -339,16 +386,18 @@
     "capacity": 15,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Game Room",
     "room_type": 44,
-    "target_area": 50.0,
+    "target_area": 60.0,
     "capacity": 15,
     "count": 3,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Art Studio",
@@ -357,7 +406,8 @@
     "capacity": 10,
     "count": 1,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Music Room",
@@ -366,34 +416,38 @@
     "capacity": 8,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Pool",
     "room_type": 51,
-    "target_area": 250.0,
+    "target_area": 300.0,
     "capacity": 30,
     "count": 1,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Arboretum",
     "room_type": 49,
-    "target_area": 800.0,
+    "target_area": 1000.0,
     "capacity": 50,
     "count": 1,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Observation Lounge",
     "room_type": 50,
-    "target_area": 120.0,
+    "target_area": 200.0,
     "capacity": 20,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "hull_facing"
   },
   {
     "name": "Nursery",
@@ -402,16 +456,18 @@
     "capacity": 15,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "School",
     "room_type": 53,
-    "target_area": 60.0,
+    "target_area": 80.0,
     "capacity": 25,
     "count": 4,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Shops",
@@ -420,106 +476,118 @@
     "capacity": 15,
     "count": 4,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Recreation Center",
     "room_type": 54,
-    "target_area": 120.0,
+    "target_area": 150.0,
     "capacity": 40,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "none"
   },
   {
     "name": "Holodeck",
     "room_type": 48,
-    "target_area": 60.0,
+    "target_area": 80.0,
     "capacity": 6,
     "count": 2,
     "deck_zone": 3,
-    "group": 5
+    "group": 5,
+    "placement": "interior"
   },
   {
     "name": "Hydroponics Bay",
     "room_type": 80,
-    "target_area": 1000.0,
+    "target_area": 1200.0,
     "capacity": 8,
     "count": 4,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "Atmosphere Processing",
     "room_type": 81,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "Water Recycling",
     "room_type": 82,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 6,
     "count": 2,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "interior"
   },
   {
     "name": "Waste Processing",
     "room_type": 83,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "interior"
   },
   {
     "name": "Env Monitoring",
     "room_type": 84,
-    "target_area": 50.0,
+    "target_area": 60.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "Life Support Center",
     "room_type": 85,
-    "target_area": 200.0,
+    "target_area": 250.0,
     "capacity": 8,
     "count": 1,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "HVAC Control",
     "room_type": 86,
-    "target_area": 120.0,
+    "target_area": 140.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "Laboratory",
     "room_type": 95,
-    "target_area": 80.0,
+    "target_area": 100.0,
     "capacity": 10,
     "count": 4,
     "deck_zone": 4,
-    "group": 9
+    "group": 9,
+    "placement": "none"
   },
   {
     "name": "Cargo Bay",
     "room_type": 90,
-    "target_area": 500.0,
+    "target_area": 800.0,
     "capacity": 10,
     "count": 2,
     "deck_zone": 5,
-    "group": 10
+    "group": 10,
+    "placement": "hull_facing"
   },
   {
     "name": "Storage",
@@ -528,141 +596,157 @@
     "capacity": 4,
     "count": 4,
     "deck_zone": 5,
-    "group": 10
+    "group": 10,
+    "placement": "none"
   },
   {
     "name": "Armory",
     "room_type": 92,
-    "target_area": 50.0,
+    "target_area": 60.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 5,
-    "group": 1
+    "group": 1,
+    "placement": "interior"
   },
   {
     "name": "Shuttle Bay",
     "room_type": 93,
-    "target_area": 500.0,
+    "target_area": 1000.0,
     "capacity": 10,
     "count": 1,
     "deck_zone": 5,
-    "group": 10
+    "group": 10,
+    "placement": "hull_facing"
   },
   {
     "name": "Airlock",
     "room_type": 94,
-    "target_area": 40.0,
+    "target_area": 50.0,
     "capacity": 4,
     "count": 4,
     "deck_zone": 5,
-    "group": 10
+    "group": 10,
+    "placement": "hull_facing"
   },
   {
     "name": "Reactor",
     "room_type": 61,
-    "target_area": 500.0,
+    "target_area": 600.0,
     "capacity": 5,
     "count": 1,
     "deck_zone": 6,
-    "group": 8
+    "group": 8,
+    "placement": "interior"
   },
   {
     "name": "Backup Reactor",
     "room_type": 62,
-    "target_area": 250.0,
+    "target_area": 300.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 8
+    "group": 8,
+    "placement": "interior"
   },
   {
     "name": "Engine Room",
     "room_type": 63,
-    "target_area": 500.0,
+    "target_area": 600.0,
     "capacity": 15,
     "count": 1,
     "deck_zone": 6,
-    "group": 8
+    "group": 8,
+    "placement": "aft"
   },
   {
     "name": "Main Engineering",
     "room_type": 60,
-    "target_area": 200.0,
+    "target_area": 300.0,
     "capacity": 15,
     "count": 1,
     "deck_zone": 6,
-    "group": 6
+    "group": 6,
+    "placement": "aft"
   },
   {
     "name": "Power Distribution",
     "room_type": 64,
-    "target_area": 100.0,
+    "target_area": 120.0,
     "capacity": 4,
     "count": 2,
     "deck_zone": 6,
-    "group": 6
+    "group": 6,
+    "placement": "none"
   },
   {
     "name": "Cooling Plant",
     "room_type": 71,
-    "target_area": 120.0,
+    "target_area": 150.0,
     "capacity": 6,
     "count": 2,
     "deck_zone": 6,
-    "group": 6
+    "group": 6,
+    "placement": "hull_facing"
   },
   {
     "name": "Maintenance Bay",
     "room_type": 70,
-    "target_area": 120.0,
+    "target_area": 200.0,
     "capacity": 10,
     "count": 2,
     "deck_zone": 6,
-    "group": 7
+    "group": 7,
+    "placement": "none"
   },
   {
     "name": "Machine Shop",
     "room_type": 65,
-    "target_area": 100.0,
+    "target_area": 150.0,
     "capacity": 6,
     "count": 1,
     "deck_zone": 6,
-    "group": 7
+    "group": 7,
+    "placement": "none"
   },
   {
     "name": "Electronics Lab",
     "room_type": 66,
-    "target_area": 55.0,
+    "target_area": 70.0,
     "capacity": 6,
     "count": 1,
     "deck_zone": 6,
-    "group": 6
+    "group": 6,
+    "placement": "none"
   },
   {
     "name": "Parts Storage",
     "room_type": 67,
-    "target_area": 120.0,
+    "target_area": 150.0,
     "capacity": 5,
     "count": 2,
     "deck_zone": 6,
-    "group": 10
+    "group": 10,
+    "placement": "none"
   },
   {
     "name": "Fuel Storage",
     "room_type": 68,
-    "target_area": 250.0,
+    "target_area": 400.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 8
+    "group": 8,
+    "placement": "hull_facing"
   },
   {
     "name": "Robotics Bay",
     "room_type": 69,
-    "target_area": 55.0,
+    "target_area": 80.0,
     "capacity": 4,
     "count": 1,
     "deck_zone": 6,
-    "group": 7
+    "group": 7,
+    "placement": "none"
   }
 ]

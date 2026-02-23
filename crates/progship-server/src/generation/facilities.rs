@@ -21,6 +21,8 @@ pub(super) struct FacilitySpec {
     pub count: u32,
     pub deck_zone: u8, // 0=command, 1=hab, 2=services, 3=rec, 4=lifesup, 5=cargo, 6=eng
     pub group: u8,
+    #[serde(default)]
+    pub placement: String, // "none", "hull_facing", "interior", "aft", "forward"
 }
 
 /// Deck-zone → deck range mapping.
