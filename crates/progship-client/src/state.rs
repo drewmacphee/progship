@@ -177,6 +177,9 @@ pub struct RoomLabel;
 pub struct DoorMarker;
 
 #[derive(Component)]
+pub struct DoorPlaque;
+
+#[derive(Component)]
 pub struct PersonEntity {
     pub person_id: u64,
 }

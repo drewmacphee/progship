@@ -173,6 +173,101 @@ pub mod room_types {
     }
 }
 
+/// Returns a short Unicode symbol for a room type, suitable for minimap and signage.
+pub fn room_type_icon(rt: u8) -> &'static str {
+    match rt {
+        // Command & Administration
+        room_types::BRIDGE => "⚑",
+        room_types::CONFERENCE => "◇",
+        room_types::CIC => "◎",
+        room_types::COMMS_ROOM => "⌁",
+        room_types::CAPTAINS_READY_ROOM => "★",
+        room_types::SECURITY_OFFICE => "⊕",
+        room_types::BRIG => "⊞",
+        room_types::ADMIN_OFFICE => "≡",
+        room_types::OBSERVATORY => "◉",
+        // Habitation
+        room_types::CABIN_SINGLE => "▪",
+        room_types::CABIN_DOUBLE => "▫",
+        room_types::FAMILY_SUITE => "⌂",
+        room_types::VIP_SUITE => "◆",
+        room_types::QUARTERS_CREW => "▪",
+        room_types::QUARTERS_OFFICER => "□",
+        room_types::QUARTERS_PASSENGER => "▪",
+        room_types::SHARED_BATHROOM => "≈",
+        room_types::SHARED_LAUNDRY => "◻",
+        // Food & Dining
+        room_types::MESS_HALL => "♨",
+        room_types::WARDROOM => "⊡",
+        room_types::GALLEY => "♨",
+        room_types::FOOD_STORAGE_COLD => "❄",
+        room_types::FOOD_STORAGE_DRY => "▥",
+        room_types::CAFE => "☕",
+        room_types::BAKERY => "◌",
+        room_types::WATER_PURIFICATION => "≋",
+        // Medical
+        room_types::HOSPITAL_WARD => "✚",
+        room_types::SURGERY => "✚",
+        room_types::DENTAL_CLINIC => "✚",
+        room_types::PHARMACY => "℞",
+        room_types::MENTAL_HEALTH => "♡",
+        room_types::QUARANTINE => "⊘",
+        room_types::MORGUE => "†",
+        room_types::MEDBAY => "✚",
+        // Recreation & Morale
+        room_types::GYM => "▲",
+        room_types::THEATRE => "♪",
+        room_types::LIBRARY => "⊞",
+        room_types::CHAPEL => "✟",
+        room_types::GAME_ROOM => "♠",
+        room_types::BAR => "♦",
+        room_types::ART_STUDIO => "✿",
+        room_types::MUSIC_ROOM => "♪",
+        room_types::HOLODECK => "◈",
+        room_types::ARBORETUM => "♣",
+        room_types::OBSERVATION_LOUNGE => "◎",
+        room_types::POOL => "≈",
+        room_types::NURSERY => "○",
+        room_types::SCHOOL => "✎",
+        room_types::RECREATION => "⊞",
+        room_types::LOUNGE => "◇",
+        room_types::SHOPS => "⊡",
+        // Engineering & Propulsion
+        room_types::ENGINEERING => "⚙",
+        room_types::REACTOR => "☢",
+        room_types::BACKUP_REACTOR => "☢",
+        room_types::ENGINE_ROOM => "⊗",
+        room_types::POWER_DISTRIBUTION => "⚡",
+        room_types::MACHINE_SHOP => "⊞",
+        room_types::ELECTRONICS_LAB => "⊡",
+        room_types::PARTS_STORAGE => "▥",
+        room_types::FUEL_STORAGE => "▼",
+        room_types::ROBOTICS_BAY => "⊞",
+        room_types::MAINTENANCE_BAY => "⊡",
+        room_types::COOLING_PLANT => "❄",
+        // Life Support
+        room_types::HYDROPONICS => "♣",
+        room_types::ATMOSPHERE_PROCESSING => "≋",
+        room_types::WATER_RECYCLING => "≈",
+        room_types::WASTE_PROCESSING => "⊘",
+        room_types::ENV_MONITORING => "◉",
+        room_types::LIFE_SUPPORT => "⊕",
+        room_types::HVAC_CONTROL => "≡",
+        // Cargo & Logistics
+        room_types::CARGO_BAY => "⊞",
+        room_types::STORAGE => "▥",
+        room_types::ARMORY => "⊕",
+        room_types::SHUTTLE_BAY => "▷",
+        room_types::AIRLOCK => "⊟",
+        room_types::LABORATORY => "⊕",
+        // Infrastructure
+        room_types::ELEVATOR_SHAFT => "↕",
+        room_types::LADDER_SHAFT => "⊥",
+        room_types::SERVICE_ELEVATOR_SHAFT => "↕",
+        _ => "",
+    }
+}
+
 pub mod deck_heights {
     use super::room_types;
 

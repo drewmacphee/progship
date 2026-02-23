@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 use progship_client_sdk::*;
+use progship_logic::constants::{room_type_icon, room_types};
 use spacetimedb_sdk::Table;
 
 use crate::state::{ConnectionState, PlayerState, ViewState};
@@ -167,7 +168,7 @@ pub fn render_minimap(
                     ..default()
                 })
                 .with_children(|map| {
-                    // Render each room as a small colored rectangle
+                    // Render each room as a small colored rectangle with type icon
                     for room in &rooms {
                         let hw = room.width / 2.0;
                         let hh = room.height / 2.0;
@@ -177,8 +178,13 @@ pub fn render_minimap(
                         let rh = (room.height * scale_y).max(1.0);
 
                         let color = minimap_room_color(room.room_type);
+                        let icon = room_type_icon(room.room_type);
+                        let show_icon = !icon.is_empty()
+                            && rw >= 8.0
+                            && rh >= 8.0
+                            && !room_types::is_corridor(room.room_type);
 
-                        map.spawn((
+                        let mut room_cmd = map.spawn((
                             Node {
                                 position_type: PositionType::Absolute,
                                 left: Val::Px(rx),
@@ -186,12 +192,29 @@ pub fn render_minimap(
                                 width: Val::Px(rw),
                                 height: Val::Px(rh),
                                 border: UiRect::all(Val::Px(0.5)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                overflow: Overflow::clip(),
                                 ..default()
                             },
                             BackgroundColor(color),
                             BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.4)),
                             MinimapRoom,
                         ));
+
+                        if show_icon {
+                            let icon_size = rw.min(rh).clamp(6.0, 10.0);
+                            room_cmd.with_children(|cell| {
+                                cell.spawn((
+                                    Text::new(icon),
+                                    TextFont {
+                                        font_size: icon_size,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                                ));
+                            });
+                        }
                     }
 
                     // Player position marker
