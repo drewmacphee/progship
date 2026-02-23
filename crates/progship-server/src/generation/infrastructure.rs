@@ -13,6 +13,7 @@ use super::hull::{hull_length, hull_width};
 use super::treemap::RoomRequest;
 use crate::tables::*;
 use progship_logic::constants::deck_heights;
+use progship_logic::constants::placement;
 use spacetimedb::{ReducerContext, Table};
 
 // Grid cell type markers
@@ -124,6 +125,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             target_area: node.required_area,
             capacity: node.capacity,
             group: node.group,
+            placement: placement::room_placement(node.function),
         });
     }
     for zr in zone_requests.iter_mut() {
@@ -923,7 +925,258 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             );
         }
 
+        // ---- Phase 3.5: Pre-place oversized rooms ----
+        // Rooms >200m² get placed directly into the grid as large rectangles before
+        // segment decomposition. This lets them claim the space they need instead
+        // of being squeezed into narrow strips.
+        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        let mut pre_placed_node_ids: Vec<u64> = Vec::new();
+
+        // Estimate area budget from inner dimensions (before segments are known)
+        let inner_w = inner_x1 - inner_x0;
+        let inner_h = inner_y1 - inner_y0;
+        let gross_inner_area = (inner_w * inner_h) as f32;
+        let est_area_budget = gross_inner_area * 0.80; // corridors+shafts take ~20%
+
+        // Collect this deck's zone rooms temporarily (peek without advancing cursors)
+        let primary_zone = deck_zone_map[deck as usize] as usize;
+        let zone_decks_total = zone_deck_counts[primary_zone];
+        let zone_deck_num = zone_deck_seen[primary_zone];
+        zone_deck_seen[primary_zone] += 1;
+        let remaining_zone_decks = zone_decks_total - zone_deck_num;
+        let cursor_start = zone_cursors[primary_zone];
+        let remaining_rooms = zone_requests[primary_zone].len() - cursor_start;
+        let fair_share = if remaining_zone_decks > 0 {
+            remaining_rooms.div_ceil(remaining_zone_decks as usize)
+        } else {
+            remaining_rooms
+        };
+
+        // Collect deck requests (all sizes) via same logic as old Phase 5
+        let mut deck_requests: Vec<RoomRequest> = Vec::new();
+        let mut filled_area = 0.0f32;
+        {
+            let cursor = &mut zone_cursors[primary_zone];
+            let mut taken = 0usize;
+            while *cursor < zone_requests[primary_zone].len()
+                && filled_area < est_area_budget
+                && taken < fair_share
+            {
+                let req = zone_requests[primary_zone][*cursor].clone();
+                filled_area += req.target_area;
+                deck_requests.push(req);
+                *cursor += 1;
+                taken += 1;
+            }
+        }
+        // Overflow from other zones if underfilled
+        if filled_area < est_area_budget * 0.7 {
+            let overflow_order = [1u8, 2, 3, 4, 5, 0, 6];
+            for &oz in &overflow_order {
+                if oz as usize == primary_zone {
+                    continue;
+                }
+                let oc = &mut zone_cursors[oz as usize];
+                while *oc < zone_requests[oz as usize].len() && filled_area < est_area_budget {
+                    let req = zone_requests[oz as usize][*oc].clone();
+                    filled_area += req.target_area;
+                    deck_requests.push(req);
+                    *oc += 1;
+                }
+                if filled_area >= est_area_budget {
+                    break;
+                }
+            }
+        }
+        // Sort largest first
+        deck_requests.sort_by(|a, b| {
+            b.target_area
+                .partial_cmp(&a.target_area)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
+
+        // Minimum area threshold for pre-placement (smaller rooms go through BSP)
+        const LARGE_ROOM_THRESHOLD: f32 = 200.0;
+
+        // Separate oversized from normal
+        let (large_requests, normal_requests): (Vec<RoomRequest>, Vec<RoomRequest>) = deck_requests
+            .into_iter()
+            .partition(|r| r.target_area >= LARGE_ROOM_THRESHOLD);
+
+        // Place each large room directly into the grid
+        let mid_y = (inner_y0 + inner_y1) / 2;
+        let _mid_x = (inner_x0 + inner_x1) / 2;
+
+        for req in &large_requests {
+            let target_side = (req.target_area.sqrt()) as usize;
+            let want_w = target_side.max(MIN_ROOM_DIM);
+            let want_h = ((req.target_area / want_w as f32).ceil() as usize).max(MIN_ROOM_DIM);
+
+            // Determine preferred region based on placement constraint
+            let (search_regions, prefer_hull) = match req.placement {
+                p if p == placement::HULL_FACING => {
+                    // Place along perimeter ring inner edge (any side)
+                    let regions: Vec<(usize, usize, usize, usize)> = vec![
+                        // North strip (just inside north ring)
+                        (inner_x0, inner_y0, inner_w, RING_WIDTH * 2),
+                        // South strip
+                        (
+                            inner_x0,
+                            inner_y1.saturating_sub(RING_WIDTH * 2),
+                            inner_w,
+                            RING_WIDTH * 2,
+                        ),
+                        // West strip
+                        (inner_x0, inner_y0, RING_WIDTH * 2, inner_h),
+                        // East strip
+                        (
+                            inner_x1.saturating_sub(RING_WIDTH * 2),
+                            inner_y0,
+                            RING_WIDTH * 2,
+                            inner_h,
+                        ),
+                    ];
+                    (regions, true)
+                }
+                p if p == placement::AFT => {
+                    // South half
+                    (vec![(inner_x0, mid_y, inner_w, inner_y1 - mid_y)], false)
+                }
+                p if p == placement::FORWARD => {
+                    // North half
+                    (vec![(inner_x0, inner_y0, inner_w, mid_y - inner_y0)], false)
+                }
+                p if p == placement::INTERIOR => {
+                    // Central area (away from perimeter)
+                    let margin = RING_WIDTH * 2;
+                    let cx0 = inner_x0 + margin;
+                    let cy0 = inner_y0 + margin;
+                    let cw = inner_w.saturating_sub(margin * 2);
+                    let ch = inner_h.saturating_sub(margin * 2);
+                    (vec![(cx0, cy0, cw, ch)], false)
+                }
+                _ => {
+                    // No constraint — try whole inner area
+                    (vec![(inner_x0, inner_y0, inner_w, inner_h)], false)
+                }
+            };
+
+            // Try to find a clear rectangle in each search region
+            let mut best_pos: Option<(usize, usize, usize, usize)> = None;
+
+            for (rx, ry, rw, rh) in &search_regions {
+                if let Some(pos) = find_clear_rect_for_room(
+                    &grid,
+                    hw,
+                    hl,
+                    *rx,
+                    *ry,
+                    *rw,
+                    *rh,
+                    want_w,
+                    want_h,
+                    prefer_hull,
+                    ring_x0,
+                    ring_x1,
+                    ring_y0,
+                    ring_y1,
+                ) {
+                    best_pos = Some(pos);
+                    break;
+                }
+            }
+
+            // Fallback: try entire inner area if constrained search failed
+            if best_pos.is_none() {
+                best_pos = find_clear_rect_for_room(
+                    &grid, hw, hl, inner_x0, inner_y0, inner_w, inner_h, want_w, want_h, false,
+                    ring_x0, ring_x1, ring_y0, ring_y1,
+                );
+            }
+
+            if let Some((px, py, pw, ph)) = best_pos {
+                let room_id = next_id();
+
+                // Stamp grid
+                for gx in px..(px + pw).min(hw) {
+                    for gy in py..(py + ph).min(hl) {
+                        if grid[gx][gy] == CELL_EMPTY {
+                            grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                        }
+                    }
+                }
+
+                ctx.db.room().insert(Room {
+                    id: room_id,
+                    node_id: req.node_id,
+                    name: req.name.clone(),
+                    room_type: req.room_type,
+                    deck,
+                    x: px as f32 + pw as f32 / 2.0,
+                    y: py as f32 + ph as f32 / 2.0,
+                    width: pw as f32,
+                    height: ph as f32,
+                    capacity: req.capacity,
+                    ceiling_height: deck_heights::room_ceiling_height(req.room_type),
+                    deck_span: deck_heights::room_deck_span(req.room_type),
+                });
+
+                // Door to nearest corridor
+                create_corridor_door(
+                    ctx,
+                    room_id,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    spine_left,
+                    spine_right,
+                    &spine_segments,
+                    &cross_rooms,
+                    &spur_rooms,
+                    inner_x0,
+                    inner_x1,
+                    inner_y0,
+                    inner_y1,
+                    ring_x0,
+                    ring_x1,
+                    ring_y0,
+                    ring_y1,
+                    ring_n_id,
+                    ring_s_id,
+                    ring_w_id,
+                    ring_e_id,
+                );
+
+                placed_rooms.push((room_id, px, py, pw, ph, req.room_type));
+                pre_placed_node_ids.push(req.node_id);
+
+                log::info!(
+                    "Deck {}: pre-placed {} ({}m²) at ({},{}) {}×{} = {}m²",
+                    deck + 1,
+                    req.name,
+                    req.target_area,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    pw * ph
+                );
+            } else {
+                log::warn!(
+                    "Deck {}: could not pre-place {} ({}m²)",
+                    deck + 1,
+                    req.name,
+                    req.target_area
+                );
+            }
+        }
+
+        // Remaining requests for BSP (normal-sized rooms only)
+        let deck_requests = normal_requests;
+
         // ---- Phase 4: Identify rectangular segments between corridors ----
+        // Segments are computed AFTER oversized rooms so they naturally work around them.
         let segments = find_segments(
             &grid,
             hw,
@@ -943,68 +1196,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             ring_s_id,
         );
 
-        // ---- Phase 5: Collect room requests for this deck (proportional fill) ----
-        let primary_zone = deck_zone_map[deck as usize] as usize;
-        let mut deck_requests: Vec<RoomRequest> = Vec::new();
-        let total_seg_area: usize = segments.iter().map(|s| s.w * s.h).sum();
-        let mut filled_area = 0.0f32;
-        let area_budget = total_seg_area as f32 * 0.95;
-
-        // Proportional distribution: divide remaining rooms across remaining decks for this zone
-        let zone_decks_total = zone_deck_counts[primary_zone];
-        let zone_deck_num = zone_deck_seen[primary_zone]; // 0-indexed
-        zone_deck_seen[primary_zone] += 1;
-        let remaining_zone_decks = zone_decks_total - zone_deck_num;
-
-        let cursor = &mut zone_cursors[primary_zone];
-        let remaining_rooms = zone_requests[primary_zone].len() - *cursor;
-        // Each deck gets at most ceil(remaining / remaining_decks) rooms
-        let fair_share = if remaining_zone_decks > 0 {
-            remaining_rooms.div_ceil(remaining_zone_decks as usize)
-        } else {
-            remaining_rooms
-        };
-        let mut taken = 0usize;
-        while *cursor < zone_requests[primary_zone].len()
-            && filled_area < area_budget
-            && taken < fair_share
-        {
-            let req = zone_requests[primary_zone][*cursor].clone();
-            filled_area += req.target_area;
-            deck_requests.push(req);
-            *cursor += 1;
-            taken += 1;
-        }
-
-        if filled_area < area_budget * 0.7 {
-            let overflow_order = [1u8, 2, 3, 4, 5, 0, 6];
-            for &oz in &overflow_order {
-                if oz as usize == primary_zone {
-                    continue;
-                }
-                let oc = &mut zone_cursors[oz as usize];
-                while *oc < zone_requests[oz as usize].len() && filled_area < area_budget {
-                    let req = zone_requests[oz as usize][*oc].clone();
-                    filled_area += req.target_area;
-                    deck_requests.push(req);
-                    *oc += 1;
-                }
-                if filled_area >= area_budget {
-                    break;
-                }
-            }
-        }
-
-        deck_requests.sort_by(|a, b| {
-            b.target_area
-                .partial_cmp(&a.target_area)
-                .unwrap_or(core::cmp::Ordering::Equal)
-        });
-
         // ---- Phase 6: BSP room placement into segments ----
-        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        // (deck_requests now contains only normal-sized rooms; oversized were pre-placed)
         let mut request_idx = 0;
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
+        let total_seg_area: usize = segments.iter().map(|s| s.w * s.h).sum();
 
         // Sort segments largest-first so big rooms get big segments
         let mut seg_order: Vec<usize> = (0..segments.len()).collect();
@@ -2618,4 +2814,97 @@ fn compute_optimal_deck_count(
         best = d;
     }
     best
+}
+
+/// Find the best clear rectangle within a search region for placing a large room.
+///
+/// Scans the search region for the largest contiguous empty rectangle that can
+/// accommodate the requested room dimensions. Prefers positions that touch the
+/// ring corridor (for hull-facing rooms) when `prefer_hull` is true.
+///
+/// Returns `Some((x, y, w, h))` if a valid placement is found.
+#[allow(clippy::too_many_arguments)]
+fn find_clear_rect_for_room(
+    grid: &[Vec<u8>],
+    hw: usize,
+    hl: usize,
+    search_x: usize,
+    search_y: usize,
+    search_w: usize,
+    search_h: usize,
+    want_w: usize,
+    want_h: usize,
+    prefer_hull: bool,
+    ring_x0: usize,
+    ring_x1: usize,
+    ring_y0: usize,
+    ring_y1: usize,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut best: Option<(usize, usize, usize, usize, usize)> = None; // (x, y, w, h, score)
+
+    // Scan with a sliding window, step by 1
+    let max_x = (search_x + search_w).min(hw);
+    let max_y = (search_y + search_h).min(hl);
+
+    // Try placing at each valid position within the search region
+    let step = 2; // speed up scan
+    let mut y = search_y;
+    while y + MIN_ROOM_DIM <= max_y {
+        let mut x = search_x;
+        while x + MIN_ROOM_DIM <= max_x {
+            // Find max clear width from this position
+            let mut clear_w = 0usize;
+            for dx in 0..(max_x - x) {
+                if grid[x + dx][y] != CELL_EMPTY {
+                    break;
+                }
+                clear_w = dx + 1;
+            }
+            if clear_w < MIN_ROOM_DIM {
+                x += step;
+                continue;
+            }
+
+            // Find max clear height for this width
+            let rw = clear_w.min(want_w);
+            let mut clear_h = 0usize;
+            'height: for dy in 0..(max_y - y) {
+                for dx in 0..rw {
+                    if grid[x + dx][y + dy] != CELL_EMPTY {
+                        break 'height;
+                    }
+                }
+                clear_h = dy + 1;
+            }
+            if clear_h < MIN_ROOM_DIM {
+                x += step;
+                continue;
+            }
+
+            let rh = clear_h.min(want_h);
+            let area = rw * rh;
+
+            // Score: prefer larger area, bonus for hull-adjacent when requested
+            let mut score = area;
+            if prefer_hull {
+                // Bonus if touching ring corridor
+                let touches_ring = x <= ring_x0 + RING_WIDTH + 1
+                    || x + rw >= ring_x1.saturating_sub(RING_WIDTH + 1)
+                    || y <= ring_y0 + RING_WIDTH + 1
+                    || y + rh >= ring_y1.saturating_sub(RING_WIDTH + 1);
+                if touches_ring {
+                    score += area; // double score for hull-adjacent
+                }
+            }
+
+            if best.is_none() || score > best.unwrap().4 {
+                best = Some((x, y, rw, rh, score));
+            }
+
+            x += step;
+        }
+        y += step;
+    }
+
+    best.map(|(x, y, w, h, _)| (x, y, w, h))
 }
