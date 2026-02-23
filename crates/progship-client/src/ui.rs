@@ -7,8 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState,
-    ToastContainer, UiState, ViewState,
+    ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState, ToastContainer,
+    UiState, ViewState,
 };
 
 pub fn setup_ui(mut commands: Commands) {

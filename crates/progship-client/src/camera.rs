@@ -139,10 +139,7 @@ pub fn camera_follow_player(
 }
 
 /// Quit the app on Escape or Ctrl+Q.
-pub fn handle_quit(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut exit: MessageWriter<AppExit>,
-) {
+pub fn handle_quit(keyboard: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
     if ctrl && keyboard.just_pressed(KeyCode::KeyQ) {
         exit.write(AppExit::Success);

@@ -262,11 +262,10 @@ pub fn render_minimap(
                                 ));
 
                                 // Direction indicator — line of dots in look direction
-                                // fps_yaw: 0 = +Z in Bevy, but minimap Y-axis = world Z
-                                // sin(yaw) points left/right (X on minimap), cos(yaw) points forward (Y on minimap)
+                                // yaw=0 faces -Z (Bevy) = north (low Y) = UP on minimap (negative dy)
                                 let yaw = view.fps_yaw;
-                                let dx = -yaw.sin(); // minimap X direction
-                                let dy = yaw.cos(); // minimap Y direction (positive = down on screen)
+                                let dx = -yaw.sin();
+                                let dy = -yaw.cos();
                                 let dot_len = 10.0;
                                 for i in 1..=3 {
                                     let t = i as f32 * (dot_len / 3.0);

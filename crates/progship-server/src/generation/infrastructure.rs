@@ -1015,25 +1015,26 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             // Determine preferred region based on placement constraint
             let (search_regions, prefer_hull) = match req.placement {
                 p if p == placement::HULL_FACING => {
-                    // Place along perimeter ring inner edge (any side)
+                    // Place overlapping the perimeter ring so room touches hull.
+                    // Search starts at ring boundary (not inner), includes corridor cells.
                     let regions: Vec<(usize, usize, usize, usize)> = vec![
-                        // North strip (just inside north ring)
-                        (inner_x0, inner_y0, inner_w, RING_WIDTH * 2),
-                        // South strip
+                        // South strip (aft — prefer first for shuttle bays etc.)
                         (
-                            inner_x0,
-                            inner_y1.saturating_sub(RING_WIDTH * 2),
-                            inner_w,
-                            RING_WIDTH * 2,
+                            ring_x0,
+                            ring_y1.saturating_sub(RING_WIDTH * 3),
+                            ring_x1 - ring_x0,
+                            RING_WIDTH * 3,
                         ),
+                        // North strip
+                        (ring_x0, ring_y0, ring_x1 - ring_x0, RING_WIDTH * 3),
                         // West strip
-                        (inner_x0, inner_y0, RING_WIDTH * 2, inner_h),
+                        (ring_x0, ring_y0, RING_WIDTH * 3, ring_y1 - ring_y0),
                         // East strip
                         (
-                            inner_x1.saturating_sub(RING_WIDTH * 2),
-                            inner_y0,
-                            RING_WIDTH * 2,
-                            inner_h,
+                            ring_x1.saturating_sub(RING_WIDTH * 3),
+                            ring_y0,
+                            RING_WIDTH * 3,
+                            ring_y1 - ring_y0,
                         ),
                     ];
                     (regions, true)
@@ -1097,10 +1098,12 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             if let Some((px, py, pw, ph)) = best_pos {
                 let room_id = next_id();
 
-                // Stamp grid
+                // Stamp grid — hull-facing rooms overwrite ring corridor cells
+                let is_hull = req.placement == placement::HULL_FACING;
                 for gx in px..(px + pw).min(hw) {
                     for gy in py..(py + ph).min(hl) {
-                        if grid[gx][gy] == CELL_EMPTY {
+                        let c = grid[gx][gy];
+                        if c == CELL_EMPTY || (is_hull && c == CELL_MAIN_CORRIDOR) {
                             grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
                         }
                     }
@@ -2842,12 +2845,13 @@ fn find_clear_rect_for_room(
 ) -> Option<(usize, usize, usize, usize)> {
     let mut best: Option<(usize, usize, usize, usize, usize)> = None; // (x, y, w, h, score)
 
-    // Scan with a sliding window, step by 1
     let max_x = (search_x + search_w).min(hw);
     let max_y = (search_y + search_h).min(hl);
 
-    // Try placing at each valid position within the search region
-    let step = 2; // speed up scan
+    // Hull-facing rooms can overwrite ring corridor cells
+    let cell_ok = |c: u8| -> bool { c == CELL_EMPTY || (prefer_hull && c == CELL_MAIN_CORRIDOR) };
+
+    let step = 2;
     let mut y = search_y;
     while y + MIN_ROOM_DIM <= max_y {
         let mut x = search_x;
@@ -2855,7 +2859,7 @@ fn find_clear_rect_for_room(
             // Find max clear width from this position
             let mut clear_w = 0usize;
             for dx in 0..(max_x - x) {
-                if grid[x + dx][y] != CELL_EMPTY {
+                if !cell_ok(grid[x + dx][y]) {
                     break;
                 }
                 clear_w = dx + 1;
@@ -2870,7 +2874,7 @@ fn find_clear_rect_for_room(
             let mut clear_h = 0usize;
             'height: for dy in 0..(max_y - y) {
                 for dx in 0..rw {
-                    if grid[x + dx][y + dy] != CELL_EMPTY {
+                    if !cell_ok(grid[x + dx][y + dy]) {
                         break 'height;
                     }
                 }
@@ -2884,16 +2888,15 @@ fn find_clear_rect_for_room(
             let rh = clear_h.min(want_h);
             let area = rw * rh;
 
-            // Score: prefer larger area, bonus for hull-adjacent when requested
+            // Score: prefer larger area, bonus for touching hull edge
             let mut score = area;
             if prefer_hull {
-                // Bonus if touching ring corridor
-                let touches_ring = x <= ring_x0 + RING_WIDTH + 1
-                    || x + rw >= ring_x1.saturating_sub(RING_WIDTH + 1)
-                    || y <= ring_y0 + RING_WIDTH + 1
-                    || y + rh >= ring_y1.saturating_sub(RING_WIDTH + 1);
-                if touches_ring {
-                    score += area; // double score for hull-adjacent
+                let touches_hull = x <= ring_x0 + 1
+                    || x + rw >= ring_x1.saturating_sub(1)
+                    || y <= ring_y0 + 1
+                    || y + rh >= ring_y1.saturating_sub(1);
+                if touches_hull {
+                    score += area * 2; // triple score for hull-adjacent
                 }
             }
 
