@@ -36,7 +36,7 @@ impl Default for MinimapState {
     fn default() -> Self {
         Self {
             visible: true,
-            panel_size: 250.0,
+            panel_size: 350.0,
             margin: 10.0,
         }
     }
@@ -93,16 +93,18 @@ pub fn render_minimap(
         return;
     }
 
-    // Find deck bounds
+    // Find deck bounds (room.x/y are centers, not bottom-left)
     let mut min_x = f32::MAX;
     let mut min_y = f32::MAX;
     let mut max_x = f32::MIN;
     let mut max_y = f32::MIN;
     for room in &rooms {
-        min_x = min_x.min(room.x);
-        min_y = min_y.min(room.y);
-        max_x = max_x.max(room.x + room.width);
-        max_y = max_y.max(room.y + room.height);
+        let hw = room.width / 2.0;
+        let hh = room.height / 2.0;
+        min_x = min_x.min(room.x - hw);
+        min_y = min_y.min(room.y - hh);
+        max_x = max_x.max(room.x + hw);
+        max_y = max_y.max(room.y + hh);
     }
 
     let deck_w = (max_x - min_x).max(1.0);
@@ -161,8 +163,10 @@ pub fn render_minimap(
                 .with_children(|map| {
                     // Render each room as a small colored rectangle
                     for room in &rooms {
-                        let rx = (room.x - min_x) * scale_x + 2.0;
-                        let ry = (max_y - (room.y + room.height)) * scale_y;
+                        let hw = room.width / 2.0;
+                        let hh = room.height / 2.0;
+                        let rx = (room.x - hw - min_x) * scale_x + 2.0;
+                        let ry = (max_y - (room.y + hh)) * scale_y;
                         let rw = (room.width * scale_x).max(1.0);
                         let rh = (room.height * scale_y).max(1.0);
 

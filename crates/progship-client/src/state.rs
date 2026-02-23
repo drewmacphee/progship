@@ -73,12 +73,6 @@ impl ConnectionConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CameraMode {
-    TopDown,
-    FirstPerson,
-}
-
 #[derive(Resource)]
 pub struct ViewState {
     pub current_deck: i32,
@@ -86,12 +80,10 @@ pub struct ViewState {
     pub rooms_dirty: bool,
     pub minimap_dirty: bool,
     pub prev_room_count: usize,
-    pub camera_height: f32,
     pub tick_timer: f32,
     pub people_sync_timer: f32,
     pub hud_timer: f32,
     pub info_timer: f32,
-    pub camera_mode: CameraMode,
     pub fps_yaw: f32,
     pub fps_pitch: f32,
 }
@@ -104,12 +96,10 @@ impl Default for ViewState {
             rooms_dirty: true,
             minimap_dirty: true,
             prev_room_count: 0,
-            camera_height: 150.0, // Default shows ~200m area on 400m deck
             tick_timer: 0.0,
             people_sync_timer: 0.0,
             hud_timer: 0.0,
             info_timer: 0.0,
-            camera_mode: CameraMode::FirstPerson,
             fps_yaw: 0.0,
             fps_pitch: 0.0,
         }

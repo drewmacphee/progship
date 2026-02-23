@@ -9,7 +9,7 @@ use progship_client_sdk::*;
 use progship_logic::constants::room_types;
 use spacetimedb_sdk::{DbContext, Table};
 
-use crate::state::{CameraMode, ConnectionState, PlayerState, Toast, UiState, ViewState};
+use crate::state::{ConnectionState, PlayerState, Toast, UiState, ViewState};
 
 pub fn player_input(
     state: Res<ConnectionState>,
@@ -25,54 +25,29 @@ pub fn player_input(
         _ => return,
     };
 
-    // WASD movement
-    let speed = match view.camera_mode {
-        CameraMode::TopDown => {
-            let zoom_factor = (view.camera_height / 80.0).max(0.5);
-            15.0 * zoom_factor * time.delta_secs()
-        }
-        CameraMode::FirstPerson => 5.0 * time.delta_secs(),
-    };
+    // WASD movement relative to yaw direction
+    let speed = 5.0 * time.delta_secs();
     let mut dx = 0.0f32;
     let mut dy = 0.0f32;
 
-    match view.camera_mode {
-        CameraMode::TopDown => {
-            if keyboard.pressed(KeyCode::KeyW) {
-                dy -= speed;
-            }
-            if keyboard.pressed(KeyCode::KeyS) {
-                dy += speed;
-            }
-            if keyboard.pressed(KeyCode::KeyA) {
-                dx -= speed;
-            }
-            if keyboard.pressed(KeyCode::KeyD) {
-                dx += speed;
-            }
-        }
-        CameraMode::FirstPerson => {
-            // Movement relative to yaw direction
-            let (sin_yaw, cos_yaw) = view.fps_yaw.sin_cos();
-            let mut fwd = 0.0f32;
-            let mut right = 0.0f32;
-            if keyboard.pressed(KeyCode::KeyW) {
-                fwd += speed;
-            }
-            if keyboard.pressed(KeyCode::KeyS) {
-                fwd -= speed;
-            }
-            if keyboard.pressed(KeyCode::KeyA) {
-                right -= speed;
-            }
-            if keyboard.pressed(KeyCode::KeyD) {
-                right += speed;
-            }
-            // Yaw=0 faces -Z in Bevy (= -Y game coords = north)
-            dx += -sin_yaw * fwd + cos_yaw * right;
-            dy += -cos_yaw * fwd - sin_yaw * right;
-        }
+    let (sin_yaw, cos_yaw) = view.fps_yaw.sin_cos();
+    let mut fwd = 0.0f32;
+    let mut right = 0.0f32;
+    if keyboard.pressed(KeyCode::KeyW) {
+        fwd += speed;
     }
+    if keyboard.pressed(KeyCode::KeyS) {
+        fwd -= speed;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        right -= speed;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        right += speed;
+    }
+    // Yaw=0 faces -Z in Bevy (= -Y game coords = north)
+    dx += -sin_yaw * fwd + cos_yaw * right;
+    dy += -cos_yaw * fwd - sin_yaw * right;
 
     // Arrow keys for movement ONLY if not in a ladder shaft
     let in_ladder_shaft = player
@@ -323,15 +298,8 @@ pub fn player_input(
         let _ = conn.reducers().set_time_scale((scale / 2.0).max(0.25));
     }
 
-    // Zoom camera — only in top-down mode
-    if view.camera_mode == CameraMode::TopDown {
-        for event in scroll_events.read() {
-            let zoom_step = view.camera_height * 0.1;
-            view.camera_height = (view.camera_height - event.y * zoom_step).clamp(15.0, 500.0);
-        }
-    } else {
-        scroll_events.clear();
-    }
+    // Scroll events not used in FPS mode
+    scroll_events.clear();
 
     // Detect new events for toasts
     let active_events: Vec<_> = conn.db.event().iter().filter(|e| e.state != 2).collect();
