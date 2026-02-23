@@ -30,6 +30,8 @@ pub struct MinimapState {
     pub panel_size: f32,
     /// Margin from screen edge.
     pub margin: f32,
+    /// Last rendered yaw (to detect rotation changes).
+    prev_yaw: f32,
 }
 
 impl Default for MinimapState {
@@ -38,6 +40,7 @@ impl Default for MinimapState {
             visible: true,
             panel_size: 350.0,
             margin: 10.0,
+            prev_yaw: f32::MAX,
         }
     }
 }
@@ -54,16 +57,19 @@ pub fn render_minimap(
     state: Res<ConnectionState>,
     mut view: ResMut<ViewState>,
     player: Res<PlayerState>,
-    minimap: Res<MinimapState>,
+    mut minimap: ResMut<MinimapState>,
     mut commands: Commands,
     existing_roots: Query<Entity, With<MinimapRoot>>,
 ) {
-    // Rebuild when dirty, visibility toggled, or player position changed
-    let needs_rebuild = view.minimap_dirty || minimap.is_changed() || player.is_changed();
+    // Rebuild when dirty, visibility toggled, player moved, or camera rotated significantly
+    let yaw_changed = (view.fps_yaw - minimap.prev_yaw).abs() > 0.05;
+    let needs_rebuild =
+        view.minimap_dirty || minimap.is_changed() || player.is_changed() || yaw_changed;
     if !needs_rebuild {
         return;
     }
     view.minimap_dirty = false;
+    minimap.prev_yaw = view.fps_yaw;
 
     // Clean up old minimap (root despawn_recursive handles all children)
     for entity in existing_roots.iter() {
@@ -231,6 +237,32 @@ pub fn render_minimap(
                                     BorderColor::all(Color::srgb(1.0, 0.4, 0.0)),
                                     MinimapPlayer,
                                 ));
+
+                                // Direction indicator — line of dots in look direction
+                                // fps_yaw: 0 = +Z in Bevy, but minimap Y-axis = world Z
+                                // sin(yaw) points left/right (X on minimap), cos(yaw) points forward (Y on minimap)
+                                let yaw = view.fps_yaw;
+                                let dx = -yaw.sin(); // minimap X direction
+                                let dy = yaw.cos(); // minimap Y direction (positive = down on screen)
+                                let dot_len = 10.0;
+                                for i in 1..=3 {
+                                    let t = i as f32 * (dot_len / 3.0);
+                                    let dot_size = 4.0 - i as f32 * 0.5; // taper: 3.5, 3.0, 2.5
+                                    let dot_x = px + dx * t - dot_size / 2.0;
+                                    let dot_y = py + dy * t - dot_size / 2.0;
+                                    map.spawn((
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            left: Val::Px(dot_x),
+                                            top: Val::Px(dot_y),
+                                            width: Val::Px(dot_size),
+                                            height: Val::Px(dot_size),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(1.0, 0.6, 0.0)),
+                                        MinimapPlayer,
+                                    ));
+                                }
                             }
                         }
                     }
