@@ -58,8 +58,8 @@ pub fn render_minimap(
     mut commands: Commands,
     existing_roots: Query<Entity, With<MinimapRoot>>,
 ) {
-    // Only rebuild when minimap is marked dirty or visibility toggled
-    let needs_rebuild = view.minimap_dirty || minimap.is_changed();
+    // Rebuild when dirty, visibility toggled, or player position changed
+    let needs_rebuild = view.minimap_dirty || minimap.is_changed() || player.is_changed();
     if !needs_rebuild {
         return;
     }
@@ -166,7 +166,7 @@ pub fn render_minimap(
                         let hw = room.width / 2.0;
                         let hh = room.height / 2.0;
                         let rx = (room.x - hw - min_x) * scale_x + 2.0;
-                        let ry = (max_y - (room.y + hh)) * scale_y;
+                        let ry = (room.y - hh - min_y) * scale_y;
                         let rw = (room.width * scale_x).max(1.0);
                         let rh = (room.height * scale_y).max(1.0);
 
@@ -200,20 +200,35 @@ pub fn render_minimap(
                                 .unwrap_or(false)
                             {
                                 let px = (pos.x - min_x) * scale_x + 2.0;
-                                let py = (max_y - pos.y) * scale_y;
+                                let py = (pos.y - min_y) * scale_y;
 
+                                // Outer glow ring
                                 map.spawn((
                                     Node {
                                         position_type: PositionType::Absolute,
-                                        left: Val::Px(px - 3.0),
-                                        top: Val::Px(py - 3.0),
-                                        width: Val::Px(6.0),
-                                        height: Val::Px(6.0),
-                                        border: UiRect::all(Val::Px(1.0)),
+                                        left: Val::Px(px - 6.0),
+                                        top: Val::Px(py - 6.0),
+                                        width: Val::Px(12.0),
+                                        height: Val::Px(12.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(1.0, 0.8, 0.0, 0.3)),
+                                    MinimapPlayer,
+                                ));
+
+                                // Inner dot
+                                map.spawn((
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: Val::Px(px - 4.0),
+                                        top: Val::Px(py - 4.0),
+                                        width: Val::Px(8.0),
+                                        height: Val::Px(8.0),
+                                        border: UiRect::all(Val::Px(1.5)),
                                         ..default()
                                     },
                                     BackgroundColor(Color::srgb(1.0, 1.0, 0.0)),
-                                    BorderColor::all(Color::srgb(1.0, 0.5, 0.0)),
+                                    BorderColor::all(Color::srgb(1.0, 0.4, 0.0)),
                                     MinimapPlayer,
                                 ));
                             }
