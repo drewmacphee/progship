@@ -947,7 +947,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // Rooms >200m² get placed directly into the grid as large rectangles before
         // segment decomposition. This lets them claim the space they need instead
         // of being squeezed into narrow strips.
-        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        // (room_id, x, y, w, h, room_type, target_area, placement)
+        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8, f32, u8)> = Vec::new();
         let mut pre_placed_node_ids: Vec<u64> = Vec::new();
 
         // Estimate area budget from inner dimensions (before segments are known)
@@ -1016,10 +1017,15 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // Minimum area threshold for pre-placement (smaller rooms go through BSP)
         const LARGE_ROOM_THRESHOLD: f32 = 200.0;
 
-        // Separate oversized from normal
-        let (large_requests, normal_requests): (Vec<RoomRequest>, Vec<RoomRequest>) = deck_requests
-            .into_iter()
-            .partition(|r| r.target_area >= LARGE_ROOM_THRESHOLD);
+        // Separate oversized rooms AND rooms with special placement constraints
+        let (large_requests, normal_requests): (Vec<RoomRequest>, Vec<RoomRequest>) =
+            deck_requests.into_iter().partition(|r| {
+                r.target_area >= LARGE_ROOM_THRESHOLD
+                    || r.placement == placement::HULL_FACING
+                    || r.placement == placement::AFT
+                    || r.placement == placement::FORWARD
+                    || r.placement == placement::INTERIOR
+            });
 
         // Place each large room directly into the grid
         let mid_y = (inner_y0 + inner_y1) / 2;
@@ -1029,22 +1035,34 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             let target_side = (req.target_area.sqrt()) as usize;
             let want_w = target_side.max(MIN_ROOM_DIM);
             let want_h = ((req.target_area / want_w as f32).ceil() as usize).max(MIN_ROOM_DIM);
+            log::info!(
+                "LARGE ROOM: {} (type={}) area={} want={}x{} placement={}",
+                req.name,
+                req.room_type,
+                req.target_area,
+                want_w,
+                want_h,
+                req.placement
+            );
 
             // Determine preferred region based on placement constraint
             let search_regions = match req.placement {
                 p if p == placement::HULL_FACING => {
                     // Place in the hull band zone (between hull edge and ring outer wall).
+                    // Rooms are placed adjacent to the ring corridor (starting from ring edge outward).
                     let hb_w = ring_x0.saturating_sub(hull_x0);
                     let hb_h = ring_y0.saturating_sub(hull_y0);
+                    let ring_w = ring_x1.saturating_sub(ring_x0);
+                    let ring_h = ring_y1.saturating_sub(ring_y0);
                     vec![
-                        // South strip (aft — prefer first for shuttle bays etc.)
-                        (hull_x0, ring_y1, hull_x1 - hull_x0, hb_h),
-                        // North strip
-                        (hull_x0, hull_y0, hull_x1 - hull_x0, hb_h),
-                        // West strip
-                        (hull_x0, hull_y0, hb_w, hull_y1 - hull_y0),
-                        // East strip
-                        (ring_x1, hull_y0, hb_w, hull_y1 - hull_y0),
+                        // South strip: starts at ring_y1 (rooms grow south toward hull)
+                        (ring_x0, ring_y1, ring_w, hb_h),
+                        // North strip: starts at ring_y0 - hb_h so rooms closest to ring are found
+                        (ring_x0, ring_y0.saturating_sub(hb_h), ring_w, hb_h),
+                        // West strip: starts at ring_x0 - hb_w
+                        (ring_x0.saturating_sub(hb_w), ring_y0, hb_w, ring_h),
+                        // East strip: starts at ring_x1
+                        (ring_x1, ring_y0, hb_w, ring_h),
                     ]
                 }
                 p if p == placement::AFT => {
@@ -1085,7 +1103,33 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 );
             }
 
-            if let Some((px, py, pw, ph)) = best_pos {
+            if let Some((mut px, mut py, pw, ph)) = best_pos {
+                // Shift hull-facing rooms to be adjacent to ring corridor
+                if req.placement == placement::HULL_FACING {
+                    // North band: shift south so bottom edge touches ring_y0
+                    if py + ph <= ring_y0 {
+                        let target_y = ring_y0.saturating_sub(ph);
+                        if target_y >= hull_y0
+                            && (target_y..target_y + ph).all(|y| {
+                                (px..px + pw)
+                                    .all(|x| grid[x][y] == CELL_EMPTY || grid[x][y] == grid[px][py])
+                            })
+                        {
+                            py = target_y;
+                        }
+                    }
+                    // West band: shift east so right edge touches ring_x0
+                    if px + pw <= ring_x0 {
+                        let target_x = ring_x0.saturating_sub(pw);
+                        if target_x >= hull_x0
+                            && (px..px + pw).all(|x| {
+                                (py..py + ph).all(|y| grid[target_x + (x - px)][y] == CELL_EMPTY)
+                            })
+                        {
+                            px = target_x;
+                        }
+                    }
+                }
                 let room_id = next_id();
 
                 // Stamp grid
@@ -1168,7 +1212,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     );
                 }
 
-                placed_rooms.push((room_id, px, py, pw, ph, req.room_type));
+                placed_rooms.push((
+                    room_id,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    req.room_type,
+                    req.target_area,
+                    req.placement,
+                ));
                 pre_placed_node_ids.push(req.node_id);
 
                 log::info!(
@@ -1339,7 +1392,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     ring_e_id,
                 );
 
-                placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
+                placed_rooms.push((
+                    room_id,
+                    *rx,
+                    *ry,
+                    *rw,
+                    *rh,
+                    req.room_type,
+                    req.target_area,
+                    req.placement,
+                ));
                 request_idx += 1;
             }
         }
@@ -1496,7 +1558,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 ring_e_id,
                             );
 
-                            placed_rooms.push((room_id, start_x, start_y, rw, rh, req.room_type));
+                            placed_rooms.push((
+                                room_id,
+                                start_x,
+                                start_y,
+                                rw,
+                                rh,
+                                req.room_type,
+                                req.target_area,
+                                req.placement,
+                            ));
                             req_cursor += 1;
                             wave_placed += 1;
                         }
@@ -1591,7 +1662,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 ceiling_height: deck_heights::room_ceiling_height(frt),
                                 deck_span: deck_heights::room_deck_span(frt),
                             });
-                            placed_rooms.push((room_id, x, y, rw, rh, frt));
+                            placed_rooms.push((
+                                room_id,
+                                x,
+                                y,
+                                rw,
+                                rh,
+                                frt,
+                                ftarget,
+                                placement::NONE,
+                            ));
 
                             create_corridor_door(
                                 ctx,
@@ -1635,14 +1715,26 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         {
             let mut expanded = 0u32;
             for i in 0..placed_rooms.len() {
-                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt) = placed_rooms[i];
+                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt, target_area, room_placement) =
+                    placed_rooms[i];
                 let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+                // Cap expansion at 1.5× the larger of target or initial area
+                let max_area = ((target_area as usize).max(rw * rh) as f32 * 1.5) as usize;
+                // Hull-facing rooms must not expand into the interior
+                let (exp_x0, exp_y0, exp_x1, exp_y1) = if room_placement == placement::HULL_FACING {
+                    (hull_x0, hull_y0, hull_x1, hull_y1)
+                } else {
+                    (inner_x0, inner_y0, inner_x1, inner_y1)
+                };
                 let mut changed = true;
                 while changed {
                     changed = false;
+                    if rw * rh >= max_area {
+                        break;
+                    }
                     // Try expand east (+x)
                     let new_x1 = rx + rw;
-                    if new_x1 < inner_x1 {
+                    if new_x1 < exp_x1 {
                         let col_clear = (ry..ry + rh).all(|y| grid[new_x1][y] == CELL_EMPTY);
                         if col_clear {
                             for y in ry..ry + rh {
@@ -1653,7 +1745,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         }
                     }
                     // Try expand west (-x)
-                    if rx > inner_x0 {
+                    if rx > exp_x0 {
                         let col_clear = (ry..ry + rh).all(|y| grid[rx - 1][y] == CELL_EMPTY);
                         if col_clear {
                             rx -= 1;
@@ -1666,7 +1758,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     }
                     // Try expand south (+y)
                     let new_y1 = ry + rh;
-                    if new_y1 < inner_y1 {
+                    if new_y1 < exp_y1 {
                         let row_clear = (rx..rx + rw).all(|x| grid[x][new_y1] == CELL_EMPTY);
                         if row_clear {
                             for x in rx..rx + rw {
@@ -1677,7 +1769,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         }
                     }
                     // Try expand north (-y)
-                    if ry > inner_y0 {
+                    if ry > exp_y0 {
                         let row_clear = (rx..rx + rw).all(|x| grid[x][ry - 1] == CELL_EMPTY);
                         if row_clear {
                             ry -= 1;
@@ -1724,8 +1816,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // ---- Phase 9: Room-to-room doors (adjacent logical pairs) ----
         for i in 0..placed_rooms.len() {
             for j in (i + 1)..placed_rooms.len() {
-                let (id_a, ax, ay, aw, ah, rt_a) = placed_rooms[i];
-                let (id_b, bx, by, bw, bh, rt_b) = placed_rooms[j];
+                let (id_a, ax, ay, aw, ah, rt_a, ..) = placed_rooms[i];
+                let (id_b, bx, by, bw, bh, rt_b, ..) = placed_rooms[j];
                 if !should_have_room_door(rt_a, rt_b) {
                     continue;
                 }
