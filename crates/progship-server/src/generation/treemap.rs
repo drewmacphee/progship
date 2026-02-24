@@ -12,6 +12,7 @@ pub(super) struct RoomRequest {
     pub target_area: f32,
     pub capacity: u32,
     pub group: u8,
+    pub placement: u8,
 }
 
 /// Placed room result from treemap.

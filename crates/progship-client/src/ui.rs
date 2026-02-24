@@ -7,8 +7,8 @@ use progship_client_sdk::*;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    CameraMode, ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState,
-    ToastContainer, UiState, ViewState,
+    ConnectionConfig, ConnectionState, HudText, InfoPanel, NeedsBar, PlayerState, ToastContainer,
+    UiState, ViewState,
 };
 
 pub fn setup_ui(mut commands: Commands) {
@@ -159,22 +159,26 @@ pub fn render_hud(
             String::new()
         };
 
-        // Get player's current room and context action
-        let (room_name, context_hint) = player
+        // Get player's current room, position, and context action
+        let player_pos = player
             .person_id
-            .and_then(|pid| conn.db.position().person_id().find(&pid))
-            .and_then(|pos| conn.db.room().id().find(&pos.room_id))
-            .map(|r| {
-                let total_decks = conn
-                    .db
-                    .ship_config()
-                    .id()
-                    .find(&0)
-                    .map(|c| c.deck_count as i32);
-                (
-                    r.name.clone(),
-                    context_action_hint(r.room_type, Some(r.deck), total_decks),
-                )
+            .and_then(|pid| conn.db.position().person_id().find(&pid));
+        let (room_name, context_hint, pos_str) = player_pos
+            .as_ref()
+            .and_then(|pos| {
+                conn.db.room().id().find(&pos.room_id).map(|r| {
+                    let total_decks = conn
+                        .db
+                        .ship_config()
+                        .id()
+                        .find(&0)
+                        .map(|c| c.deck_count as i32);
+                    (
+                        r.name.clone(),
+                        context_action_hint(r.room_type, Some(r.deck), total_decks),
+                        format!("({:.0},{:.0})", pos.x, pos.y),
+                    )
+                })
             })
             .unwrap_or_default();
 
@@ -207,15 +211,11 @@ pub fn render_hud(
             })
             .unwrap_or_default();
 
-        let cam_str = match view.camera_mode {
-            CameraMode::TopDown => "",
-            CameraMode::FirstPerson => " [FPS]",
-        };
         **text = format!(
             "{} | Day {} {:02}:{:02}{} | {}x{}\n\
-             Deck {} | {} | {} aboard | {}{}\n\
+             Deck {} {} | {} | {} aboard | {}\n\
              {}{}\n\
-             [WASD] Move [E] Talk [F]{} [Q] Inspect [V] Camera [Space] Pause",
+             [WASD] Move [E] Talk [F]{} [Q] Inspect [M] Map [Space] Pause [Esc] Quit",
             ship_name,
             day,
             h,
@@ -224,10 +224,10 @@ pub fn render_hud(
             time_scale,
             event_str,
             view.current_deck + 1,
+            pos_str,
             room_name,
             person_count,
             atmo_str,
-            cam_str,
             activity_str,
             if activity_str.is_empty() { "" } else { "" },
             context_hint,

@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 use progship_client_sdk::*;
+use progship_logic::constants::{room_type_icon, room_types};
 use spacetimedb_sdk::Table;
 
 use crate::state::{ConnectionState, PlayerState, ViewState};
@@ -30,14 +31,17 @@ pub struct MinimapState {
     pub panel_size: f32,
     /// Margin from screen edge.
     pub margin: f32,
+    /// Last rendered yaw (to detect rotation changes).
+    prev_yaw: f32,
 }
 
 impl Default for MinimapState {
     fn default() -> Self {
         Self {
             visible: true,
-            panel_size: 250.0,
+            panel_size: 350.0,
             margin: 10.0,
+            prev_yaw: f32::MAX,
         }
     }
 }
@@ -54,16 +58,19 @@ pub fn render_minimap(
     state: Res<ConnectionState>,
     mut view: ResMut<ViewState>,
     player: Res<PlayerState>,
-    minimap: Res<MinimapState>,
+    mut minimap: ResMut<MinimapState>,
     mut commands: Commands,
     existing_roots: Query<Entity, With<MinimapRoot>>,
 ) {
-    // Only rebuild when minimap is marked dirty or visibility toggled
-    let needs_rebuild = view.minimap_dirty || minimap.is_changed();
+    // Rebuild when dirty, visibility toggled, player moved, or camera rotated significantly
+    let yaw_changed = (view.fps_yaw - minimap.prev_yaw).abs() > 0.05;
+    let needs_rebuild =
+        view.minimap_dirty || minimap.is_changed() || player.is_changed() || yaw_changed;
     if !needs_rebuild {
         return;
     }
     view.minimap_dirty = false;
+    minimap.prev_yaw = view.fps_yaw;
 
     // Clean up old minimap (root despawn_recursive handles all children)
     for entity in existing_roots.iter() {
@@ -93,16 +100,18 @@ pub fn render_minimap(
         return;
     }
 
-    // Find deck bounds
+    // Find deck bounds (room.x/y are centers, not bottom-left)
     let mut min_x = f32::MAX;
     let mut min_y = f32::MAX;
     let mut max_x = f32::MIN;
     let mut max_y = f32::MIN;
     for room in &rooms {
-        min_x = min_x.min(room.x);
-        min_y = min_y.min(room.y);
-        max_x = max_x.max(room.x + room.width);
-        max_y = max_y.max(room.y + room.height);
+        let hw = room.width / 2.0;
+        let hh = room.height / 2.0;
+        min_x = min_x.min(room.x - hw);
+        min_y = min_y.min(room.y - hh);
+        max_x = max_x.max(room.x + hw);
+        max_y = max_y.max(room.y + hh);
     }
 
     let deck_w = (max_x - min_x).max(1.0);
@@ -159,16 +168,23 @@ pub fn render_minimap(
                     ..default()
                 })
                 .with_children(|map| {
-                    // Render each room as a small colored rectangle
+                    // Render each room as a small colored rectangle with type icon
                     for room in &rooms {
-                        let rx = (room.x - min_x) * scale_x + 2.0;
-                        let ry = (max_y - (room.y + room.height)) * scale_y;
+                        let hw = room.width / 2.0;
+                        let hh = room.height / 2.0;
+                        let rx = (room.x - hw - min_x) * scale_x + 2.0;
+                        let ry = (room.y - hh - min_y) * scale_y;
                         let rw = (room.width * scale_x).max(1.0);
                         let rh = (room.height * scale_y).max(1.0);
 
                         let color = minimap_room_color(room.room_type);
+                        let icon = room_type_icon(room.room_type);
+                        let show_icon = !icon.is_empty()
+                            && rw >= 8.0
+                            && rh >= 8.0
+                            && !room_types::is_corridor(room.room_type);
 
-                        map.spawn((
+                        let mut room_cmd = map.spawn((
                             Node {
                                 position_type: PositionType::Absolute,
                                 left: Val::Px(rx),
@@ -176,12 +192,29 @@ pub fn render_minimap(
                                 width: Val::Px(rw),
                                 height: Val::Px(rh),
                                 border: UiRect::all(Val::Px(0.5)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                overflow: Overflow::clip(),
                                 ..default()
                             },
                             BackgroundColor(color),
                             BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.4)),
                             MinimapRoom,
                         ));
+
+                        if show_icon {
+                            let icon_size = rw.min(rh).clamp(6.0, 10.0);
+                            room_cmd.with_children(|cell| {
+                                cell.spawn((
+                                    Text::new(icon),
+                                    TextFont {
+                                        font_size: icon_size,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                                ));
+                            });
+                        }
                     }
 
                     // Player position marker
@@ -196,22 +229,62 @@ pub fn render_minimap(
                                 .unwrap_or(false)
                             {
                                 let px = (pos.x - min_x) * scale_x + 2.0;
-                                let py = (max_y - pos.y) * scale_y;
+                                let py = (pos.y - min_y) * scale_y;
 
+                                // Outer glow ring
                                 map.spawn((
                                     Node {
                                         position_type: PositionType::Absolute,
-                                        left: Val::Px(px - 3.0),
-                                        top: Val::Px(py - 3.0),
-                                        width: Val::Px(6.0),
-                                        height: Val::Px(6.0),
-                                        border: UiRect::all(Val::Px(1.0)),
+                                        left: Val::Px(px - 6.0),
+                                        top: Val::Px(py - 6.0),
+                                        width: Val::Px(12.0),
+                                        height: Val::Px(12.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(1.0, 0.8, 0.0, 0.3)),
+                                    MinimapPlayer,
+                                ));
+
+                                // Inner dot
+                                map.spawn((
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: Val::Px(px - 4.0),
+                                        top: Val::Px(py - 4.0),
+                                        width: Val::Px(8.0),
+                                        height: Val::Px(8.0),
+                                        border: UiRect::all(Val::Px(1.5)),
                                         ..default()
                                     },
                                     BackgroundColor(Color::srgb(1.0, 1.0, 0.0)),
-                                    BorderColor::all(Color::srgb(1.0, 0.5, 0.0)),
+                                    BorderColor::all(Color::srgb(1.0, 0.4, 0.0)),
                                     MinimapPlayer,
                                 ));
+
+                                // Direction indicator — line of dots in look direction
+                                // yaw=0 faces -Z (Bevy) = north (low Y) = UP on minimap (negative dy)
+                                let yaw = view.fps_yaw;
+                                let dx = -yaw.sin();
+                                let dy = -yaw.cos();
+                                let dot_len = 10.0;
+                                for i in 1..=3 {
+                                    let t = i as f32 * (dot_len / 3.0);
+                                    let dot_size = 4.0 - i as f32 * 0.5; // taper: 3.5, 3.0, 2.5
+                                    let dot_x = px + dx * t - dot_size / 2.0;
+                                    let dot_y = py + dy * t - dot_size / 2.0;
+                                    map.spawn((
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            left: Val::Px(dot_x),
+                                            top: Val::Px(dot_y),
+                                            width: Val::Px(dot_size),
+                                            height: Val::Px(dot_size),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(1.0, 0.6, 0.0)),
+                                        MinimapPlayer,
+                                    ));
+                                }
                             }
                         }
                     }

@@ -13,6 +13,7 @@ use super::hull::{hull_length, hull_width};
 use super::treemap::RoomRequest;
 use crate::tables::*;
 use progship_logic::constants::deck_heights;
+use progship_logic::constants::placement;
 use spacetimedb::{ReducerContext, Table};
 
 // Grid cell type markers
@@ -29,6 +30,7 @@ const RING_WIDTH: usize = 4; // perimeter ring — same as spine
 const SPUR_WIDTH: usize = 3; // spur corridors — narrower than spine
 const MIN_ROOM_DIM: usize = 4;
 const SPUR_THRESHOLD: usize = 12; // add spurs when segment wider than this
+const HULL_BAND_WIDTH: usize = 15; // hull-facing room zone outside ring corridor
 
 /// Filler room pool: used to backfill empty deck space after zone rooms are placed.
 const FILLER_POOL: &[(u8, &str, f32, u32)] = &[
@@ -65,6 +67,8 @@ struct ShaftPlacement {
     shaft_type: u8,
     name: &'static str,
     is_main: bool,
+    /// Preferred door wall (NORTH/SOUTH/EAST/WEST) — consistent across all decks.
+    preferred_wall: u8,
 }
 
 /// A rectangular segment between corridors where rooms can be placed.
@@ -124,6 +128,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             target_area: node.required_area,
             capacity: node.capacity,
             group: node.group,
+            placement: placement::room_placement(node.function),
         });
     }
     for zr in zone_requests.iter_mut() {
@@ -258,17 +263,24 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         .collect();
 
     // ---- Compute global shaft positions from midship deck ----
+    // Grid is expanded by HULL_BAND_WIDTH on each side for hull-facing rooms.
+    // All interior positions are offset by HULL_BAND_WIDTH in the grid.
     let mid_deck = deck_count / 2;
-    let mid_hw = hull_width(mid_deck, deck_count, ship_beam);
-    let mid_hl = hull_length(mid_deck, deck_count, ship_length);
+    let mid_hw_hull = hull_width(mid_deck, deck_count, ship_beam);
+    let mid_hl_hull = hull_length(mid_deck, deck_count, ship_length);
+    let mid_hw = mid_hw_hull + 2 * HULL_BAND_WIDTH; // expanded grid width
+    let mid_hl = mid_hl_hull + 2 * HULL_BAND_WIDTH; // expanded grid length
     let mid_spine_left = mid_hw / 2 - SPINE_WIDTH / 2;
     let mid_spine_right = mid_spine_left + SPINE_WIDTH;
-    let mid_num_cross = ((mid_hl as f32 / 35.0).round() as usize).max(1);
-    let mid_cross_spacing = mid_hl / (mid_num_cross + 1);
+    // Cross-corridors are inside the ring; compute in interior space then offset
+    let interior_hl = mid_hl_hull.saturating_sub(2 * RING_WIDTH);
+    let mid_num_cross = ((interior_hl as f32 / 35.0).round() as usize).max(1);
+    let mid_cross_spacing = interior_hl / (mid_num_cross + 1);
+    let inner_y0_ref = HULL_BAND_WIDTH + RING_WIDTH; // ring outer + ring width
     let mut mid_cross_ys: Vec<usize> = Vec::new();
     for i in 1..=mid_num_cross {
-        let cy = i * mid_cross_spacing;
-        if cy + CROSS_CORRIDOR_WIDTH <= mid_hl {
+        let cy = inner_y0_ref + i * mid_cross_spacing;
+        if cy + CROSS_CORRIDOR_WIDTH <= mid_hl - HULL_BAND_WIDTH - RING_WIDTH {
             mid_cross_ys.push(cy);
         }
     }
@@ -303,16 +315,24 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         let hl = mid_hl;
         let mut grid: Vec<Vec<u8>> = vec![vec![CELL_EMPTY; hl]; hw];
 
-        // Mask cells outside tapered hull
-        let x_margin = (mid_hw - deck_hw) / 2;
-        let y_margin = (mid_hl - deck_hl) / 2;
+        // Mask cells outside tapered hull (hull band cells stay CELL_EMPTY)
+        let taper_margin_x = (mid_hw_hull - deck_hw) / 2;
+        let taper_margin_y = (mid_hl_hull - deck_hl) / 2;
+        let hull_x0 = taper_margin_x; // outer hull edge in expanded grid
+        let hull_x1 = hw - taper_margin_x;
+        let hull_y0 = taper_margin_y;
+        let hull_y1 = hl - taper_margin_y;
         for x in 0..hw {
             for y in 0..hl {
-                if x < x_margin || x >= hw - x_margin || y < y_margin || y >= hl - y_margin {
+                if x < hull_x0 || x >= hull_x1 || y < hull_y0 || y >= hull_y1 {
                     grid[x][y] = CELL_HULL;
                 }
             }
         }
+
+        // Ring corridor sits inside the hull band
+        let x_margin = HULL_BAND_WIDTH + taper_margin_x;
+        let y_margin = HULL_BAND_WIDTH + taper_margin_y;
 
         // ---- Phase 1: Ring corridor (perimeter) ----
         let ring_x0 = x_margin;
@@ -923,7 +943,311 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             );
         }
 
+        // ---- Phase 3.5: Pre-place oversized rooms ----
+        // Rooms >200m² get placed directly into the grid as large rectangles before
+        // segment decomposition. This lets them claim the space they need instead
+        // of being squeezed into narrow strips.
+        // (room_id, x, y, w, h, room_type, target_area, placement)
+        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8, f32, u8)> = Vec::new();
+        let mut pre_placed_node_ids: Vec<u64> = Vec::new();
+
+        // Estimate area budget from inner dimensions (before segments are known)
+        let inner_w = inner_x1 - inner_x0;
+        let inner_h = inner_y1 - inner_y0;
+        let gross_inner_area = (inner_w * inner_h) as f32;
+        let est_area_budget = gross_inner_area * 0.80; // corridors+shafts take ~20%
+
+        // Collect this deck's zone rooms temporarily (peek without advancing cursors)
+        let primary_zone = deck_zone_map[deck as usize] as usize;
+        let zone_decks_total = zone_deck_counts[primary_zone];
+        let zone_deck_num = zone_deck_seen[primary_zone];
+        zone_deck_seen[primary_zone] += 1;
+        let remaining_zone_decks = zone_decks_total - zone_deck_num;
+        let cursor_start = zone_cursors[primary_zone];
+        let remaining_rooms = zone_requests[primary_zone].len() - cursor_start;
+        let fair_share = if remaining_zone_decks > 0 {
+            remaining_rooms.div_ceil(remaining_zone_decks as usize)
+        } else {
+            remaining_rooms
+        };
+
+        // Collect deck requests (all sizes) via same logic as old Phase 5
+        let mut deck_requests: Vec<RoomRequest> = Vec::new();
+        let mut filled_area = 0.0f32;
+        {
+            let cursor = &mut zone_cursors[primary_zone];
+            let mut taken = 0usize;
+            while *cursor < zone_requests[primary_zone].len()
+                && filled_area < est_area_budget
+                && taken < fair_share
+            {
+                let req = zone_requests[primary_zone][*cursor].clone();
+                filled_area += req.target_area;
+                deck_requests.push(req);
+                *cursor += 1;
+                taken += 1;
+            }
+        }
+        // Overflow from other zones if underfilled
+        if filled_area < est_area_budget * 0.7 {
+            let overflow_order = [1u8, 2, 3, 4, 5, 0, 6];
+            for &oz in &overflow_order {
+                if oz as usize == primary_zone {
+                    continue;
+                }
+                let oc = &mut zone_cursors[oz as usize];
+                while *oc < zone_requests[oz as usize].len() && filled_area < est_area_budget {
+                    let req = zone_requests[oz as usize][*oc].clone();
+                    filled_area += req.target_area;
+                    deck_requests.push(req);
+                    *oc += 1;
+                }
+                if filled_area >= est_area_budget {
+                    break;
+                }
+            }
+        }
+        // Sort largest first
+        deck_requests.sort_by(|a, b| {
+            b.target_area
+                .partial_cmp(&a.target_area)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
+
+        // Minimum area threshold for pre-placement (smaller rooms go through BSP)
+        const LARGE_ROOM_THRESHOLD: f32 = 200.0;
+
+        // Separate oversized rooms AND rooms with special placement constraints
+        let (large_requests, normal_requests): (Vec<RoomRequest>, Vec<RoomRequest>) =
+            deck_requests.into_iter().partition(|r| {
+                r.target_area >= LARGE_ROOM_THRESHOLD
+                    || r.placement == placement::HULL_FACING
+                    || r.placement == placement::AFT
+                    || r.placement == placement::FORWARD
+                    || r.placement == placement::INTERIOR
+            });
+
+        // Place each large room directly into the grid
+        let mid_y = (inner_y0 + inner_y1) / 2;
+        let _mid_x = (inner_x0 + inner_x1) / 2;
+
+        for req in &large_requests {
+            let target_side = (req.target_area.sqrt()) as usize;
+            let want_w = target_side.max(MIN_ROOM_DIM);
+            let want_h = ((req.target_area / want_w as f32).ceil() as usize).max(MIN_ROOM_DIM);
+            log::info!(
+                "LARGE ROOM: {} (type={}) area={} want={}x{} placement={}",
+                req.name,
+                req.room_type,
+                req.target_area,
+                want_w,
+                want_h,
+                req.placement
+            );
+
+            // Determine preferred region based on placement constraint
+            let search_regions = match req.placement {
+                p if p == placement::HULL_FACING => {
+                    // Place in the hull band zone (between hull edge and ring outer wall).
+                    // Rooms are placed adjacent to the ring corridor (starting from ring edge outward).
+                    let hb_w = ring_x0.saturating_sub(hull_x0);
+                    let hb_h = ring_y0.saturating_sub(hull_y0);
+                    let ring_w = ring_x1.saturating_sub(ring_x0);
+                    let ring_h = ring_y1.saturating_sub(ring_y0);
+                    vec![
+                        // South strip: starts at ring_y1 (rooms grow south toward hull)
+                        (ring_x0, ring_y1, ring_w, hb_h),
+                        // North strip: starts at ring_y0 - hb_h so rooms closest to ring are found
+                        (ring_x0, ring_y0.saturating_sub(hb_h), ring_w, hb_h),
+                        // West strip: starts at ring_x0 - hb_w
+                        (ring_x0.saturating_sub(hb_w), ring_y0, hb_w, ring_h),
+                        // East strip: starts at ring_x1
+                        (ring_x1, ring_y0, hb_w, ring_h),
+                    ]
+                }
+                p if p == placement::AFT => {
+                    vec![(inner_x0, mid_y, inner_w, inner_y1 - mid_y)]
+                }
+                p if p == placement::FORWARD => {
+                    vec![(inner_x0, inner_y0, inner_w, mid_y - inner_y0)]
+                }
+                p if p == placement::INTERIOR => {
+                    let margin = RING_WIDTH * 2;
+                    let cx0 = inner_x0 + margin;
+                    let cy0 = inner_y0 + margin;
+                    let cw = inner_w.saturating_sub(margin * 2);
+                    let ch = inner_h.saturating_sub(margin * 2);
+                    vec![(cx0, cy0, cw, ch)]
+                }
+                _ => {
+                    vec![(inner_x0, inner_y0, inner_w, inner_h)]
+                }
+            };
+
+            // Try to find a clear rectangle in each search region
+            let mut best_pos: Option<(usize, usize, usize, usize)> = None;
+
+            for (rx, ry, rw, rh) in &search_regions {
+                if let Some(pos) =
+                    find_clear_rect_for_room(&grid, hw, hl, *rx, *ry, *rw, *rh, want_w, want_h)
+                {
+                    best_pos = Some(pos);
+                    break;
+                }
+            }
+
+            // Fallback: try entire inner area if constrained search failed
+            if best_pos.is_none() {
+                best_pos = find_clear_rect_for_room(
+                    &grid, hw, hl, inner_x0, inner_y0, inner_w, inner_h, want_w, want_h,
+                );
+            }
+
+            if let Some((mut px, mut py, pw, ph)) = best_pos {
+                // Shift hull-facing rooms to be adjacent to ring corridor
+                if req.placement == placement::HULL_FACING {
+                    // North band: shift south so bottom edge touches ring_y0
+                    if py + ph <= ring_y0 {
+                        let target_y = ring_y0.saturating_sub(ph);
+                        if target_y >= hull_y0
+                            && (target_y..target_y + ph)
+                                .all(|y| (px..px + pw).all(|x| grid[x][y] == CELL_EMPTY))
+                        {
+                            py = target_y;
+                        }
+                    }
+                    // West band: shift east so right edge touches ring_x0
+                    if px + pw <= ring_x0 {
+                        let target_x = ring_x0.saturating_sub(pw);
+                        if target_x >= hull_x0
+                            && (px..px + pw).all(|x| {
+                                (py..py + ph).all(|y| grid[target_x + (x - px)][y] == CELL_EMPTY)
+                            })
+                        {
+                            px = target_x;
+                        }
+                    }
+                }
+                let room_id = next_id();
+
+                // Stamp grid
+                for gx in px..(px + pw).min(hw) {
+                    for gy in py..(py + ph).min(hl) {
+                        if grid[gx][gy] == CELL_EMPTY {
+                            grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                        }
+                    }
+                }
+
+                ctx.db.room().insert(Room {
+                    id: room_id,
+                    node_id: req.node_id,
+                    name: req.name.clone(),
+                    room_type: req.room_type,
+                    deck,
+                    x: px as f32 + pw as f32 / 2.0,
+                    y: py as f32 + ph as f32 / 2.0,
+                    width: pw as f32,
+                    height: ph as f32,
+                    capacity: req.capacity,
+                    ceiling_height: deck_heights::room_ceiling_height(req.room_type),
+                    deck_span: deck_heights::room_deck_span(req.room_type),
+                });
+
+                // Door to corridor
+                if req.placement == placement::HULL_FACING {
+                    // Hull-facing rooms connect to ring corridor through its outer wall
+                    let ring_segments = [
+                        (ring_n_id, ring_n_grid),
+                        (ring_s_id, ring_s_grid),
+                        (ring_w_id, ring_w_grid),
+                        (ring_e_id, ring_e_grid),
+                    ];
+                    for &(rid, (rx, ry, rw, rh)) in &ring_segments {
+                        if let Some((dx, dy, wa, wb, ol)) =
+                            find_shared_edge(px, py, pw, ph, rx, ry, rw, rh)
+                        {
+                            ctx.db.door().insert(Door {
+                                id: 0,
+                                room_a: room_id,
+                                room_b: rid,
+                                wall_a: wa,
+                                wall_b: wb,
+                                position_along_wall: 0.5,
+                                width: door_width_from_overlap(ol).min(3.0),
+                                access_level: access_levels::PUBLIC,
+                                door_x: dx,
+                                door_y: dy,
+                            });
+                            break;
+                        }
+                    }
+                } else {
+                    create_corridor_door(
+                        ctx,
+                        room_id,
+                        px,
+                        py,
+                        pw,
+                        ph,
+                        spine_left,
+                        spine_right,
+                        &spine_segments,
+                        &cross_rooms,
+                        &spur_rooms,
+                        inner_x0,
+                        inner_x1,
+                        inner_y0,
+                        inner_y1,
+                        ring_x0,
+                        ring_x1,
+                        ring_y0,
+                        ring_y1,
+                        ring_n_id,
+                        ring_s_id,
+                        ring_w_id,
+                        ring_e_id,
+                    );
+                }
+
+                placed_rooms.push((
+                    room_id,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    req.room_type,
+                    req.target_area,
+                    req.placement,
+                ));
+                pre_placed_node_ids.push(req.node_id);
+
+                log::info!(
+                    "Deck {}: pre-placed {} ({}m²) at ({},{}) {}×{} = {}m²",
+                    deck + 1,
+                    req.name,
+                    req.target_area,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    pw * ph
+                );
+            } else {
+                log::warn!(
+                    "Deck {}: could not pre-place {} ({}m²)",
+                    deck + 1,
+                    req.name,
+                    req.target_area
+                );
+            }
+        }
+
+        // Remaining requests for BSP (normal-sized rooms only)
+        let deck_requests = normal_requests;
+
         // ---- Phase 4: Identify rectangular segments between corridors ----
+        // Segments are computed AFTER oversized rooms so they naturally work around them.
         let segments = find_segments(
             &grid,
             hw,
@@ -943,68 +1267,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             ring_s_id,
         );
 
-        // ---- Phase 5: Collect room requests for this deck (proportional fill) ----
-        let primary_zone = deck_zone_map[deck as usize] as usize;
-        let mut deck_requests: Vec<RoomRequest> = Vec::new();
-        let total_seg_area: usize = segments.iter().map(|s| s.w * s.h).sum();
-        let mut filled_area = 0.0f32;
-        let area_budget = total_seg_area as f32 * 0.95;
-
-        // Proportional distribution: divide remaining rooms across remaining decks for this zone
-        let zone_decks_total = zone_deck_counts[primary_zone];
-        let zone_deck_num = zone_deck_seen[primary_zone]; // 0-indexed
-        zone_deck_seen[primary_zone] += 1;
-        let remaining_zone_decks = zone_decks_total - zone_deck_num;
-
-        let cursor = &mut zone_cursors[primary_zone];
-        let remaining_rooms = zone_requests[primary_zone].len() - *cursor;
-        // Each deck gets at most ceil(remaining / remaining_decks) rooms
-        let fair_share = if remaining_zone_decks > 0 {
-            remaining_rooms.div_ceil(remaining_zone_decks as usize)
-        } else {
-            remaining_rooms
-        };
-        let mut taken = 0usize;
-        while *cursor < zone_requests[primary_zone].len()
-            && filled_area < area_budget
-            && taken < fair_share
-        {
-            let req = zone_requests[primary_zone][*cursor].clone();
-            filled_area += req.target_area;
-            deck_requests.push(req);
-            *cursor += 1;
-            taken += 1;
-        }
-
-        if filled_area < area_budget * 0.7 {
-            let overflow_order = [1u8, 2, 3, 4, 5, 0, 6];
-            for &oz in &overflow_order {
-                if oz as usize == primary_zone {
-                    continue;
-                }
-                let oc = &mut zone_cursors[oz as usize];
-                while *oc < zone_requests[oz as usize].len() && filled_area < area_budget {
-                    let req = zone_requests[oz as usize][*oc].clone();
-                    filled_area += req.target_area;
-                    deck_requests.push(req);
-                    *oc += 1;
-                }
-                if filled_area >= area_budget {
-                    break;
-                }
-            }
-        }
-
-        deck_requests.sort_by(|a, b| {
-            b.target_area
-                .partial_cmp(&a.target_area)
-                .unwrap_or(core::cmp::Ordering::Equal)
-        });
-
         // ---- Phase 6: BSP room placement into segments ----
-        let mut placed_rooms: Vec<(u32, usize, usize, usize, usize, u8)> = Vec::new();
+        // (deck_requests now contains only normal-sized rooms; oversized were pre-placed)
         let mut request_idx = 0;
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
+        let total_seg_area: usize = segments.iter().map(|s| s.w * s.h).sum();
 
         // Sort segments largest-first so big rooms get big segments
         let mut seg_order: Vec<usize> = (0..segments.len()).collect();
@@ -1123,7 +1390,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     ring_e_id,
                 );
 
-                placed_rooms.push((room_id, *rx, *ry, *rw, *rh, req.room_type));
+                placed_rooms.push((
+                    room_id,
+                    *rx,
+                    *ry,
+                    *rw,
+                    *rh,
+                    req.room_type,
+                    req.target_area,
+                    req.placement,
+                ));
                 request_idx += 1;
             }
         }
@@ -1280,7 +1556,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 ring_e_id,
                             );
 
-                            placed_rooms.push((room_id, start_x, start_y, rw, rh, req.room_type));
+                            placed_rooms.push((
+                                room_id,
+                                start_x,
+                                start_y,
+                                rw,
+                                rh,
+                                req.room_type,
+                                req.target_area,
+                                req.placement,
+                            ));
                             req_cursor += 1;
                             wave_placed += 1;
                         }
@@ -1375,7 +1660,16 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 ceiling_height: deck_heights::room_ceiling_height(frt),
                                 deck_span: deck_heights::room_deck_span(frt),
                             });
-                            placed_rooms.push((room_id, x, y, rw, rh, frt));
+                            placed_rooms.push((
+                                room_id,
+                                x,
+                                y,
+                                rw,
+                                rh,
+                                frt,
+                                ftarget,
+                                placement::NONE,
+                            ));
 
                             create_corridor_door(
                                 ctx,
@@ -1419,14 +1713,26 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         {
             let mut expanded = 0u32;
             for i in 0..placed_rooms.len() {
-                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt) = placed_rooms[i];
+                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt, target_area, room_placement) =
+                    placed_rooms[i];
                 let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+                // Cap expansion at 1.5× the larger of target or initial area
+                let max_area = ((target_area as usize).max(rw * rh) as f32 * 1.5) as usize;
+                // Hull-facing rooms must not expand into the interior
+                let (exp_x0, exp_y0, exp_x1, exp_y1) = if room_placement == placement::HULL_FACING {
+                    (hull_x0, hull_y0, hull_x1, hull_y1)
+                } else {
+                    (inner_x0, inner_y0, inner_x1, inner_y1)
+                };
                 let mut changed = true;
                 while changed {
                     changed = false;
+                    if rw * rh >= max_area {
+                        break;
+                    }
                     // Try expand east (+x)
                     let new_x1 = rx + rw;
-                    if new_x1 < inner_x1 {
+                    if new_x1 < exp_x1 {
                         let col_clear = (ry..ry + rh).all(|y| grid[new_x1][y] == CELL_EMPTY);
                         if col_clear {
                             for y in ry..ry + rh {
@@ -1437,7 +1743,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         }
                     }
                     // Try expand west (-x)
-                    if rx > inner_x0 {
+                    if rx > exp_x0 {
                         let col_clear = (ry..ry + rh).all(|y| grid[rx - 1][y] == CELL_EMPTY);
                         if col_clear {
                             rx -= 1;
@@ -1450,7 +1756,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     }
                     // Try expand south (+y)
                     let new_y1 = ry + rh;
-                    if new_y1 < inner_y1 {
+                    if new_y1 < exp_y1 {
                         let row_clear = (rx..rx + rw).all(|x| grid[x][new_y1] == CELL_EMPTY);
                         if row_clear {
                             for x in rx..rx + rw {
@@ -1461,7 +1767,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         }
                     }
                     // Try expand north (-y)
-                    if ry > inner_y0 {
+                    if ry > exp_y0 {
                         let row_clear = (rx..rx + rw).all(|x| grid[x][ry - 1] == CELL_EMPTY);
                         if row_clear {
                             ry -= 1;
@@ -1508,8 +1814,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         // ---- Phase 9: Room-to-room doors (adjacent logical pairs) ----
         for i in 0..placed_rooms.len() {
             for j in (i + 1)..placed_rooms.len() {
-                let (id_a, ax, ay, aw, ah, rt_a) = placed_rooms[i];
-                let (id_b, bx, by, bw, bh, rt_b) = placed_rooms[j];
+                let (id_a, ax, ay, aw, ah, rt_a, ..) = placed_rooms[i];
+                let (id_b, bx, by, bw, bh, rt_b, ..) = placed_rooms[j];
                 if !should_have_room_door(rt_a, rt_b) {
                     continue;
                 }
@@ -2158,7 +2464,8 @@ fn bsp_subdivide(
     }
 }
 
-/// Connect a shaft room to the nearest corridor via a door.
+/// Connect a shaft room to the nearest corridor via a door, preferring the shaft's
+/// designated wall for consistent orientation across all decks.
 #[allow(clippy::too_many_arguments)]
 fn connect_shaft_to_corridor(
     ctx: &ReducerContext,
@@ -2178,90 +2485,76 @@ fn connect_shaft_to_corridor(
     let sy = sp.y;
     let sw = sp.w;
     let sh = sp.h;
+    let pref = sp.preferred_wall;
 
-    // Try cross-corridors (full inner width)
+    // Collect all candidate connections (corridor_id, door_x, door_y, wall_a, wall_b, overlap)
+    let mut candidates: Vec<(u32, f32, f32, u8, u8, f32)> = Vec::new();
+
+    // Cross-corridors
     for &(cc_id, cy) in cross_rooms {
         let cc_w = inner_x1 - inner_x0;
         if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, inner_x0, cy, cc_w, CROSS_CORRIDOR_WIDTH)
         {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: shaft_room_id,
-                room_b: cc_id,
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: door_width_from_overlap(ol),
-                access_level: access,
-                door_x: dx,
-                door_y: dy,
-            });
-            return;
+            candidates.push((cc_id, dx, dy, wa, wb, ol));
         }
     }
-
-    // Try spine segments
+    // Spine segments
     for &(seg_id, seg_y0, seg_y1) in spine_segments {
         let seg_h = seg_y1 - seg_y0;
         if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, spine_left, seg_y0, SPINE_WIDTH, seg_h)
         {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: shaft_room_id,
-                room_b: seg_id,
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: door_width_from_overlap(ol),
-                access_level: access,
-                door_x: dx,
-                door_y: dy,
-            });
-            return;
+            candidates.push((seg_id, dx, dy, wa, wb, ol));
         }
     }
-
-    // Try spur corridors
+    // Spur corridors
     for &(spur_id, spur_x, spur_y, spur_w, spur_h) in spur_rooms {
         if let Some((dx, dy, wa, wb, ol)) =
             find_shared_edge(sx, sy, sw, sh, spur_x, spur_y, spur_w, spur_h)
         {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: shaft_room_id,
-                room_b: spur_id,
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: door_width_from_overlap(ol),
-                access_level: access,
-                door_x: dx,
-                door_y: dy,
-            });
-            return;
+            candidates.push((spur_id, dx, dy, wa, wb, ol));
         }
     }
-
-    // Try ring corridors (N, S, W, E)
+    // Ring corridors
     for i in 0..4 {
         let (rx, ry, rw, rh) = ring_grids[i];
         if let Some((dx, dy, wa, wb, ol)) = find_shared_edge(sx, sy, sw, sh, rx, ry, rw, rh) {
-            ctx.db.door().insert(Door {
-                id: 0,
-                room_a: shaft_room_id,
-                room_b: ring_ids[i],
-                wall_a: wa,
-                wall_b: wb,
-                position_along_wall: 0.5,
-                width: door_width_from_overlap(ol),
-                access_level: access,
-                door_x: dx,
-                door_y: dy,
-            });
-            return;
+            candidates.push((ring_ids[i], dx, dy, wa, wb, ol));
         }
+    }
+
+    // First pass: prefer the designated wall
+    if let Some(&(cid, dx, dy, wa, wb, ol)) = candidates.iter().find(|c| c.3 == pref) {
+        ctx.db.door().insert(Door {
+            id: 0,
+            room_a: shaft_room_id,
+            room_b: cid,
+            wall_a: wa,
+            wall_b: wb,
+            position_along_wall: 0.5,
+            width: door_width_from_overlap(ol),
+            access_level: access,
+            door_x: dx,
+            door_y: dy,
+        });
+        return;
+    }
+    // Fallback: any wall
+    if let Some(&(cid, dx, dy, wa, wb, ol)) = candidates.first() {
+        ctx.db.door().insert(Door {
+            id: 0,
+            room_a: shaft_room_id,
+            room_b: cid,
+            wall_a: wa,
+            wall_b: wb,
+            position_along_wall: 0.5,
+            width: door_width_from_overlap(ol),
+            access_level: access,
+            door_x: dx,
+            door_y: dy,
+        });
+        return;
     }
 
     log::warn!(
@@ -2436,6 +2729,7 @@ fn compute_shaft_placements(
 
     if cross_ys.is_empty() {
         if let Some((name, st, is_main, w, h)) = templates.first() {
+            // Shaft right of spine → door on WEST wall (facing spine)
             placements.push(ShaftPlacement {
                 x: spine_right,
                 y: hl / 4,
@@ -2444,6 +2738,7 @@ fn compute_shaft_placements(
                 shaft_type: *st,
                 name,
                 is_main: *is_main,
+                preferred_wall: wall_sides::WEST,
             });
         }
         return placements;
@@ -2464,7 +2759,7 @@ fn compute_shaft_placements(
 
     let num_positions = cross_ys.len();
 
-    // Main elevators: starboard of spine
+    // Main elevators: starboard of spine → door faces NORTH (into cross-corridor)
     for (i, (name, st, is_main, w, h)) in main_elevators.iter().enumerate() {
         let cross_idx = if main_elevators.len() <= num_positions {
             i * num_positions / main_elevators.len()
@@ -2477,20 +2772,27 @@ fn compute_shaft_placements(
         } else {
             0
         };
+        let sy = cy + cross_end_offset + stack_offset;
+        // Determine preferred wall: adjacent to cross-corridor (NORTH) or spine (WEST)
+        let pwall = if sy == cy + cross_end_offset {
+            wall_sides::NORTH // adjacent to cross-corridor above
+        } else {
+            wall_sides::WEST // stacked below — face spine
+        };
         placements.push(ShaftPlacement {
             x: spine_right,
-            y: cy + cross_end_offset + stack_offset,
+            y: sy,
             w: *w,
             h: *h,
             shaft_type: *st,
             name,
             is_main: *is_main,
+            preferred_wall: pwall,
         });
     }
 
-    // Service elevators: near cross-corridor intersections, offset from spine
-    // (moved inward from hull edge since ring replaces service corridor)
-    let svc_x = spine_right + 3 + 1; // just past main elevator
+    // Service elevators: offset from spine → door faces WEST (toward spine)
+    let svc_x = spine_right + 3 + 1;
     if svc_x + 2 < hw {
         for (i, (name, st, is_main, w, h)) in service_elevators.iter().enumerate() {
             let cross_idx = if service_elevators.len() <= num_positions {
@@ -2507,11 +2809,12 @@ fn compute_shaft_placements(
                 shaft_type: *st,
                 name,
                 is_main: *is_main,
+                preferred_wall: wall_sides::WEST,
             });
         }
     }
 
-    // Ladders: port side of spine
+    // Ladders: port side of spine → door faces EAST (toward spine)
     for (i, (name, st, is_main, w, h)) in ladders.iter().enumerate() {
         let cross_idx = if ladders.len() <= num_positions {
             (i * num_positions / ladders.len().max(1)).min(num_positions - 1)
@@ -2527,6 +2830,7 @@ fn compute_shaft_placements(
             shaft_type: *st,
             name,
             is_main: *is_main,
+            preferred_wall: wall_sides::EAST,
         });
     }
 
@@ -2618,4 +2922,79 @@ fn compute_optimal_deck_count(
         best = d;
     }
     best
+}
+
+/// Find the best clear rectangle within a search region for placing a large room.
+///
+/// Scans the search region for the largest contiguous empty rectangle that can
+/// accommodate the requested room dimensions.
+///
+/// Returns `Some((x, y, w, h))` if a valid placement is found.
+#[allow(clippy::too_many_arguments)]
+fn find_clear_rect_for_room(
+    grid: &[Vec<u8>],
+    hw: usize,
+    hl: usize,
+    search_x: usize,
+    search_y: usize,
+    search_w: usize,
+    search_h: usize,
+    want_w: usize,
+    want_h: usize,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut best: Option<(usize, usize, usize, usize, usize)> = None; // (x, y, w, h, score)
+
+    let max_x = (search_x + search_w).min(hw);
+    let max_y = (search_y + search_h).min(hl);
+
+    let step = 2;
+    let mut y = search_y;
+    while y + MIN_ROOM_DIM <= max_y {
+        let mut x = search_x;
+        while x + MIN_ROOM_DIM <= max_x {
+            // Find max clear width from this position
+            let mut clear_w = 0usize;
+            for dx in 0..(max_x - x) {
+                if grid[x + dx][y] != CELL_EMPTY {
+                    break;
+                }
+                clear_w = dx + 1;
+            }
+            if clear_w < MIN_ROOM_DIM {
+                x += step;
+                continue;
+            }
+
+            // Find max clear height for this width
+            let rw = clear_w.min(want_w);
+            let mut clear_h = 0usize;
+            'height: for dy in 0..(max_y - y) {
+                for dx in 0..rw {
+                    if grid[x + dx][y + dy] != CELL_EMPTY {
+                        break 'height;
+                    }
+                }
+                clear_h = dy + 1;
+            }
+            if clear_h < MIN_ROOM_DIM {
+                x += step;
+                continue;
+            }
+
+            let rh = clear_h.min(want_h);
+            let area = rw * rh;
+
+            // Score: prefer larger area
+            let score = area;
+
+            if best.is_none() || score > best.unwrap().4 {
+                best = Some((x, y, rw, rh, score));
+            }
+
+            x += step;
+        }
+        y += step;
+    }
+
+    best.map(|(x, y, w, h, _)| (x, y, w, h))
 }

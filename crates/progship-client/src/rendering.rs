@@ -4,12 +4,12 @@
 
 use bevy::prelude::*;
 use progship_client_sdk::*;
-use progship_logic::constants::room_types;
+use progship_logic::constants::{room_type_icon, room_types};
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    BlinkingLight, ConnectionState, DoorMarker, DustMote, IndicatorEntity, PersonEntity,
-    PlayerState, PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
+    BlinkingLight, ConnectionState, DoorMarker, DoorPlaque, DustMote, IndicatorEntity,
+    PersonEntity, PlayerState, PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
 };
 
 /// Add a mesh to assets. When Solari is enabled, generates tangents for deferred GBuffer.
@@ -447,6 +447,60 @@ pub fn sync_rooms(
             room_id,
             deck,
         );
+
+        // Door plaque: icon + room name on the corridor side of non-corridor rooms
+        let room = deck_rooms[cut.room_idx];
+        let other_rt = room_walls[cut.other_idx].2;
+        if !room_types::is_corridor(room.room_type) && room_types::is_corridor(other_rt) {
+            let icon = room_type_icon(room.room_type);
+            let label = if icon.is_empty() {
+                room.name.clone()
+            } else {
+                format!("{} {}", icon, room.name)
+            };
+
+            // Offset plaque to the right of the door (looking from corridor),
+            // on the corridor-facing wall surface
+            let plaque_h = 1.6; // eye height
+            let offset = cut.width / 2.0 + 0.6; // right of door frame
+            let wall_offset = 0.02; // just off the wall surface
+
+            let (px, pz, rot) = match cut.wall_side {
+                // Room's N wall: corridor is to the north, plaque faces north (-Z in Bevy)
+                0 => (
+                    fx + offset,
+                    rwalls.n_z - wall_offset,
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+                // Room's S wall: corridor is to the south, plaque faces south (+Z)
+                1 => (fx - offset, rwalls.s_z + wall_offset, Quat::IDENTITY),
+                // Room's E wall: corridor is to the east, plaque faces east (+X)
+                2 => (
+                    rwalls.e_x + wall_offset,
+                    fz + offset,
+                    Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+                ),
+                // Room's W wall: corridor is to the west, plaque faces west (-X)
+                3 => (
+                    rwalls.w_x - wall_offset,
+                    fz - offset,
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                ),
+                _ => continue,
+            };
+
+            commands.spawn((
+                Text2d::new(&label),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.9, 0.95, 1.0, 0.9)),
+                Transform::from_xyz(px, plaque_h, pz).with_rotation(rot),
+                DoorPlaque,
+                RoomEntity { room_id, deck },
+            ));
+        }
     }
 
     // --- Phase 7: Hull windows on ring corridors ---
