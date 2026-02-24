@@ -1110,10 +1110,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     if py + ph <= ring_y0 {
                         let target_y = ring_y0.saturating_sub(ph);
                         if target_y >= hull_y0
-                            && (target_y..target_y + ph).all(|y| {
-                                (px..px + pw)
-                                    .all(|x| grid[x][y] == CELL_EMPTY || grid[x][y] == grid[px][py])
-                            })
+                            && (target_y..target_y + ph)
+                                .all(|y| (px..px + pw).all(|x| grid[x][y] == CELL_EMPTY))
                         {
                             py = target_y;
                         }
