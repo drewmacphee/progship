@@ -30,7 +30,7 @@ const RING_WIDTH: usize = 4; // perimeter ring — same as spine
 const SPUR_WIDTH: usize = 3; // spur corridors — narrower than spine
 const MIN_ROOM_DIM: usize = 4;
 const SPUR_THRESHOLD: usize = 12; // add spurs when segment wider than this
-const HULL_BAND_WIDTH: usize = 15; // hull-facing room zone outside ring corridor
+const HULL_BAND_WIDTH: usize = 25; // hull-facing room zone outside ring corridor (N/S only)
 
 /// Filler room pool: used to backfill empty deck space after zone rooms are placed.
 const FILLER_POOL: &[(u8, &str, f32, u32)] = &[
@@ -268,8 +268,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     let mid_deck = deck_count / 2;
     let mid_hw_hull = hull_width(mid_deck, deck_count, ship_beam);
     let mid_hl_hull = hull_length(mid_deck, deck_count, ship_length);
-    let mid_hw = mid_hw_hull + 2 * HULL_BAND_WIDTH; // expanded grid width
-    let mid_hl = mid_hl_hull + 2 * HULL_BAND_WIDTH; // expanded grid length
+    let mid_hw = mid_hw_hull; // no hull band on east/west
+    let mid_hl = mid_hl_hull + 2 * HULL_BAND_WIDTH; // hull band on north/south only
     let mid_spine_left = mid_hw / 2 - SPINE_WIDTH / 2;
     let mid_spine_right = mid_spine_left + SPINE_WIDTH;
     // Cross-corridors are inside the ring; compute in interior space then offset
@@ -330,8 +330,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
-        // Ring corridor sits inside the hull band
-        let x_margin = HULL_BAND_WIDTH + taper_margin_x;
+        // Ring corridor: no hull band on X (ring touches hull), hull band on Y (N/S)
+        let x_margin = taper_margin_x;
         let y_margin = HULL_BAND_WIDTH + taper_margin_y;
 
         // ---- Phase 1: Ring corridor (perimeter) ----
@@ -1048,21 +1048,15 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             // Determine preferred region based on placement constraint
             let search_regions = match req.placement {
                 p if p == placement::HULL_FACING => {
-                    // Place in the hull band zone (between hull edge and ring outer wall).
-                    // Rooms are placed adjacent to the ring corridor (starting from ring edge outward).
-                    let hb_w = ring_x0.saturating_sub(hull_x0);
+                    // Hull band is N/S only. Rooms span ring_x0..ring_x1 (confined
+                    // to the east/west outer edges of the ring corridor).
                     let hb_h = ring_y0.saturating_sub(hull_y0);
                     let ring_w = ring_x1.saturating_sub(ring_x0);
-                    let ring_h = ring_y1.saturating_sub(ring_y0);
                     vec![
                         // South strip: starts at ring_y1 (rooms grow south toward hull)
                         (ring_x0, ring_y1, ring_w, hb_h),
-                        // North strip: starts at ring_y0 - hb_h so rooms closest to ring are found
+                        // North strip: hull edge up to ring_y0
                         (ring_x0, ring_y0.saturating_sub(hb_h), ring_w, hb_h),
-                        // West strip: starts at ring_x0 - hb_w
-                        (ring_x0.saturating_sub(hb_w), ring_y0, hb_w, ring_h),
-                        // East strip: starts at ring_x1
-                        (ring_x1, ring_y0, hb_w, ring_h),
                     ]
                 }
                 p if p == placement::AFT => {
@@ -1103,7 +1097,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 );
             }
 
-            if let Some((mut px, mut py, pw, ph)) = best_pos {
+            if let Some((px, mut py, pw, ph)) = best_pos {
                 // Shift hull-facing rooms to be adjacent to ring corridor
                 if req.placement == placement::HULL_FACING {
                     // North band: shift south so bottom edge touches ring_y0
@@ -1114,17 +1108,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 .all(|y| (px..px + pw).all(|x| grid[x][y] == CELL_EMPTY))
                         {
                             py = target_y;
-                        }
-                    }
-                    // West band: shift east so right edge touches ring_x0
-                    if px + pw <= ring_x0 {
-                        let target_x = ring_x0.saturating_sub(pw);
-                        if target_x >= hull_x0
-                            && (px..px + pw).all(|x| {
-                                (py..py + ph).all(|y| grid[target_x + (x - px)][y] == CELL_EMPTY)
-                            })
-                        {
-                            px = target_x;
                         }
                     }
                 }
@@ -1705,6 +1688,129 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             if filler_count > 0 {
                 log::info!("Deck {}: placed {} filler rooms", deck + 1, filler_count);
             }
+
+            // ---- Phase 8b: Hull band filler (N/S strips) ----
+            // Fill remaining empty space in the north and south hull bands with filler rooms.
+            // These connect to Ring North / Ring South respectively.
+            let hull_band_regions = [
+                // North band: hull_y0..ring_y0, confined to ring_x0..ring_x1
+                (ring_x0, hull_y0, ring_x1, ring_y0),
+                // South band: ring_y1..hull_y1, confined to ring_x0..ring_x1
+                (ring_x0, ring_y1, ring_x1, hull_y1),
+            ];
+            for (bx0, by0, bx1, by1) in &hull_band_regions {
+                let (bx0, by0, bx1, by1) = (*bx0, *by0, *bx1, *by1);
+                if bx1 <= bx0 || by1 <= by0 {
+                    continue;
+                }
+                let mut y = by0;
+                while y < by1 {
+                    let mut x = bx0;
+                    while x < bx1 {
+                        if grid[x][y] != CELL_EMPTY {
+                            x += 1;
+                            continue;
+                        }
+                        let mut max_w = 0;
+                        for dx in 0..(bx1 - x) {
+                            if grid[x + dx][y] != CELL_EMPTY {
+                                break;
+                            }
+                            max_w = dx + 1;
+                        }
+                        let mut max_h = by1 - y;
+                        for dy in 0..max_h {
+                            let row_clear = (0..max_w).all(|dx| grid[x + dx][y + dy] == CELL_EMPTY);
+                            if !row_clear {
+                                max_h = dy;
+                                break;
+                            }
+                        }
+
+                        if max_w >= MIN_ROOM_DIM && max_h >= MIN_ROOM_DIM {
+                            let (frt, fname, ftarget, fcap) =
+                                FILLER_POOL[filler_idx % FILLER_POOL.len()];
+                            filler_idx += 1;
+                            let target_side = (ftarget.sqrt() as usize).max(MIN_ROOM_DIM);
+                            let rw = max_w.min(target_side.max(MIN_ROOM_DIM));
+                            let rh = max_h.min(
+                                ((ftarget / rw as f32).ceil() as usize)
+                                    .max(MIN_ROOM_DIM)
+                                    .min(max_h),
+                            );
+
+                            if rw >= MIN_ROOM_DIM && rh >= MIN_ROOM_DIM {
+                                filler_count += 1;
+                                let room_id = next_id();
+                                for gx in x..(x + rw) {
+                                    for gy in y..(y + rh) {
+                                        grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                                    }
+                                }
+                                ctx.db.room().insert(Room {
+                                    id: room_id,
+                                    node_id: 0,
+                                    name: format!("{} {}", fname, filler_count),
+                                    room_type: frt,
+                                    deck,
+                                    x: x as f32 + rw as f32 / 2.0,
+                                    y: y as f32 + rh as f32 / 2.0,
+                                    width: rw as f32,
+                                    height: rh as f32,
+                                    capacity: fcap,
+                                    ceiling_height: deck_heights::room_ceiling_height(frt),
+                                    deck_span: deck_heights::room_deck_span(frt),
+                                });
+                                placed_rooms.push((
+                                    room_id,
+                                    x,
+                                    y,
+                                    rw,
+                                    rh,
+                                    frt,
+                                    ftarget,
+                                    placement::NONE,
+                                ));
+
+                                create_corridor_door(
+                                    ctx,
+                                    room_id,
+                                    x,
+                                    y,
+                                    rw,
+                                    rh,
+                                    spine_left,
+                                    spine_right,
+                                    &spine_segments,
+                                    &cross_rooms,
+                                    &spur_rooms,
+                                    inner_x0,
+                                    inner_x1,
+                                    inner_y0,
+                                    inner_y1,
+                                    ring_x0,
+                                    ring_x1,
+                                    ring_y0,
+                                    ring_y1,
+                                    ring_n_id,
+                                    ring_s_id,
+                                    ring_w_id,
+                                    ring_e_id,
+                                );
+                            }
+                        }
+                        x += max_w.max(1);
+                    }
+                    y += 1;
+                }
+            }
+            if filler_count > 0 {
+                log::info!(
+                    "Deck {}: total filler rooms (incl. hull band): {}",
+                    deck + 1,
+                    filler_count
+                );
+            }
         }
 
         // ---- Phase 8.5: Room expansion into empty space ----
@@ -1718,9 +1824,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
                 // Cap expansion at 1.5× the larger of target or initial area
                 let max_area = ((target_area as usize).max(rw * rh) as f32 * 1.5) as usize;
-                // Hull-facing rooms must not expand into the interior
+                // Hull-facing rooms expand within N/S hull band (ring X extent, hull Y extent)
                 let (exp_x0, exp_y0, exp_x1, exp_y1) = if room_placement == placement::HULL_FACING {
-                    (hull_x0, hull_y0, hull_x1, hull_y1)
+                    (ring_x0, hull_y0, ring_x1, hull_y1)
                 } else {
                     (inner_x0, inner_y0, inner_x1, inner_y1)
                 };
