@@ -30,7 +30,7 @@ const RING_WIDTH: usize = 4; // perimeter ring — same as spine
 const SPUR_WIDTH: usize = 3; // spur corridors — narrower than spine
 const MIN_ROOM_DIM: usize = 4;
 const SPUR_THRESHOLD: usize = 12; // add spurs when segment wider than this
-const HULL_BAND_WIDTH: usize = 25; // hull-facing room zone outside ring corridor (N/S only)
+const HULL_BAND_WIDTH: usize = 15; // hull-facing room zone outside ring corridor (N/S only)
 
 /// Filler room pool: used to backfill empty deck space after zone rooms are placed.
 const FILLER_POOL: &[(u8, &str, f32, u32)] = &[
@@ -1018,10 +1018,14 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         const LARGE_ROOM_THRESHOLD: f32 = 200.0;
 
         // Separate oversized rooms AND rooms with special placement constraints
+        // Hull-facing rooms are excluded here — they go to the hull band phase.
+        let (hull_facing_requests, non_hull_requests): (Vec<RoomRequest>, Vec<RoomRequest>) =
+            deck_requests
+                .into_iter()
+                .partition(|r| r.placement == placement::HULL_FACING);
         let (large_requests, normal_requests): (Vec<RoomRequest>, Vec<RoomRequest>) =
-            deck_requests.into_iter().partition(|r| {
+            non_hull_requests.into_iter().partition(|r| {
                 r.target_area >= LARGE_ROOM_THRESHOLD
-                    || r.placement == placement::HULL_FACING
                     || r.placement == placement::AFT
                     || r.placement == placement::FORWARD
                     || r.placement == placement::INTERIOR
@@ -1047,18 +1051,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
             // Determine preferred region based on placement constraint
             let search_regions = match req.placement {
-                p if p == placement::HULL_FACING => {
-                    // Hull band is N/S only. Rooms span ring_x0..ring_x1 (confined
-                    // to the east/west outer edges of the ring corridor).
-                    let hb_h = ring_y0.saturating_sub(hull_y0);
-                    let ring_w = ring_x1.saturating_sub(ring_x0);
-                    vec![
-                        // South strip: starts at ring_y1 (rooms grow south toward hull)
-                        (ring_x0, ring_y1, ring_w, hb_h),
-                        // North strip: hull edge up to ring_y0
-                        (ring_x0, ring_y0.saturating_sub(hb_h), ring_w, hb_h),
-                    ]
-                }
                 p if p == placement::AFT => {
                     vec![(inner_x0, mid_y, inner_w, inner_y1 - mid_y)]
                 }
@@ -1097,20 +1089,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 );
             }
 
-            if let Some((px, mut py, pw, ph)) = best_pos {
-                // Shift hull-facing rooms to be adjacent to ring corridor
-                if req.placement == placement::HULL_FACING {
-                    // North band: shift south so bottom edge touches ring_y0
-                    if py + ph <= ring_y0 {
-                        let target_y = ring_y0.saturating_sub(ph);
-                        if target_y >= hull_y0
-                            && (target_y..target_y + ph)
-                                .all(|y| (px..px + pw).all(|x| grid[x][y] == CELL_EMPTY))
-                        {
-                            py = target_y;
-                        }
-                    }
-                }
+            if let Some((px, py, pw, ph)) = best_pos {
                 let room_id = next_id();
 
                 // Stamp grid
@@ -1138,60 +1117,31 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 });
 
                 // Door to corridor
-                if req.placement == placement::HULL_FACING {
-                    // Hull-facing rooms connect to ring corridor through its outer wall
-                    let ring_segments = [
-                        (ring_n_id, ring_n_grid),
-                        (ring_s_id, ring_s_grid),
-                        (ring_w_id, ring_w_grid),
-                        (ring_e_id, ring_e_grid),
-                    ];
-                    for &(rid, (rx, ry, rw, rh)) in &ring_segments {
-                        if let Some((dx, dy, wa, wb, ol)) =
-                            find_shared_edge(px, py, pw, ph, rx, ry, rw, rh)
-                        {
-                            ctx.db.door().insert(Door {
-                                id: 0,
-                                room_a: room_id,
-                                room_b: rid,
-                                wall_a: wa,
-                                wall_b: wb,
-                                position_along_wall: 0.5,
-                                width: door_width_from_overlap(ol).min(3.0),
-                                access_level: access_levels::PUBLIC,
-                                door_x: dx,
-                                door_y: dy,
-                            });
-                            break;
-                        }
-                    }
-                } else {
-                    create_corridor_door(
-                        ctx,
-                        room_id,
-                        px,
-                        py,
-                        pw,
-                        ph,
-                        spine_left,
-                        spine_right,
-                        &spine_segments,
-                        &cross_rooms,
-                        &spur_rooms,
-                        inner_x0,
-                        inner_x1,
-                        inner_y0,
-                        inner_y1,
-                        ring_x0,
-                        ring_x1,
-                        ring_y0,
-                        ring_y1,
-                        ring_n_id,
-                        ring_s_id,
-                        ring_w_id,
-                        ring_e_id,
-                    );
-                }
+                create_corridor_door(
+                    ctx,
+                    room_id,
+                    px,
+                    py,
+                    pw,
+                    ph,
+                    spine_left,
+                    spine_right,
+                    &spine_segments,
+                    &cross_rooms,
+                    &spur_rooms,
+                    inner_x0,
+                    inner_x1,
+                    inner_y0,
+                    inner_y1,
+                    ring_x0,
+                    ring_x1,
+                    ring_y0,
+                    ring_y1,
+                    ring_n_id,
+                    ring_s_id,
+                    ring_w_id,
+                    ring_e_id,
+                );
 
                 placed_rooms.push((
                     room_id,
@@ -1689,34 +1639,125 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 log::info!("Deck {}: placed {} filler rooms", deck + 1, filler_count);
             }
 
-            // ---- Phase 8b: Hull band filler (N/S strips) ----
-            // Fill remaining empty space in the N/S hull bands with large rooms that
-            // span the full band depth. Scan along the ring edge (x-axis), and for each
-            // empty column span, place one room covering the full available height.
+            // ---- Phase 8b: Unified hull band placement (N/S strips) ----
+            // Places hull-facing specialty rooms first, then fills gaps with fillers.
+            // All rooms are a single row directly touching the ring outer wall.
             let hull_band_regions: [(usize, usize, usize, usize, u32); 2] = [
-                // North band: hull_y0..ring_y0, ring for door = ring_n_id
+                // North band: hull_y0..ring_y0, door to ring_n
                 (ring_x0, hull_y0, ring_x1, ring_y0, ring_n_id),
-                // South band: ring_y1..hull_y1, ring for door = ring_s_id
+                // South band: ring_y1..hull_y1, door to ring_s
                 (ring_x0, ring_y1, ring_x1, hull_y1, ring_s_id),
             ];
+            let mut hull_band_count = 0u32;
             for (bx0, by0, bx1, by1, ring_id) in &hull_band_regions {
                 let (bx0, by0, bx1, by1) = (*bx0, *by0, *bx1, *by1);
                 if bx1 <= bx0 || by1 <= by0 {
                     continue;
                 }
                 let band_h = by1 - by0;
-                let mut x = bx0;
-                while x < bx1 {
-                    // Find the widest empty column span at the ring edge
+                if band_h < MIN_ROOM_DIM {
+                    continue;
+                }
+
+                // Place hull-facing specialty rooms first along this band
+                for req in &hull_facing_requests {
+                    let want_w = (req.target_area / band_h as f32).ceil() as usize;
+                    let want_w = want_w.max(MIN_ROOM_DIM).min(bx1 - bx0);
+                    // Scan ring edge for a clear span of want_w
                     let ring_edge_y = if *ring_id == ring_n_id {
-                        by1.saturating_sub(1) // north band: ring edge is at by1-1
+                        by1.saturating_sub(1)
                     } else {
-                        by0 // south band: ring edge is at by0
+                        by0
+                    };
+                    let mut placed = false;
+                    let mut sx = bx0;
+                    while sx + want_w <= bx1 && !placed {
+                        // Check ring edge is clear
+                        let edge_clear =
+                            (0..want_w).all(|dx| grid[sx + dx][ring_edge_y] == CELL_EMPTY);
+                        if !edge_clear {
+                            sx += 1;
+                            continue;
+                        }
+                        // Check full rectangle is clear
+                        let ry = if *ring_id == ring_n_id {
+                            by1.saturating_sub(band_h)
+                        } else {
+                            by0
+                        };
+                        let rect_clear = (0..want_w)
+                            .all(|dx| (0..band_h).all(|dy| grid[sx + dx][ry + dy] == CELL_EMPTY));
+                        if !rect_clear {
+                            sx += 1;
+                            continue;
+                        }
+                        // Place the room
+                        let room_id = next_id();
+                        hull_band_count += 1;
+                        for gx in sx..sx + want_w {
+                            for gy in ry..ry + band_h {
+                                grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
+                            }
+                        }
+                        ctx.db.room().insert(Room {
+                            id: room_id,
+                            node_id: req.node_id,
+                            name: req.name.clone(),
+                            room_type: req.room_type,
+                            deck,
+                            x: sx as f32 + want_w as f32 / 2.0,
+                            y: ry as f32 + band_h as f32 / 2.0,
+                            width: want_w as f32,
+                            height: band_h as f32,
+                            capacity: req.capacity,
+                            ceiling_height: deck_heights::room_ceiling_height(req.room_type),
+                            deck_span: deck_heights::room_deck_span(req.room_type),
+                        });
+                        placed_rooms.push((
+                            room_id,
+                            sx,
+                            ry,
+                            want_w,
+                            band_h,
+                            req.room_type,
+                            req.target_area,
+                            req.placement,
+                        ));
+                        // Door to ring
+                        ctx.db.door().insert(Door {
+                            id: 0,
+                            room_a: room_id,
+                            room_b: *ring_id,
+                            wall_a: if *ring_id == ring_n_id { 1 } else { 0 },
+                            wall_b: if *ring_id == ring_n_id { 0 } else { 1 },
+                            position_along_wall: 0.5,
+                            width: (want_w as f32 * 0.3).clamp(1.5, 3.0),
+                            access_level: access_levels::PUBLIC,
+                            door_x: sx as f32 + want_w as f32 / 2.0,
+                            door_y: if *ring_id == ring_n_id {
+                                by1 as f32
+                            } else {
+                                by0 as f32
+                            },
+                        });
+                        placed = true;
+                    }
+                }
+
+                // Fill remaining gaps with filler rooms
+                let mut x = bx0;
+                let max_filler_w = 20usize;
+                while x < bx1 {
+                    let ring_edge_y = if *ring_id == ring_n_id {
+                        by1.saturating_sub(1)
+                    } else {
+                        by0
                     };
                     if grid[x][ring_edge_y] != CELL_EMPTY {
                         x += 1;
                         continue;
                     }
+                    // Find widest empty span at ring edge
                     let mut w = 0;
                     for dx in 0..(bx1 - x) {
                         if grid[x + dx][ring_edge_y] != CELL_EMPTY {
@@ -1724,50 +1765,31 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         }
                         w = dx + 1;
                     }
-                    // Cap room width so we get multiple reasonably-sized rooms
-                    let max_room_w = 20usize;
-                    let rw = w.min(max_room_w);
+                    let rw = w.min(max_filler_w);
                     if rw < MIN_ROOM_DIM {
                         x += w.max(1);
                         continue;
                     }
-                    // Find max height from ring edge outward toward hull
-                    let mut h = band_h;
-                    for dy in 0..band_h {
-                        let check_y = if *ring_id == ring_n_id {
-                            by1.saturating_sub(1 + dy)
-                        } else {
-                            by0 + dy
-                        };
-                        if check_y < by0 || check_y >= by1 {
-                            h = dy;
-                            break;
-                        }
-                        let row_clear = (0..rw).all(|dx| grid[x + dx][check_y] == CELL_EMPTY);
-                        if !row_clear {
-                            h = dy;
-                            break;
-                        }
-                    }
-                    if h < MIN_ROOM_DIM {
-                        x += rw.max(1);
-                        continue;
-                    }
-                    // Place the room anchored at the ring edge
                     let ry = if *ring_id == ring_n_id {
-                        by1.saturating_sub(h)
+                        by1.saturating_sub(band_h)
                     } else {
                         by0
                     };
+                    // Verify full rect is clear
+                    let rect_clear =
+                        (0..rw).all(|dx| (0..band_h).all(|dy| grid[x + dx][ry + dy] == CELL_EMPTY));
+                    if !rect_clear {
+                        x += 1;
+                        continue;
+                    }
                     let (frt, fname, _ftarget, fcap) = FILLER_POOL[filler_idx % FILLER_POOL.len()];
                     filler_idx += 1;
                     filler_count += 1;
+                    hull_band_count += 1;
                     let room_id = next_id();
-                    for gx in x..(x + rw) {
-                        for gy in ry..(ry + h) {
-                            if grid[gx][gy] == CELL_EMPTY {
-                                grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
-                            }
+                    for gx in x..x + rw {
+                        for gy in ry..ry + band_h {
+                            grid[gx][gy] = CELL_ROOM_BASE + (room_id as u8 % 246);
                         }
                     }
                     ctx.db.room().insert(Room {
@@ -1777,9 +1799,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         room_type: frt,
                         deck,
                         x: x as f32 + rw as f32 / 2.0,
-                        y: ry as f32 + h as f32 / 2.0,
+                        y: ry as f32 + band_h as f32 / 2.0,
                         width: rw as f32,
-                        height: h as f32,
+                        height: band_h as f32,
                         capacity: fcap,
                         ceiling_height: deck_heights::room_ceiling_height(frt),
                         deck_span: deck_heights::room_deck_span(frt),
@@ -1789,45 +1811,36 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         x,
                         ry,
                         rw,
-                        h,
+                        band_h,
                         frt,
-                        (rw * h) as f32,
+                        (rw * band_h) as f32,
                         placement::NONE,
                     ));
-                    // Create door to ring corridor
-                    create_corridor_door(
-                        ctx,
-                        room_id,
-                        x,
-                        ry,
-                        rw,
-                        h,
-                        spine_left,
-                        spine_right,
-                        &spine_segments,
-                        &cross_rooms,
-                        &spur_rooms,
-                        inner_x0,
-                        inner_x1,
-                        inner_y0,
-                        inner_y1,
-                        ring_x0,
-                        ring_x1,
-                        ring_y0,
-                        ring_y1,
-                        ring_n_id,
-                        ring_s_id,
-                        ring_w_id,
-                        ring_e_id,
-                    );
+                    // Door to ring
+                    ctx.db.door().insert(Door {
+                        id: 0,
+                        room_a: room_id,
+                        room_b: *ring_id,
+                        wall_a: if *ring_id == ring_n_id { 1 } else { 0 },
+                        wall_b: if *ring_id == ring_n_id { 0 } else { 1 },
+                        position_along_wall: 0.5,
+                        width: (rw as f32 * 0.3).clamp(1.5, 3.0),
+                        access_level: access_levels::PUBLIC,
+                        door_x: x as f32 + rw as f32 / 2.0,
+                        door_y: if *ring_id == ring_n_id {
+                            by1 as f32
+                        } else {
+                            by0 as f32
+                        },
+                    });
                     x += rw;
                 }
             }
-            if filler_count > 0 {
+            if hull_band_count > 0 {
                 log::info!(
-                    "Deck {}: total filler rooms (incl. hull band): {}",
+                    "Deck {}: placed {} hull band rooms",
                     deck + 1,
-                    filler_count
+                    hull_band_count
                 );
             }
         }
@@ -1958,52 +1971,6 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         door_x: dx,
                         door_y: dy,
                     });
-                }
-            }
-        }
-
-        // ---- Phase 9b: Hull band adjacency doors ----
-        // Connect adjacent hull band rooms that share an edge, so rooms not directly
-        // touching the ring corridor are reachable through neighboring rooms.
-        {
-            // Collect rooms in hull band regions (N/S)
-            let hull_band_rooms: Vec<usize> = (0..placed_rooms.len())
-                .filter(|&i| {
-                    let (_, _, ry, _, rh, _, _, _) = placed_rooms[i];
-                    // Room is in north band (any part above ring_y0) or south band (any part below ring_y1)
-                    ry < ring_y0 || ry + rh > ring_y1
-                })
-                .collect();
-            for i in 0..hull_band_rooms.len() {
-                for j in (i + 1)..hull_band_rooms.len() {
-                    let ii = hull_band_rooms[i];
-                    let jj = hull_band_rooms[j];
-                    let (id_a, ax, ay, aw, ah, ..) = placed_rooms[ii];
-                    let (id_b, bx, by, bw, bh, ..) = placed_rooms[jj];
-                    // Skip if a door already exists between these two rooms
-                    let already_connected = ctx.db.door().iter().any(|d| {
-                        (d.room_a == id_a && d.room_b == id_b)
-                            || (d.room_a == id_b && d.room_b == id_a)
-                    });
-                    if already_connected {
-                        continue;
-                    }
-                    if let Some((dx, dy, wa, wb, ol)) =
-                        find_shared_edge(ax, ay, aw, ah, bx, by, bw, bh)
-                    {
-                        ctx.db.door().insert(Door {
-                            id: 0,
-                            room_a: id_a,
-                            room_b: id_b,
-                            wall_a: wa,
-                            wall_b: wb,
-                            position_along_wall: 0.5,
-                            width: door_width_from_overlap(ol),
-                            access_level: access_levels::PUBLIC,
-                            door_x: dx,
-                            door_y: dy,
-                        });
-                    }
                 }
             }
         }
