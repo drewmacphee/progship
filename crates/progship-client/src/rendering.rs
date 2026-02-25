@@ -9,8 +9,9 @@ use progship_logic::movement::decode_cell_rects;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
-    BlinkingLight, ConnectionState, DoorMarker, DoorPlaque, DustMote, IndicatorEntity,
-    PersonEntity, PlayerState, PulsingEmissive, RoomEntity, RoomLabel, UiState, ViewState,
+    BlinkingLight, ConnectionState, DoorButton, DoorMarker, DoorPanel, DoorPlaque, DustMote,
+    IndicatorEntity, PersonEntity, PlayerState, PulsingEmissive, RoomEntity, RoomLabel, UiState,
+    ViewState,
 };
 
 /// Add a mesh to assets. When Solari is enabled, generates tangents for deferred GBuffer.
@@ -244,6 +245,8 @@ pub fn sync_rooms(
         wall_side: u8,
         axis_pos: f32,
         width: f32,
+        door_id: u64,
+        is_open: bool,
     }
     let mut doorway_cuts: Vec<DoorwayCut> = Vec::new();
 
@@ -325,6 +328,8 @@ pub fn sync_rooms(
                     door.door_y
                 },
                 width: door.width,
+                door_id: door.id,
+                is_open: door.is_open,
             });
         }
     }
@@ -440,6 +445,15 @@ pub fn sync_rooms(
     });
     let frame_depth = 2.0 * wt + 0.1;
 
+    let panel_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.4, 0.42, 0.45),
+        metallic: 0.9,
+        perceptual_roughness: 0.25,
+        reflectance: 0.5,
+        ..default()
+    });
+    let panel_thickness = 0.06;
+
     for cut in &doorway_cuts {
         let rwalls = &room_walls[cut.room_idx].3;
         let cwalls = &room_walls[cut.other_idx].3;
@@ -472,6 +486,51 @@ pub fn sync_rooms(
             room_id,
             deck,
         );
+
+        // --- Door sliding panels ---
+        let panel_hw = cut.width / 4.0; // each panel is half the door width
+        let open_slide = cut.width / 4.0 + post_w * 0.4; // how far panels slide when open
+        for side in [-1.0_f32, 1.0] {
+            let closed_offset = side * panel_hw; // center of each half
+            let current_offset = if cut.is_open {
+                closed_offset + side * open_slide
+            } else {
+                closed_offset
+            };
+            let (px, pz, panel_mesh) = if horiz {
+                (
+                    fx + current_offset,
+                    fz,
+                    add_mesh(
+                        &mut meshes,
+                        Cuboid::new(panel_hw * 2.0, door_h - 0.04, panel_thickness),
+                    ),
+                )
+            } else {
+                (
+                    fx,
+                    fz + current_offset,
+                    add_mesh(
+                        &mut meshes,
+                        Cuboid::new(panel_thickness, door_h - 0.04, panel_hw * 2.0),
+                    ),
+                )
+            };
+            commands.spawn((
+                Mesh3d(panel_mesh),
+                MeshMaterial3d(panel_mat.clone()),
+                Transform::from_xyz(px, door_h / 2.0, pz),
+                DoorPanel {
+                    door_id: cut.door_id,
+                    side,
+                    horizontal: horiz,
+                    half_width: panel_hw,
+                    open_offset: open_slide,
+                    frame_center: if horiz { fx } else { fz },
+                },
+                RoomEntity { room_id, deck },
+            ));
+        }
 
         // Door plaque: icon + room name on the corridor side of non-corridor rooms
         let room = deck_rooms[cut.room_idx];
@@ -523,6 +582,76 @@ pub fn sync_rooms(
                 TextColor(Color::srgba(0.9, 0.95, 1.0, 0.9)),
                 Transform::from_xyz(px, plaque_h, pz).with_rotation(rot),
                 DoorPlaque,
+                RoomEntity { room_id, deck },
+            ));
+        }
+
+        // --- Door button panel (small emissive cuboid beside door frame) ---
+        let btn_h = 1.2;
+        let btn_offset = cut.width / 2.0 + post_w + 0.15;
+        let wall_off = 0.01;
+        let btn_color = if cut.is_open {
+            Color::srgb(0.1, 0.8, 0.2)
+        } else {
+            Color::srgb(0.8, 0.1, 0.1)
+        };
+        let btn_mat = materials.add(StandardMaterial {
+            base_color: btn_color,
+            emissive: btn_color.into(),
+            ..default()
+        });
+        let btn_mesh = add_mesh(&mut meshes, Cuboid::new(0.12, 0.18, 0.03));
+        let btn_positions: Vec<(f32, f32, Quat)> = match cut.wall_side {
+            0 => vec![
+                (
+                    fx + btn_offset,
+                    rwalls.n_z - wall_off,
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+                (fx - btn_offset, cwalls.s_z + wall_off, Quat::IDENTITY),
+            ],
+            1 => vec![
+                (fx - btn_offset, rwalls.s_z + wall_off, Quat::IDENTITY),
+                (
+                    fx + btn_offset,
+                    cwalls.n_z - wall_off,
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+            ],
+            2 => vec![
+                (
+                    rwalls.e_x + wall_off,
+                    fz - btn_offset,
+                    Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+                ),
+                (
+                    cwalls.w_x - wall_off,
+                    fz + btn_offset,
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                ),
+            ],
+            3 => vec![
+                (
+                    rwalls.w_x - wall_off,
+                    fz + btn_offset,
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                ),
+                (
+                    cwalls.e_x + wall_off,
+                    fz - btn_offset,
+                    Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+                ),
+            ],
+            _ => vec![],
+        };
+        for (bx, bz, brot) in btn_positions {
+            commands.spawn((
+                Mesh3d(btn_mesh.clone()),
+                MeshMaterial3d(btn_mat.clone()),
+                Transform::from_xyz(bx, btn_h, bz).with_rotation(brot),
+                DoorButton {
+                    door_id: cut.door_id,
+                },
                 RoomEntity { room_id, deck },
             ));
         }
@@ -1324,6 +1453,55 @@ fn spawn_door_frame(
                 DoorMarker,
                 re,
             ));
+        }
+    }
+}
+
+/// Animate door panels: smoothly slide open/closed based on server door state.
+pub fn sync_door_panels(
+    state: Res<ConnectionState>,
+    mut panels: Query<(&DoorPanel, &mut Transform)>,
+    time: Res<Time>,
+) {
+    let conn = match &*state {
+        ConnectionState::Connected(c) => c,
+        _ => return,
+    };
+    let dt = time.delta_secs();
+    let speed = 2.5;
+
+    for (panel, mut tf) in panels.iter_mut() {
+        let is_open = conn
+            .db
+            .door()
+            .iter()
+            .find(|d| d.id == panel.door_id)
+            .is_none_or(|d| d.is_open);
+
+        let closed_pos = panel.frame_center + panel.side * panel.half_width;
+        let open_pos = closed_pos + panel.side * panel.open_offset;
+        let target = if is_open { open_pos } else { closed_pos };
+
+        if panel.horizontal {
+            let diff = target - tf.translation.x;
+            if diff.abs() > 0.001 {
+                let step = diff.signum() * speed * dt;
+                if step.abs() >= diff.abs() {
+                    tf.translation.x = target;
+                } else {
+                    tf.translation.x += step;
+                }
+            }
+        } else {
+            let diff = target - tf.translation.z;
+            if diff.abs() > 0.001 {
+                let step = diff.signum() * speed * dt;
+                if step.abs() >= diff.abs() {
+                    tf.translation.z = target;
+                } else {
+                    tf.translation.z += step;
+                }
+            }
         }
     }
 }

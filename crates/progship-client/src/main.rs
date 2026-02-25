@@ -31,7 +31,7 @@ use camera::{camera_follow_player, handle_quit, setup_camera};
 use input::player_input;
 use minimap::{minimap_toggle, render_minimap, MinimapState};
 use networking::{auto_join_game, connect_to_server, process_messages};
-use rendering::{animate_details, animate_dust_motes, sync_people, sync_rooms};
+use rendering::{animate_details, animate_dust_motes, sync_door_panels, sync_people, sync_rooms};
 use state::{ConnectionConfig, ConnectionState, PlayerState, UiState, ViewState};
 use ui::{render_hud, render_info_panel, render_toasts, setup_ui};
 
@@ -85,6 +85,7 @@ fn main() {
                 handle_quit,
                 sync_rooms,
                 sync_people,
+                sync_door_panels,
                 animate_details,
                 animate_dust_motes,
             ),
