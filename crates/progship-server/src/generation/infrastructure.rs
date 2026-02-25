@@ -490,6 +490,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_s_id = next_id();
         ctx.db.room().insert(Room {
@@ -505,6 +506,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_w_id = next_id();
         let ring_side_h = (inner_y1 - inner_y0) as f32;
@@ -521,6 +523,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_e_id = next_id();
         ctx.db.room().insert(Room {
@@ -536,6 +539,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
 
         // Ring corner doors (N↔W, N↔E, S↔W, S↔E) — use find_shared_edge for correct walls
@@ -629,6 +633,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: 0,
                     ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                     deck_span: 1,
+                    cells: Vec::new(),
                 });
                 spine_segments.push((seg_id, y0, y1));
             }
@@ -679,6 +684,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 capacity: 0,
                 ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                 deck_span: 1,
+                cells: Vec::new(),
             });
             ctx.db.corridor().insert(Corridor {
                 id: 0,
@@ -754,6 +760,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: 0,
                         ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                         deck_span: 1,
+                        cells: Vec::new(),
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
@@ -785,6 +792,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: 0,
                         ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                         deck_span: 1,
+                        cells: Vec::new(),
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
@@ -1034,6 +1042,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 capacity: 0,
                 ceiling_height: deck_heights::room_ceiling_height(srt),
                 deck_span: deck_heights::room_deck_span(srt),
+                cells: Vec::new(),
             });
 
             if global_idx < shaft_infos.len() {
@@ -1236,6 +1245,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                     ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                     deck_span: deck_heights::room_deck_span(req.room_type),
+                    cells: Vec::new(),
                 });
 
                 // Door to corridor
@@ -1451,6 +1461,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                     ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                     deck_span: deck_heights::room_deck_span(req.room_type),
+                    cells: Vec::new(),
                 });
 
                 create_corridor_door(
@@ -1633,6 +1644,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 capacity: req.capacity,
                                 ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                                 deck_span: deck_heights::room_deck_span(req.room_type),
+                                cells: Vec::new(),
                             });
 
                             create_corridor_door(
@@ -1777,6 +1789,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 capacity: fcap,
                                 ceiling_height: deck_heights::room_ceiling_height(frt),
                                 deck_span: deck_heights::room_deck_span(frt),
+                                cells: Vec::new(),
                             });
                             placed_rooms.push((
                                 room_id,
@@ -1897,6 +1910,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                             capacity: req.capacity,
                             ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                             deck_span: deck_heights::room_deck_span(req.room_type),
+                            cells: Vec::new(),
                         });
                         placed_rooms.push((
                             room_id,
@@ -1990,6 +2004,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: fcap,
                         ceiling_height: deck_heights::room_ceiling_height(frt),
                         deck_span: deck_heights::room_deck_span(frt),
+                        cells: Vec::new(),
                     });
                     placed_rooms.push((
                         room_id,
@@ -2105,6 +2120,87 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     deck,
                     "deadspace-rescue",
                 );
+            }
+        }
+
+        // ---- J10b: Cell-level irregular expansion ----
+        // Grow rooms one cell at a time into adjacent empty cells, enabling L/T/U shapes.
+        {
+            let mut claimed = 0u32;
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for i in 0..placed_rooms.len() {
+                    let (room_id, rx, ry, rw, rh, _rt, _ta, room_placement) = placed_rooms[i];
+                    let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+                    let (exp_x0, exp_y0, exp_x1, exp_y1) =
+                        if room_placement == placement::HULL_FACING {
+                            (ring_x0, hull_y0, ring_x1, hull_y1)
+                        } else {
+                            (inner_x0, inner_y0, inner_x1, inner_y1)
+                        };
+                    for x in rx..(rx + rw).min(hw) {
+                        for y in ry..(ry + rh).min(hl) {
+                            if grid[x][y] != cell_tag {
+                                continue;
+                            }
+                            for &(dx, dy) in &[(0isize, 1isize), (0, -1), (1, 0), (-1, 0)] {
+                                let nx = x as isize + dx;
+                                let ny = y as isize + dy;
+                                if nx < exp_x0 as isize
+                                    || nx >= exp_x1 as isize
+                                    || ny < exp_y0 as isize
+                                    || ny >= exp_y1 as isize
+                                {
+                                    continue;
+                                }
+                                let nx = nx as usize;
+                                let ny = ny as usize;
+                                if grid[nx][ny] == CELL_EMPTY {
+                                    grid[nx][ny] = cell_tag;
+                                    claimed += 1;
+                                    changed = true;
+                                    let pr = &mut placed_rooms[i];
+                                    if nx < pr.1 {
+                                        pr.3 += pr.1 - nx;
+                                        pr.1 = nx;
+                                    }
+                                    if nx >= pr.1 + pr.3 {
+                                        pr.3 = nx - pr.1 + 1;
+                                    }
+                                    if ny < pr.2 {
+                                        pr.4 += pr.2 - ny;
+                                        pr.2 = ny;
+                                    }
+                                    if ny >= pr.2 + pr.4 {
+                                        pr.4 = ny - pr.2 + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if claimed > 0 {
+                log::info!(
+                    "Deck {}: cell-level expansion claimed {} cells",
+                    deck + 1,
+                    claimed
+                );
+            }
+        }
+
+        // ---- J10a: Populate cells field from grid ----
+        for &(room_id, rx, ry, rw, rh, ..) in &placed_rooms {
+            let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+            let cells_data = encode_cell_mask(&grid, cell_tag, rx, ry, rw, rh, hw, hl);
+            if let Some(mut room) = ctx.db.room().id().find(room_id) {
+                room.x = rx as f32 + rw as f32 / 2.0;
+                room.y = ry as f32 + rh as f32 / 2.0;
+                room.width = rw as f32;
+                room.height = rh as f32;
+                room.cells = cells_data;
+                ctx.db.room().id().update(room);
             }
         }
 
@@ -3286,4 +3382,83 @@ fn find_clear_rect_for_room(
     }
 
     best.map(|(x, y, w, h, _)| (x, y, w, h))
+}
+
+/// Encode a room's grid footprint as packed axis-aligned rects.
+/// Scans grid within bbox for cells matching `cell_tag`, produces a minimal
+/// set of rects (greedy row-merge) encoded as [(x0,y0,x1,y1) u16] bytes.
+#[allow(clippy::too_many_arguments)]
+fn encode_cell_mask(
+    grid: &[Vec<u8>],
+    cell_tag: u8,
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+    hw: usize,
+    hl: usize,
+) -> Vec<u8> {
+    // Greedy row-based rect merging
+    let mut rects: Vec<(u16, u16, u16, u16)> = Vec::new();
+    let mut used = vec![vec![false; rh]; rw];
+
+    for y in 0..rh {
+        let gy = ry + y;
+        if gy >= hl {
+            break;
+        }
+        let mut x = 0;
+        while x < rw {
+            let gx = rx + x;
+            if gx >= hw || used[x][y] || grid[gx][gy] != cell_tag {
+                x += 1;
+                continue;
+            }
+            // Find max width of this run
+            let mut run_w = 0;
+            while x + run_w < rw
+                && rx + x + run_w < hw
+                && !used[x + run_w][y]
+                && grid[rx + x + run_w][gy] == cell_tag
+            {
+                run_w += 1;
+            }
+            // Extend downward as far as all columns match
+            let mut run_h = 1;
+            'outer: while y + run_h < rh && ry + y + run_h < hl {
+                for dx in 0..run_w {
+                    if rx + x + dx >= hw
+                        || used[x + dx][y + run_h]
+                        || grid[rx + x + dx][ry + y + run_h] != cell_tag
+                    {
+                        break 'outer;
+                    }
+                }
+                run_h += 1;
+            }
+            // Mark used
+            for dy in 0..run_h {
+                for dx in 0..run_w {
+                    used[x + dx][y + dy] = true;
+                }
+            }
+            rects.push((
+                (rx + x) as u16,
+                (ry + y) as u16,
+                (rx + x + run_w) as u16,
+                (ry + y + run_h) as u16,
+            ));
+            x += run_w;
+        }
+    }
+
+    // Encode as bytes: 4 × u16 per rect = 8 bytes per rect
+    let mut bytes = Vec::with_capacity(rects.len() * 8);
+    for (x0, y0, x1, y1) in &rects {
+        bytes.extend_from_slice(&x0.to_le_bytes());
+        bytes.extend_from_slice(&y0.to_le_bytes());
+        bytes.extend_from_slice(&x1.to_le_bytes());
+        bytes.extend_from_slice(&y1.to_le_bytes());
+    }
+    bytes
 }
