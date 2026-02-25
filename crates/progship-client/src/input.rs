@@ -92,7 +92,7 @@ pub fn player_input(
         player.move_send_timer = 0.0;
     }
 
-    // E to interact with nearest person
+    // E to interact with nearest person, or toggle nearest door
     if keyboard.just_pressed(KeyCode::KeyE) {
         if let Some(pid) = player.person_id {
             if let Some(my_pos) = conn.db.position().person_id().find(&pid) {
@@ -114,6 +114,26 @@ pub fn player_input(
                 if let Some((target_id, _)) = closest {
                     let _ = conn.reducers().player_interact(target_id);
                     ui.selected_person = Some(target_id);
+                } else {
+                    // No person nearby — try toggling nearest door
+                    let my_room = my_pos.room_id;
+                    let mut closest_door: Option<(u64, f32)> = None;
+                    for door in conn.db.door().iter() {
+                        if door.room_a != my_room && door.room_b != my_room {
+                            continue;
+                        }
+                        let ddist = ((door.door_x - my_pos.x).powi(2)
+                            + (door.door_y - my_pos.y).powi(2))
+                        .sqrt();
+                        if ddist < 3.0 {
+                            if closest_door.is_none() || ddist < closest_door.unwrap().1 {
+                                closest_door = Some((door.id, ddist));
+                            }
+                        }
+                    }
+                    if let Some((door_id, _)) = closest_door {
+                        let _ = conn.reducers().toggle_door(door_id);
+                    }
                 }
             }
         }

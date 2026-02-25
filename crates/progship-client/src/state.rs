@@ -180,6 +180,23 @@ pub struct DoorMarker;
 pub struct DoorPlaque;
 
 #[derive(Component)]
+pub struct DoorPanel {
+    pub door_id: u64,
+    /// -1.0 = left panel, 1.0 = right panel
+    pub side: f32,
+    pub horizontal: bool,
+    pub half_width: f32,
+    pub open_offset: f32,
+    /// Frame center along the sliding axis (X if horizontal, Z if vertical)
+    pub frame_center: f32,
+}
+
+#[derive(Component)]
+pub struct DoorButton {
+    pub door_id: u64,
+}
+
+#[derive(Component)]
 pub struct PersonEntity {
     pub person_id: u64,
 }
