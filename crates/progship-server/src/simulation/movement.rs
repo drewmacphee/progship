@@ -80,6 +80,7 @@ fn build_nav_graph(ctx: &ReducerContext) -> NavGraph {
         .db
         .door()
         .iter()
+        .filter(|d| d.is_open) // Only open doors are traversable
         .map(|d| DoorEdge {
             room_a: d.room_a,
             room_b: d.room_b,

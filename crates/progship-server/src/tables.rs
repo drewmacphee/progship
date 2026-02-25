@@ -315,6 +315,10 @@ pub struct Door {
     pub door_x: f32,
     /// Absolute world Y coordinate of door center in meters.
     pub door_y: f32,
+    /// Whether the door is currently open (true = open, false = closed).
+    pub is_open: bool,
+    /// Whether the door is locked (requires access_level to toggle).
+    pub is_locked: bool,
 }
 
 /// Procedurally generated corridor providing primary navigation paths between rooms.

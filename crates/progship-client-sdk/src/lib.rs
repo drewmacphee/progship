@@ -72,6 +72,7 @@ pub mod subsystem_type;
 pub mod system_component_table;
 pub mod system_component_type;
 pub mod tick_reducer;
+pub mod toggle_door_reducer;
 pub mod vertical_shaft_table;
 pub mod vertical_shaft_type;
 
@@ -155,6 +156,7 @@ pub use subsystem_type::Subsystem;
 pub use system_component_table::*;
 pub use system_component_type::SystemComponent;
 pub use tick_reducer::{set_flags_for_tick, tick, TickCallbackId};
+pub use toggle_door_reducer::{set_flags_for_toggle_door, toggle_door, ToggleDoorCallbackId};
 pub use vertical_shaft_table::*;
 pub use vertical_shaft_type::VerticalShaft;
 
@@ -204,6 +206,9 @@ pub enum Reducer {
     Tick {
         delta_seconds: f32,
     },
+    ToggleDoor {
+        door_id: u64,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -225,6 +230,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetPaused { .. } => "set_paused",
             Reducer::SetTimeScale { .. } => "set_time_scale",
             Reducer::Tick { .. } => "tick",
+            Reducer::ToggleDoor { .. } => "toggle_door",
             _ => unreachable!(),
         }
     }
@@ -291,6 +297,13 @@ impl TryFrom<__ws::ReducerCallInfo<__ws::BsatnFormat>> for Reducer {
             .into()),
             "tick" => Ok(
                 __sdk::parse_reducer_args::<tick_reducer::TickArgs>("tick", &value.args)?.into(),
+            ),
+            "toggle_door" => Ok(
+                __sdk::parse_reducer_args::<toggle_door_reducer::ToggleDoorArgs>(
+                    "toggle_door",
+                    &value.args,
+                )?
+                .into(),
             ),
             unknown => {
                 Err(

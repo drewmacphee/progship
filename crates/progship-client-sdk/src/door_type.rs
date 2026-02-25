@@ -17,6 +17,8 @@ pub struct Door {
     pub access_level: u8,
     pub door_x: f32,
     pub door_y: f32,
+    pub is_open: bool,
+    pub is_locked: bool,
 }
 
 impl __sdk::InModule for Door {
@@ -37,6 +39,8 @@ pub struct DoorCols {
     pub access_level: __sdk::__query_builder::Col<Door, u8>,
     pub door_x: __sdk::__query_builder::Col<Door, f32>,
     pub door_y: __sdk::__query_builder::Col<Door, f32>,
+    pub is_open: __sdk::__query_builder::Col<Door, bool>,
+    pub is_locked: __sdk::__query_builder::Col<Door, bool>,
 }
 
 impl __sdk::__query_builder::HasCols for Door {
@@ -56,6 +60,8 @@ impl __sdk::__query_builder::HasCols for Door {
             access_level: __sdk::__query_builder::Col::new(table_name, "access_level"),
             door_x: __sdk::__query_builder::Col::new(table_name, "door_x"),
             door_y: __sdk::__query_builder::Col::new(table_name, "door_y"),
+            is_open: __sdk::__query_builder::Col::new(table_name, "is_open"),
+            is_locked: __sdk::__query_builder::Col::new(table_name, "is_locked"),
         }
     }
 }

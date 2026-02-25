@@ -573,6 +573,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     access_level: access_levels::PUBLIC,
                     door_x: dx,
                     door_y: dy,
+                    is_open: true,
+                    is_locked: false,
                 });
             }
         }
@@ -823,6 +825,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                             access_level: access_levels::PUBLIC,
                             door_x: dx,
                             door_y: dy,
+                            is_open: true,
+                            is_locked: false,
                         });
                         break;
                     }
@@ -849,6 +853,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: dy,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
                 // Spur ↔ ring east
@@ -873,6 +879,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: dy,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
             }
@@ -896,6 +904,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: cy as f32,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
                 if seg_y0 == cy + CROSS_CORRIDOR_WIDTH {
@@ -911,6 +921,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: (cy + CROSS_CORRIDOR_WIDTH) as f32,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
             }
@@ -932,6 +944,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     access_level: access_levels::PUBLIC,
                     door_x: spine_left as f32 + SPINE_WIDTH as f32 / 2.0,
                     door_y: seg_a_end as f32,
+                    is_open: true,
+                    is_locked: false,
                 });
             }
         }
@@ -949,6 +963,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 access_level: access_levels::PUBLIC,
                 door_x: spine_left as f32 + SPINE_WIDTH as f32 / 2.0,
                 door_y: inner_y0 as f32,
+                is_open: true,
+                is_locked: false,
             });
         }
         if let Some(&(last_seg, _, _)) = spine_segments.last() {
@@ -963,6 +979,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 access_level: access_levels::PUBLIC,
                 door_x: spine_left as f32 + SPINE_WIDTH as f32 / 2.0,
                 door_y: inner_y1 as f32,
+                is_open: true,
+                is_locked: false,
             });
         }
 
@@ -981,6 +999,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 access_level: access_levels::PUBLIC,
                 door_x: inner_x0 as f32,
                 door_y: cc_mid_y,
+                is_open: true,
+                is_locked: false,
             });
             // East end
             ctx.db.door().insert(Door {
@@ -994,6 +1014,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 access_level: access_levels::PUBLIC,
                 door_x: inner_x1 as f32,
                 door_y: cc_mid_y,
+                is_open: true,
+                is_locked: false,
             });
         }
 
@@ -1938,6 +1960,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                             } else {
                                 by0 as f32
                             },
+                            is_open: true,
+                            is_locked: false,
                         });
                         placed = true;
                     }
@@ -2032,6 +2056,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         } else {
                             by0 as f32
                         },
+                        is_open: true,
+                        is_locked: false,
                     });
                     x += rw;
                 }
@@ -2225,6 +2251,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access_levels::PUBLIC,
                         door_x: dx,
                         door_y: dy,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
             }
@@ -2328,6 +2356,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         access_level: access,
                         door_x: mid_x,
                         door_y: mid_y,
+                        is_open: true,
+                        is_locked: false,
                     });
                 }
             }
@@ -2713,6 +2743,8 @@ fn create_corridor_door(
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
+                is_open: true,
+                is_locked: false,
             });
             return true;
         }
@@ -2740,6 +2772,8 @@ fn create_corridor_door(
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
+                is_open: true,
+                is_locked: false,
             });
             return true;
         }
@@ -2758,6 +2792,8 @@ fn create_corridor_door(
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
+                is_open: true,
+                is_locked: false,
             });
             return true;
         }
@@ -2788,6 +2824,8 @@ fn create_corridor_door(
                 access_level: access_levels::PUBLIC,
                 door_x: dx,
                 door_y: dy,
+                is_open: true,
+                is_locked: false,
             });
             return true;
         }
@@ -2922,6 +2960,8 @@ fn connect_shaft_to_corridor(
             access_level: access,
             door_x: dx,
             door_y: dy,
+            is_open: true,
+            is_locked: false,
         });
         return;
     }
@@ -2938,6 +2978,8 @@ fn connect_shaft_to_corridor(
             access_level: access,
             door_x: dx,
             door_y: dy,
+            is_open: true,
+            is_locked: false,
         });
         return;
     }
