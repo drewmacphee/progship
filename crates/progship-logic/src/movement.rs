@@ -40,6 +40,226 @@ pub fn cell_mask_contains(cells: &[u8], x: f32, y: f32) -> bool {
     false
 }
 
+/// A wall segment on the perimeter of a room's cell mask.
+/// Direction: NORTH=0 (edge at low Y), SOUTH=1 (high Y), EAST=2 (high X), WEST=3 (low X).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WallSegment {
+    /// World X of segment center.
+    pub x: f32,
+    /// World Z (Y in grid coords) of segment center.
+    pub z: f32,
+    /// Length of the segment in meters.
+    pub length: f32,
+    /// Cardinal direction the wall faces (NORTH=0, SOUTH=1, EAST=2, WEST=3).
+    pub direction: u8,
+}
+
+/// Door edge info for perimeter gap detection.
+#[derive(Debug, Clone)]
+pub struct DoorEdge {
+    /// Absolute world X of door center.
+    pub door_x: f32,
+    /// Absolute world Y of door center.
+    pub door_y: f32,
+    /// Door opening width in meters.
+    pub width: f32,
+    /// Wall side this door is on (NORTH=0, SOUTH=1, EAST=2, WEST=3).
+    pub wall_side: u8,
+}
+
+/// Compute wall segments from a room's cell mask, with door gaps excluded.
+///
+/// Algorithm:
+/// 1. Unpack cell rects into set of owned (x,y) integer cells
+/// 2. For each cell, check 4 neighbors — exposed edges become raw 1m segments
+/// 3. Greedy-merge adjacent same-direction segments into longer walls
+/// 4. Split merged segments at door positions
+pub fn compute_room_perimeter(cells: &[u8], doors: &[DoorEdge]) -> Vec<WallSegment> {
+    use std::collections::HashSet;
+
+    let rects = decode_cell_rects(cells);
+    if rects.is_empty() {
+        return Vec::new();
+    }
+
+    // Build set of owned cells
+    let mut owned: HashSet<(i32, i32)> = HashSet::new();
+    for &(x0, y0, x1, y1) in &rects {
+        for x in x0..x1 {
+            for y in y0..y1 {
+                owned.insert((x as i32, y as i32));
+            }
+        }
+    }
+
+    // Collect raw edges: (position along wall axis, position perpendicular, direction)
+    // For NORTH (dir=0): cell (cx,cy) has exposed north edge at y=cy. Wall runs at y=cy, x from cx to cx+1.
+    // For SOUTH (dir=1): cell (cx,cy) has exposed south edge at y=cy+1. Wall runs at y=cy+1, x from cx to cx+1.
+    // For WEST (dir=3): cell (cx,cy) has exposed west edge at x=cx. Wall runs at x=cx, y from cy to cy+1.
+    // For EAST (dir=2): cell (cx,cy) has exposed east edge at x=cx+1. Wall runs at x=cx+1, y from cy to cy+1.
+    //
+    // We group edges by (direction, perpendicular_position) then sort by axis position for merging.
+    struct RawEdge {
+        axis_start: i32, // start along the wall axis
+        perp: i32,       // perpendicular position (the wall's fixed coordinate)
+        dir: u8,
+    }
+    let mut edges: Vec<RawEdge> = Vec::new();
+
+    for &(cx, cy) in &owned {
+        // NORTH: neighbor at (cx, cy-1)
+        if !owned.contains(&(cx, cy - 1)) {
+            edges.push(RawEdge {
+                axis_start: cx,
+                perp: cy,
+                dir: 0,
+            });
+        }
+        // SOUTH: neighbor at (cx, cy+1)
+        if !owned.contains(&(cx, cy + 1)) {
+            edges.push(RawEdge {
+                axis_start: cx,
+                perp: cy + 1,
+                dir: 1,
+            });
+        }
+        // WEST: neighbor at (cx-1, cy)
+        if !owned.contains(&(cx - 1, cy)) {
+            edges.push(RawEdge {
+                axis_start: cy,
+                perp: cx,
+                dir: 3,
+            });
+        }
+        // EAST: neighbor at (cx+1, cy)
+        if !owned.contains(&(cx + 1, cy)) {
+            edges.push(RawEdge {
+                axis_start: cy,
+                perp: cx + 1,
+                dir: 2,
+            });
+        }
+    }
+
+    // Sort by (direction, perpendicular, axis_start) for greedy merge
+    edges.sort_by(|a, b| {
+        a.dir
+            .cmp(&b.dir)
+            .then(a.perp.cmp(&b.perp))
+            .then(a.axis_start.cmp(&b.axis_start))
+    });
+
+    // Greedy merge consecutive edges with same (dir, perp)
+    struct MergedSegment {
+        axis_start: i32,
+        axis_end: i32,
+        perp: i32,
+        dir: u8,
+    }
+    let mut merged: Vec<MergedSegment> = Vec::new();
+    let mut i = 0;
+    while i < edges.len() {
+        let e = &edges[i];
+        let mut seg = MergedSegment {
+            axis_start: e.axis_start,
+            axis_end: e.axis_start + 1,
+            perp: e.perp,
+            dir: e.dir,
+        };
+        i += 1;
+        while i < edges.len()
+            && edges[i].dir == seg.dir
+            && edges[i].perp == seg.perp
+            && edges[i].axis_start == seg.axis_end
+        {
+            seg.axis_end = edges[i].axis_start + 1;
+            i += 1;
+        }
+        merged.push(seg);
+    }
+
+    // Convert merged segments to WallSegments, splitting at door gaps
+    let mut result: Vec<WallSegment> = Vec::new();
+    for seg in &merged {
+        let len = (seg.axis_end - seg.axis_start) as f32;
+        let is_horizontal = seg.dir == 0 || seg.dir == 1;
+
+        // Collect door gaps that overlap this segment
+        let mut gaps: Vec<(f32, f32)> = Vec::new();
+        for door in doors {
+            if door.wall_side != seg.dir {
+                continue;
+            }
+            let (door_perp, door_axis) = if is_horizontal {
+                (door.door_y, door.door_x)
+            } else {
+                (door.door_x, door.door_y)
+            };
+            if (door_perp - seg.perp as f32).abs() > 0.5 {
+                continue;
+            }
+            let half_w = door.width / 2.0;
+            let gap_start = (door_axis - half_w).max(seg.axis_start as f32);
+            let gap_end = (door_axis + half_w).min(seg.axis_end as f32);
+            if gap_end > gap_start {
+                gaps.push((gap_start, gap_end));
+            }
+        }
+        gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        if gaps.is_empty() {
+            // No doors — emit full segment
+            let (x, z) = if is_horizontal {
+                (seg.axis_start as f32 + len / 2.0, seg.perp as f32)
+            } else {
+                (seg.perp as f32, seg.axis_start as f32 + len / 2.0)
+            };
+            result.push(WallSegment {
+                x,
+                z,
+                length: len,
+                direction: seg.dir,
+            });
+        } else {
+            // Split segment around door gaps
+            let mut cursor = seg.axis_start as f32;
+            for (gap_start, gap_end) in &gaps {
+                let sub_len = gap_start - cursor;
+                if sub_len > 0.01 {
+                    let (x, z) = if is_horizontal {
+                        (cursor + sub_len / 2.0, seg.perp as f32)
+                    } else {
+                        (seg.perp as f32, cursor + sub_len / 2.0)
+                    };
+                    result.push(WallSegment {
+                        x,
+                        z,
+                        length: sub_len,
+                        direction: seg.dir,
+                    });
+                }
+                cursor = *gap_end;
+            }
+            let sub_len = seg.axis_end as f32 - cursor;
+            if sub_len > 0.01 {
+                let (x, z) = if is_horizontal {
+                    (cursor + sub_len / 2.0, seg.perp as f32)
+                } else {
+                    (seg.perp as f32, cursor + sub_len / 2.0)
+                };
+                result.push(WallSegment {
+                    x,
+                    z,
+                    length: sub_len,
+                    direction: seg.dir,
+                });
+            }
+        }
+    }
+
+    result
+}
+
 /// Axis-aligned bounding box for a room (center + half-extents).
 #[derive(Debug, Clone, Copy)]
 pub struct RoomBounds {
@@ -750,6 +970,70 @@ mod tests {
             }
             _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
+    }
+
+    #[test]
+    fn perimeter_simple_rect() {
+        // 3×2 room at (5,5) → cells = one rect (5,5,8,7)
+        let cells = encode_rects(&[(5, 5, 8, 7)]);
+        let segs = compute_room_perimeter(&cells, &[]);
+        // Should produce 4 wall segments: N, S, E, W
+        assert_eq!(segs.len(), 4, "segs: {segs:?}");
+        let n: Vec<_> = segs.iter().filter(|s| s.direction == 0).collect();
+        let s: Vec<_> = segs.iter().filter(|s| s.direction == 1).collect();
+        let e: Vec<_> = segs.iter().filter(|s| s.direction == 2).collect();
+        let w: Vec<_> = segs.iter().filter(|s| s.direction == 3).collect();
+        assert_eq!(n.len(), 1);
+        assert_eq!(s.len(), 1);
+        assert_eq!(e.len(), 1);
+        assert_eq!(w.len(), 1);
+        assert!((n[0].length - 3.0).abs() < 0.01, "N len={}", n[0].length);
+        assert!((s[0].length - 3.0).abs() < 0.01, "S len={}", s[0].length);
+        assert!((e[0].length - 2.0).abs() < 0.01, "E len={}", e[0].length);
+        assert!((w[0].length - 2.0).abs() < 0.01, "W len={}", w[0].length);
+    }
+
+    #[test]
+    fn perimeter_l_shape() {
+        // L-shape: two rects (5,5,8,7) and (8,5,10,6)
+        let cells = encode_rects(&[(5, 5, 8, 7), (8, 5, 10, 6)]);
+        let segs = compute_room_perimeter(&cells, &[]);
+        // L-shape has 6 wall segments (inner corner creates 2 extra)
+        assert_eq!(segs.len(), 6, "segs: {segs:?}");
+    }
+
+    #[test]
+    fn perimeter_with_door_gap() {
+        // 4×3 room at (10,10) → cells = (10,10,14,13)
+        // Door on north wall at x=12.0, width=2.0 → covers cells x=11..13
+        let cells = encode_rects(&[(10, 10, 14, 13)]);
+        let doors = vec![DoorEdge {
+            door_x: 12.0,
+            door_y: 10.0,
+            width: 2.0,
+            wall_side: 0, // NORTH
+        }];
+        let segs = compute_room_perimeter(&cells, &doors);
+        // N wall should be split into 2 segments (gap in the middle)
+        let n: Vec<_> = segs.iter().filter(|s| s.direction == 0).collect();
+        assert_eq!(n.len(), 2, "N segs: {n:?}");
+        let total_n: f32 = n.iter().map(|s| s.length).sum();
+        assert!(
+            (total_n - 2.0).abs() < 0.01,
+            "total N len={total_n} (4 - 2 door)"
+        );
+    }
+
+    /// Helper to encode rects into cells bytes for testing.
+    fn encode_rects(rects: &[(u16, u16, u16, u16)]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(rects.len() * 8);
+        for &(x0, y0, x1, y1) in rects {
+            bytes.extend_from_slice(&x0.to_le_bytes());
+            bytes.extend_from_slice(&y0.to_le_bytes());
+            bytes.extend_from_slice(&x1.to_le_bytes());
+            bytes.extend_from_slice(&y1.to_le_bytes());
+        }
+        bytes
     }
 
     #[test]
