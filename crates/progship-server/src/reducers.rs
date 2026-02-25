@@ -205,6 +205,7 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
                 door_x: d.door_x,
                 door_y: d.door_y,
                 width: d.width,
+                is_open: d.is_open,
             })
             .collect();
 
@@ -349,6 +350,45 @@ pub fn player_interact(ctx: &ReducerContext, target_person_id: u64) {
         person_id: target_person_id,
         conversation_id: conv_id,
     });
+}
+
+/// Player toggles a nearby door open/closed
+#[reducer]
+pub fn toggle_door(ctx: &ReducerContext, door_id: u64) {
+    let Some(player) = ctx.db.connected_player().identity().find(ctx.sender) else {
+        return;
+    };
+    let Some(person_id) = player.person_id else {
+        return;
+    };
+    let Some(pos) = ctx.db.position().person_id().find(person_id) else {
+        return;
+    };
+    let Some(mut door) = ctx.db.door().id().find(door_id) else {
+        return;
+    };
+
+    // Verify player is in one of the rooms connected by this door
+    if pos.room_id != door.room_a && pos.room_id != door.room_b {
+        return;
+    }
+
+    // Check access level for locked doors
+    if door.is_locked {
+        let Some(_person) = ctx.db.person().id().find(person_id) else {
+            return;
+        };
+        // Crew can unlock doors matching their access level
+        let Some(crew) = ctx.db.crew().person_id().find(person_id) else {
+            return; // Non-crew can't unlock
+        };
+        if crew.rank < door.access_level {
+            return; // Insufficient rank
+        }
+    }
+
+    door.is_open = !door.is_open;
+    ctx.db.door().id().update(door);
 }
 
 /// Player performs an action at their current location

@@ -112,6 +112,7 @@ pub struct DoorInfo {
     pub door_x: f32,
     pub door_y: f32,
     pub width: f32,
+    pub is_open: bool,
 }
 
 /// Result of attempting to move a player.
@@ -201,10 +202,10 @@ pub fn compute_move(
 ) -> MoveResult {
     let r = input.player_radius;
 
-    // 0. Pre-compute door info for this room
+    // 0. Pre-compute door info for this room (only open doors allow traversal)
     let room_doors: Vec<(DoorInfo, DoorWall, u32)> = doors
         .iter()
-        .filter(|d| d.room_a == current_room.id || d.room_b == current_room.id)
+        .filter(|d| d.is_open && (d.room_a == current_room.id || d.room_b == current_room.id))
         .map(|d| {
             let other = if d.room_a == current_room.id {
                 d.room_b
@@ -489,6 +490,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
         let res = compute_move(&mi(9.0, 5.0, 2.0, 0.0), &a, &[door], &lookup);
@@ -512,6 +514,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let res = compute_move(&mi(9.0, 5.0, -2.0, 0.0), &a, &[door], &|_| None);
         assert_eq!(res, MoveResult::InRoom { x: 7.0, y: 5.0 });
@@ -527,6 +530,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 3.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
         let res = compute_move(&mi(9.5, 5.0, 1.0, 0.0), &a, &[door], &lookup);
@@ -546,6 +550,7 @@ mod tests {
             door_x: 10.0,
             door_y: 8.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -568,6 +573,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -594,6 +600,7 @@ mod tests {
             door_x: 11.5,
             door_y: 50.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(side) } else { None };
 
@@ -619,6 +626,7 @@ mod tests {
             door_x: 20.0,
             door_y: 50.0,
             width: 3.0,
+            is_open: true,
         };
         let door_n = DoorInfo {
             room_a: 3,
@@ -626,6 +634,7 @@ mod tests {
             door_x: 20.0,
             door_y: 53.0,
             width: 3.0,
+            is_open: true,
         };
         let lookup = |id: u32| match id {
             1 => Some(spine0),
@@ -673,6 +682,7 @@ mod tests {
             door_x: 5.0,
             door_y: 10.0,
             width: 3.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -697,6 +707,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -724,6 +735,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -751,6 +763,7 @@ mod tests {
             door_x: 10.0,
             door_y: 5.0,
             width: 2.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(b) } else { None };
 
@@ -778,6 +791,7 @@ mod tests {
             door_x: 37.0,
             door_y: 40.0,
             width: 4.0,
+            is_open: true,
         };
         let lookup = |id: u32| if id == 2 { Some(cross) } else { None };
 
