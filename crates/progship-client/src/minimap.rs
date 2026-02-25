@@ -168,52 +168,96 @@ pub fn render_minimap(
                     ..default()
                 })
                 .with_children(|map| {
-                    // Render each room as a small colored rectangle with type icon
+                    // Render each room — use cell mask rects if available, else bbox
                     for room in &rooms {
-                        let hw = room.width / 2.0;
-                        let hh = room.height / 2.0;
-                        let rx = (room.x - hw - min_x) * scale_x + 2.0;
-                        let ry = (room.y - hh - min_y) * scale_y;
-                        let rw = (room.width * scale_x).max(1.0);
-                        let rh = (room.height * scale_y).max(1.0);
-
                         let color = minimap_room_color(room.room_type);
                         let icon = room_type_icon(room.room_type);
-                        let show_icon = !icon.is_empty()
-                            && rw >= 8.0
-                            && rh >= 8.0
-                            && !room_types::is_corridor(room.room_type);
+                        let cell_rects = progship_logic::movement::decode_cell_rects(&room.cells);
 
-                        let mut room_cmd = map.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(rx),
-                                top: Val::Px(ry),
-                                width: Val::Px(rw),
-                                height: Val::Px(rh),
-                                border: UiRect::all(Val::Px(0.5)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                overflow: Overflow::clip(),
-                                ..default()
-                            },
-                            BackgroundColor(color),
-                            BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.4)),
-                            MinimapRoom,
-                        ));
+                        if cell_rects.is_empty() {
+                            // Fallback: single bbox rect
+                            let hw = room.width / 2.0;
+                            let hh = room.height / 2.0;
+                            let rx = (room.x - hw - min_x) * scale_x + 2.0;
+                            let ry = (room.y - hh - min_y) * scale_y;
+                            let rw = (room.width * scale_x).max(1.0);
+                            let rh = (room.height * scale_y).max(1.0);
+                            let show_icon = !icon.is_empty()
+                                && rw >= 8.0
+                                && rh >= 8.0
+                                && !room_types::is_corridor(room.room_type);
 
-                        if show_icon {
-                            let icon_size = rw.min(rh).clamp(6.0, 10.0);
-                            room_cmd.with_children(|cell| {
-                                cell.spawn((
-                                    Text::new(icon),
-                                    TextFont {
-                                        font_size: icon_size,
+                            let mut room_cmd = map.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(rx),
+                                    top: Val::Px(ry),
+                                    width: Val::Px(rw),
+                                    height: Val::Px(rh),
+                                    border: UiRect::all(Val::Px(0.5)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    overflow: Overflow::clip(),
+                                    ..default()
+                                },
+                                BackgroundColor(color),
+                                BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+                                MinimapRoom,
+                            ));
+                            if show_icon {
+                                let icon_size = rw.min(rh).clamp(6.0, 10.0);
+                                room_cmd.with_children(|cell| {
+                                    cell.spawn((
+                                        Text::new(icon),
+                                        TextFont {
+                                            font_size: icon_size,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                                    ));
+                                });
+                            }
+                        } else {
+                            // Cell mask: one minimap rect per cell rect
+                            let show_icon_on_first =
+                                !icon.is_empty() && !room_types::is_corridor(room.room_type);
+                            let mut first = true;
+                            for &(x0, y0, x1, y1) in &cell_rects {
+                                let rx = (x0 as f32 - min_x) * scale_x + 2.0;
+                                let ry = (y0 as f32 - min_y) * scale_y;
+                                let rw = ((x1 - x0) as f32 * scale_x).max(1.0);
+                                let rh = ((y1 - y0) as f32 * scale_y).max(1.0);
+
+                                let mut room_cmd = map.spawn((
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: Val::Px(rx),
+                                        top: Val::Px(ry),
+                                        width: Val::Px(rw),
+                                        height: Val::Px(rh),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        overflow: Overflow::clip(),
                                         ..default()
                                     },
-                                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                                    BackgroundColor(color),
+                                    MinimapRoom,
                                 ));
-                            });
+                                if first && show_icon_on_first && rw >= 8.0 && rh >= 8.0 {
+                                    let icon_size = rw.min(rh).clamp(6.0, 10.0);
+                                    room_cmd.with_children(|cell| {
+                                        cell.spawn((
+                                            Text::new(icon),
+                                            TextFont {
+                                                font_size: icon_size,
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                                        ));
+                                    });
+                                }
+                                first = false;
+                            }
                         }
                     }
 

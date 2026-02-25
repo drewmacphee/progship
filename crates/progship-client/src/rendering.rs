@@ -5,6 +5,7 @@
 use bevy::prelude::*;
 use progship_client_sdk::*;
 use progship_logic::constants::{room_type_icon, room_types};
+use progship_logic::movement::decode_cell_rects;
 use spacetimedb_sdk::Table;
 
 use crate::state::{
@@ -26,6 +27,31 @@ fn add_mesh(meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
 /// Public version of add_mesh for use by greeble module.
 pub fn add_mesh_pub(meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
     add_mesh(meshes, mesh)
+}
+
+/// Build a flat slab mesh from cell mask rects (or fall back to bbox cuboid).
+/// Each rect becomes a flat box at world coordinates. Y is thickness.
+fn cell_mask_floor_mesh(room: &Room, thickness: f32) -> Vec<(Cuboid, Vec3)> {
+    let rects = decode_cell_rects(&room.cells);
+    if rects.is_empty() {
+        // Fallback: single cuboid at room center
+        return vec![(
+            Cuboid::new(room.width, thickness, room.height),
+            Vec3::new(room.x, 0.0, room.y),
+        )];
+    }
+
+    // One cuboid per cell rect
+    rects
+        .iter()
+        .map(|&(x0, y0, x1, y1)| {
+            let w = (x1 - x0) as f32;
+            let h = (y1 - y0) as f32;
+            let cx = x0 as f32 + w / 2.0;
+            let cy = y0 as f32 + h / 2.0;
+            (Cuboid::new(w, thickness, h), Vec3::new(cx, 0.0, cy))
+        })
+        .collect()
 }
 
 pub fn sync_rooms(
@@ -90,32 +116,31 @@ pub fn sync_rooms(
         } else {
             default_ceiling
         };
-        // Floor
-        commands.spawn((
-            Mesh3d(add_mesh(
-                &mut meshes,
-                Cuboid::new(room.width, 0.2, room.height),
-            )),
-            MeshMaterial3d(materials.add(floor_material(color, room.room_type))),
-            Transform::from_xyz(room.x, 0.0, room.y),
-            RoomEntity {
-                room_id: room.id,
-                deck: room.deck,
-            },
-        ));
+        // Floor — use cell mask rects if available, otherwise bbox
+        let floor_mat = materials.add(floor_material(color, room.room_type));
+        for (cuboid, pos) in cell_mask_floor_mesh(room, 0.2) {
+            commands.spawn((
+                Mesh3d(add_mesh(&mut meshes, cuboid)),
+                MeshMaterial3d(floor_mat.clone()),
+                Transform::from_translation(pos),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        }
         // Ceiling
-        commands.spawn((
-            Mesh3d(add_mesh(
-                &mut meshes,
-                Cuboid::new(room.width, 0.12, room.height),
-            )),
-            MeshMaterial3d(ceiling_mat.clone()),
-            Transform::from_xyz(room.x, wh, room.y),
-            RoomEntity {
-                room_id: room.id,
-                deck: room.deck,
-            },
-        ));
+        for (cuboid, pos) in cell_mask_floor_mesh(room, 0.12) {
+            commands.spawn((
+                Mesh3d(add_mesh(&mut meshes, cuboid)),
+                MeshMaterial3d(ceiling_mat.clone()),
+                Transform::from_translation(pos + Vec3::Y * wh),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        }
         if !room_types::is_corridor(room.room_type) {
             let font_size = (room.width.min(room.height) * 2.5).clamp(8.0, 28.0);
             commands.spawn((
