@@ -58,6 +58,113 @@ fn is_habitation(rt: u8) -> bool {
     )
 }
 
+/// J7: Expand placed rooms into adjacent empty cells (rectangular expansion).
+/// Called multiple times: after BSP, after wavefront BFS, and after fillers.
+#[allow(clippy::too_many_arguments)]
+fn expand_rooms_into_empty(
+    ctx: &ReducerContext,
+    grid: &mut [Vec<u8>],
+    placed_rooms: &mut [(u32, usize, usize, usize, usize, u8, f32, u8)],
+    inner_x0: usize,
+    inner_y0: usize,
+    inner_x1: usize,
+    inner_y1: usize,
+    ring_x0: usize,
+    hull_y0: usize,
+    ring_x1: usize,
+    hull_y1: usize,
+    deck: i32,
+    label: &str,
+) {
+    let mut expanded = 0u32;
+    for i in 0..placed_rooms.len() {
+        let (room_id, mut rx, mut ry, mut rw, mut rh, _rt, _target_area, room_placement) =
+            placed_rooms[i];
+        let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+        let (exp_x0, exp_y0, exp_x1, exp_y1) = if room_placement == placement::HULL_FACING {
+            (ring_x0, hull_y0, ring_x1, hull_y1)
+        } else {
+            (inner_x0, inner_y0, inner_x1, inner_y1)
+        };
+        let mut changed = true;
+        while changed {
+            changed = false;
+            // Try expand east (+x)
+            let new_x1 = rx + rw;
+            if new_x1 < exp_x1 {
+                let col_clear = (ry..ry + rh).all(|y| grid[new_x1][y] == CELL_EMPTY);
+                if col_clear {
+                    for y in ry..ry + rh {
+                        grid[new_x1][y] = cell_tag;
+                    }
+                    rw += 1;
+                    changed = true;
+                }
+            }
+            // Try expand west (-x)
+            if rx > exp_x0 {
+                let col_clear = (ry..ry + rh).all(|y| grid[rx - 1][y] == CELL_EMPTY);
+                if col_clear {
+                    rx -= 1;
+                    for y in ry..ry + rh {
+                        grid[rx][y] = cell_tag;
+                    }
+                    rw += 1;
+                    changed = true;
+                }
+            }
+            // Try expand south (+y)
+            let new_y1 = ry + rh;
+            if new_y1 < exp_y1 {
+                let row_clear = (rx..rx + rw).all(|x| grid[x][new_y1] == CELL_EMPTY);
+                if row_clear {
+                    for x in rx..rx + rw {
+                        grid[x][new_y1] = cell_tag;
+                    }
+                    rh += 1;
+                    changed = true;
+                }
+            }
+            // Try expand north (-y)
+            if ry > exp_y0 {
+                let row_clear = (rx..rx + rw).all(|x| grid[x][ry - 1] == CELL_EMPTY);
+                if row_clear {
+                    ry -= 1;
+                    for x in rx..rx + rw {
+                        grid[x][ry] = cell_tag;
+                    }
+                    rh += 1;
+                    changed = true;
+                }
+            }
+        }
+        if (rx, ry, rw, rh)
+            != (
+                placed_rooms[i].1,
+                placed_rooms[i].2,
+                placed_rooms[i].3,
+                placed_rooms[i].4,
+            )
+        {
+            expanded += 1;
+            placed_rooms[i].1 = rx;
+            placed_rooms[i].2 = ry;
+            placed_rooms[i].3 = rw;
+            placed_rooms[i].4 = rh;
+            if let Some(mut room) = ctx.db.room().id().find(room_id) {
+                room.x = rx as f32 + rw as f32 / 2.0;
+                room.y = ry as f32 + rh as f32 / 2.0;
+                room.width = rw as f32;
+                room.height = rh as f32;
+                ctx.db.room().id().update(room);
+            }
+        }
+    }
+    if expanded > 0 {
+        log::info!("Deck {}: {} expanded {} rooms", deck + 1, label, expanded);
+    }
+}
+
 /// Shaft definition for placement at corridor intersections.
 struct ShaftPlacement {
     x: usize,
@@ -274,7 +381,17 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
     let mid_spine_right = mid_spine_left + SPINE_WIDTH;
     // Cross-corridors are inside the ring; compute in interior space then offset
     let interior_hl = mid_hl_hull.saturating_sub(2 * RING_WIDTH);
-    let mid_num_cross = ((interior_hl as f32 / 35.0).round() as usize).max(1);
+    // J3: Factor deck width into cross-corridor spacing.
+    // Wider decks need more cross-corridors (rooms further from corridors).
+    // Base: every 35m for full-width decks, up to every 50m for narrow tapered decks.
+    let cross_spacing_base = if mid_hw > 60 {
+        35.0
+    } else if mid_hw > 40 {
+        40.0
+    } else {
+        50.0
+    };
+    let mid_num_cross = ((interior_hl as f32 / cross_spacing_base).round() as usize).max(1);
     let mid_cross_spacing = interior_hl / (mid_num_cross + 1);
     let inner_y0_ref = HULL_BAND_WIDTH + RING_WIDTH; // ring outer + ring width
     let mut mid_cross_ys: Vec<usize> = Vec::new();
@@ -373,6 +490,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_s_id = next_id();
         ctx.db.room().insert(Room {
@@ -388,6 +506,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_w_id = next_id();
         let ring_side_h = (inner_y1 - inner_y0) as f32;
@@ -404,6 +523,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
         let ring_e_id = next_id();
         ctx.db.room().insert(Room {
@@ -419,6 +539,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             capacity: 0,
             ceiling_height: deck_heights::MIN_DECK_HEIGHT,
             deck_span: 1,
+            cells: Vec::new(),
         });
 
         // Ring corner doors (N↔W, N↔E, S↔W, S↔E) — use find_shared_edge for correct walls
@@ -512,6 +633,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: 0,
                     ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                     deck_span: 1,
+                    cells: Vec::new(),
                 });
                 spine_segments.push((seg_id, y0, y1));
             }
@@ -562,6 +684,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 capacity: 0,
                 ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                 deck_span: 1,
+                cells: Vec::new(),
             });
             ctx.db.corridor().insert(Corridor {
                 id: 0,
@@ -608,7 +731,11 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
                 // Port spur: from spine_left toward ring-west
                 let port_w = spine_left.saturating_sub(inner_x0);
-                if port_w > SPUR_THRESHOLD {
+                // J4: Only add spur if segment is wide enough that interior rooms
+                // can't reach both spine and ring corridor without a spur.
+                // Rooms need at least MIN_ROOM_DIM depth on each side of the spur,
+                // so skip if segment width <= 2*MIN_ROOM_DIM (rooms already touch corridors).
+                if port_w > SPUR_THRESHOLD && seg_h > 2 * SPUR_WIDTH + 2 * MIN_ROOM_DIM {
                     let spur_x = inner_x0;
                     let spur_len = port_w;
                     // Stamp grid
@@ -633,13 +760,15 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: 0,
                         ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                         deck_span: 1,
+                        cells: Vec::new(),
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
 
                 // Starboard spur: from spine_right toward ring-east
                 let starb_w = inner_x1.saturating_sub(spine_right);
-                if starb_w > SPUR_THRESHOLD {
+                // J4: Same spur check as port side
+                if starb_w > SPUR_THRESHOLD && seg_h > 2 * SPUR_WIDTH + 2 * MIN_ROOM_DIM {
                     let spur_x = spine_right;
                     let spur_len = starb_w;
                     for x in spur_x..spur_x + spur_len {
@@ -663,6 +792,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: 0,
                         ceiling_height: deck_heights::MIN_DECK_HEIGHT,
                         deck_span: 1,
+                        cells: Vec::new(),
                     });
                     spur_rooms.push((spur_id, spur_x, spur_y, spur_len, SPUR_WIDTH));
                 }
@@ -912,6 +1042,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                 capacity: 0,
                 ceiling_height: deck_heights::room_ceiling_height(srt),
                 deck_span: deck_heights::room_deck_span(srt),
+                cells: Vec::new(),
             });
 
             if global_idx < shaft_infos.len() {
@@ -1114,6 +1245,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                     ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                     deck_span: deck_heights::room_deck_span(req.room_type),
+                    cells: Vec::new(),
                 });
 
                 // Door to corridor
@@ -1201,8 +1333,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         );
 
         // ---- Phase 6: BSP room placement into segments ----
-        // (deck_requests now contains only normal-sized rooms; oversized were pre-placed)
-        let mut request_idx = 0;
+        // J9: Match requests to segments by area ratio instead of sequential consumption.
         let total_request_area: f32 = deck_requests.iter().map(|r| r.target_area).sum();
         let total_seg_area: usize = segments.iter().map(|s| s.w * s.h).sum();
 
@@ -1214,23 +1345,57 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             area_b.cmp(&area_a)
         });
 
-        for &si in &seg_order {
-            if request_idx >= deck_requests.len() {
-                break;
-            }
-            let seg = &segments[si];
-            let mut sub_rects: Vec<(usize, usize, usize, usize)> = Vec::new();
-            bsp_subdivide(
-                seg.x,
-                seg.y,
-                seg.w,
-                seg.h,
-                &deck_requests[request_idx..],
-                &mut sub_rects,
-            );
+        // Track which requests have been placed
+        let mut request_used: Vec<bool> = vec![false; deck_requests.len()];
 
+        for &si in &seg_order {
+            let seg = &segments[si];
+            let seg_area = (seg.w * seg.h) as f32;
+            // How many requests should this segment get (proportional to area)
+            let seg_share = if total_request_area > 0.0 {
+                (seg_area / total_seg_area.max(1) as f32 * deck_requests.len() as f32).ceil()
+                    as usize
+            } else {
+                0
+            };
+            // Collect best-fitting unused requests for this segment (sorted by area match)
+            let mut candidates: Vec<(usize, f32)> = deck_requests
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !request_used[*i])
+                .map(|(i, r)| {
+                    let ratio = (r.target_area / seg_area - 1.0 / seg_share.max(1) as f32).abs();
+                    (i, ratio)
+                })
+                .collect();
+            candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
+            let selected: Vec<usize> = candidates
+                .iter()
+                .take(seg_share.max(1))
+                .map(|(i, _)| *i)
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+
+            // Build requests slice for BSP (sorted largest-first within selection)
+            let mut seg_requests: Vec<&RoomRequest> =
+                selected.iter().map(|&i| &deck_requests[i]).collect();
+            seg_requests.sort_by(|a, b| {
+                b.target_area
+                    .partial_cmp(&a.target_area)
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            });
+
+            let mut sub_rects: Vec<(usize, usize, usize, usize)> = Vec::new();
+            // Build temporary owned requests for BSP
+            let seg_reqs_owned: Vec<RoomRequest> =
+                seg_requests.iter().map(|r| (*r).clone()).collect();
+            bsp_subdivide(seg.x, seg.y, seg.w, seg.h, &seg_reqs_owned, &mut sub_rects);
+
+            let mut seg_req_idx = 0usize;
             for (rx, ry, rw, rh) in &sub_rects {
-                if request_idx >= deck_requests.len() {
+                if seg_req_idx >= selected.len() {
                     break;
                 }
                 // Check for conflicts
@@ -1271,7 +1436,8 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     continue;
                 }
 
-                let req = &deck_requests[request_idx];
+                let orig_idx = selected[seg_req_idx];
+                let req = &deck_requests[orig_idx];
                 let room_id = next_id();
 
                 for gx in *rx..(*rx + *rw).min(hw) {
@@ -1295,6 +1461,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     capacity: req.capacity,
                     ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                     deck_span: deck_heights::room_deck_span(req.room_type),
+                    cells: Vec::new(),
                 });
 
                 create_corridor_door(
@@ -1333,18 +1500,38 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                     req.target_area,
                     req.placement,
                 ));
-                request_idx += 1;
+                request_used[orig_idx] = true;
+                seg_req_idx += 1;
             }
         }
+
+        // ---- Phase 6.5: Expand BSP-placed rooms into empty space ----
+        expand_rooms_into_empty(
+            ctx,
+            &mut grid,
+            &mut placed_rooms,
+            inner_x0,
+            inner_y0,
+            inner_x1,
+            inner_y1,
+            ring_x0,
+            hull_y0,
+            ring_x1,
+            hull_y1,
+            deck,
+            "post-BSP",
+        );
 
         // ---- Phase 7: Wavefront BFS gap fill ----
         // Grow corridor into remaining empty cells, place rooms from remaining requests
         {
-            let remaining_requests: Vec<RoomRequest> = if request_idx < deck_requests.len() {
-                deck_requests[request_idx..].to_vec()
-            } else {
-                Vec::new()
-            };
+            // J9: Collect remaining unplaced requests
+            let remaining_requests: Vec<RoomRequest> = deck_requests
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !request_used[*i])
+                .map(|(_, r)| r.clone())
+                .collect();
             let mut req_cursor = 0usize;
 
             // BFS frontier: all corridor cells adjacent to empty cells
@@ -1413,13 +1600,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         && req_cursor < remaining_requests.len()
                     {
                         let req = &remaining_requests[req_cursor];
-                        let target_side = (req.target_area.sqrt() as usize).max(MIN_ROOM_DIM);
-                        let rw = max_w.min(target_side.max(MIN_ROOM_DIM));
-                        let rh = max_h.min(
-                            ((req.target_area / rw as f32).ceil() as usize)
-                                .max(MIN_ROOM_DIM)
-                                .min(max_h),
-                        );
+                        // J8: Use full available rectangle — room gets whatever size fits.
+                        let rw = max_w;
+                        let rh = max_h;
 
                         if rw >= MIN_ROOM_DIM
                             && rh >= MIN_ROOM_DIM
@@ -1461,6 +1644,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 capacity: req.capacity,
                                 ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                                 deck_span: deck_heights::room_deck_span(req.room_type),
+                                cells: Vec::new(),
                             });
 
                             create_corridor_door(
@@ -1510,6 +1694,23 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
+        // ---- Phase 7.5: Expand wavefront-placed rooms into empty space ----
+        expand_rooms_into_empty(
+            ctx,
+            &mut grid,
+            &mut placed_rooms,
+            inner_x0,
+            inner_y0,
+            inner_x1,
+            inner_y1,
+            ring_x0,
+            hull_y0,
+            ring_x1,
+            hull_y1,
+            deck,
+            "post-wavefront",
+        );
+
         // ---- Phase 8: Filler backfill ----
         {
             let mut filler_idx = 0usize;
@@ -1544,13 +1745,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         let (frt, fname, ftarget, fcap) =
                             FILLER_POOL[filler_idx % FILLER_POOL.len()];
                         filler_idx += 1;
-                        let target_side = (ftarget.sqrt() as usize).max(MIN_ROOM_DIM);
-                        let rw = max_w.min(target_side.max(MIN_ROOM_DIM));
-                        let rh = max_h.min(
-                            ((ftarget / rw as f32).ceil() as usize)
-                                .max(MIN_ROOM_DIM)
-                                .min(max_h),
-                        );
+                        // J1: Fillers use the full available rectangle — no target_area clipping.
+                        let rw = max_w;
+                        let rh = max_h;
 
                         if rw >= MIN_ROOM_DIM
                             && rh >= MIN_ROOM_DIM
@@ -1592,6 +1789,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                                 capacity: fcap,
                                 ceiling_height: deck_heights::room_ceiling_height(frt),
                                 deck_span: deck_heights::room_deck_span(frt),
+                                cells: Vec::new(),
                             });
                             placed_rooms.push((
                                 room_id,
@@ -1712,6 +1910,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                             capacity: req.capacity,
                             ceiling_height: deck_heights::room_ceiling_height(req.room_type),
                             deck_span: deck_heights::room_deck_span(req.room_type),
+                            cells: Vec::new(),
                         });
                         placed_rooms.push((
                             room_id,
@@ -1805,6 +2004,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
                         capacity: fcap,
                         ceiling_height: deck_heights::room_ceiling_height(frt),
                         deck_span: deck_heights::room_deck_span(frt),
+                        cells: Vec::new(),
                     });
                     placed_rooms.push((
                         room_id,
@@ -1845,107 +2045,162 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             }
         }
 
-        // ---- Phase 8.5: Room expansion into empty space ----
-        // Try to grow each placed room in all 4 directions into adjacent empty cells.
-        // This reduces gaps without adding new rooms.
+        // ---- Phase 8.5: Final expansion pass (all rooms including fillers) ----
+        expand_rooms_into_empty(
+            ctx,
+            &mut grid,
+            &mut placed_rooms,
+            inner_x0,
+            inner_y0,
+            inner_x1,
+            inner_y1,
+            ring_x0,
+            hull_y0,
+            ring_x1,
+            hull_y1,
+            deck,
+            "post-filler",
+        );
+
+        // ---- J6: Deadspace audit ----
         {
-            let mut expanded = 0u32;
-            for i in 0..placed_rooms.len() {
-                let (room_id, mut rx, mut ry, mut rw, mut rh, _rt, target_area, room_placement) =
-                    placed_rooms[i];
-                let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
-                // Cap expansion at 1.5× the larger of target or initial area
-                let max_area = ((target_area as usize).max(rw * rh) as f32 * 1.5) as usize;
-                // Hull-facing rooms expand within N/S hull band (ring X extent, hull Y extent)
-                let (exp_x0, exp_y0, exp_x1, exp_y1) = if room_placement == placement::HULL_FACING {
-                    (ring_x0, hull_y0, ring_x1, hull_y1)
-                } else {
-                    (inner_x0, inner_y0, inner_x1, inner_y1)
-                };
-                let mut changed = true;
-                while changed {
-                    changed = false;
-                    if rw * rh >= max_area {
-                        break;
-                    }
-                    // Try expand east (+x)
-                    let new_x1 = rx + rw;
-                    if new_x1 < exp_x1 {
-                        let col_clear = (ry..ry + rh).all(|y| grid[new_x1][y] == CELL_EMPTY);
-                        if col_clear {
-                            for y in ry..ry + rh {
-                                grid[new_x1][y] = cell_tag;
-                            }
-                            rw += 1;
-                            changed = true;
-                        }
-                    }
-                    // Try expand west (-x)
-                    if rx > exp_x0 {
-                        let col_clear = (ry..ry + rh).all(|y| grid[rx - 1][y] == CELL_EMPTY);
-                        if col_clear {
-                            rx -= 1;
-                            for y in ry..ry + rh {
-                                grid[rx][y] = cell_tag;
-                            }
-                            rw += 1;
-                            changed = true;
-                        }
-                    }
-                    // Try expand south (+y)
-                    let new_y1 = ry + rh;
-                    if new_y1 < exp_y1 {
-                        let row_clear = (rx..rx + rw).all(|x| grid[x][new_y1] == CELL_EMPTY);
-                        if row_clear {
-                            for x in rx..rx + rw {
-                                grid[x][new_y1] = cell_tag;
-                            }
-                            rh += 1;
-                            changed = true;
-                        }
-                    }
-                    // Try expand north (-y)
-                    if ry > exp_y0 {
-                        let row_clear = (rx..rx + rw).all(|x| grid[x][ry - 1] == CELL_EMPTY);
-                        if row_clear {
-                            ry -= 1;
-                            for x in rx..rx + rw {
-                                grid[x][ry] = cell_tag;
-                            }
-                            rh += 1;
-                            changed = true;
-                        }
-                    }
-                }
-                if (rx, ry, rw, rh)
-                    != (
-                        placed_rooms[i].1,
-                        placed_rooms[i].2,
-                        placed_rooms[i].3,
-                        placed_rooms[i].4,
-                    )
-                {
-                    expanded += 1;
-                    placed_rooms[i].1 = rx;
-                    placed_rooms[i].2 = ry;
-                    placed_rooms[i].3 = rw;
-                    placed_rooms[i].4 = rh;
-                    // Update Room entry in DB
-                    if let Some(mut room) = ctx.db.room().id().find(room_id) {
-                        room.x = rx as f32 + rw as f32 / 2.0;
-                        room.y = ry as f32 + rh as f32 / 2.0;
-                        room.width = rw as f32;
-                        room.height = rh as f32;
-                        ctx.db.room().id().update(room);
+            let mut empty_cells = 0u32;
+            let mut total_inner = 0u32;
+            for x in inner_x0..inner_x1 {
+                for y in inner_y0..inner_y1 {
+                    total_inner += 1;
+                    if grid[x][y] == CELL_EMPTY {
+                        empty_cells += 1;
                     }
                 }
             }
-            if expanded > 0 {
+            // Also count hull band
+            for x in ring_x0..ring_x1 {
+                for y in hull_y0..inner_y0 {
+                    total_inner += 1;
+                    if grid[x][y] == CELL_EMPTY {
+                        empty_cells += 1;
+                    }
+                }
+                for y in inner_y1..hull_y1 {
+                    total_inner += 1;
+                    if grid[x][y] == CELL_EMPTY {
+                        empty_cells += 1;
+                    }
+                }
+            }
+            let pct = if total_inner > 0 {
+                empty_cells as f32 / total_inner as f32 * 100.0
+            } else {
+                0.0
+            };
+            if empty_cells > 0 {
                 log::info!(
-                    "Deck {}: expanded {} rooms into empty space",
+                    "Deck {}: deadspace audit — {} empty cells ({:.1}% of {})",
                     deck + 1,
-                    expanded
+                    empty_cells,
+                    pct,
+                    total_inner
                 );
+            }
+            if pct > 5.0 {
+                // Emergency expansion pass to fill remaining deadspace
+                expand_rooms_into_empty(
+                    ctx,
+                    &mut grid,
+                    &mut placed_rooms,
+                    inner_x0,
+                    inner_y0,
+                    inner_x1,
+                    inner_y1,
+                    ring_x0,
+                    hull_y0,
+                    ring_x1,
+                    hull_y1,
+                    deck,
+                    "deadspace-rescue",
+                );
+            }
+        }
+
+        // ---- J10b: Cell-level irregular expansion ----
+        // Grow rooms one cell at a time into adjacent empty cells, enabling L/T/U shapes.
+        {
+            let mut claimed = 0u32;
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for i in 0..placed_rooms.len() {
+                    let (room_id, rx, ry, rw, rh, _rt, _ta, room_placement) = placed_rooms[i];
+                    let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+                    let (exp_x0, exp_y0, exp_x1, exp_y1) =
+                        if room_placement == placement::HULL_FACING {
+                            (ring_x0, hull_y0, ring_x1, hull_y1)
+                        } else {
+                            (inner_x0, inner_y0, inner_x1, inner_y1)
+                        };
+                    for x in rx..(rx + rw).min(hw) {
+                        for y in ry..(ry + rh).min(hl) {
+                            if grid[x][y] != cell_tag {
+                                continue;
+                            }
+                            for &(dx, dy) in &[(0isize, 1isize), (0, -1), (1, 0), (-1, 0)] {
+                                let nx = x as isize + dx;
+                                let ny = y as isize + dy;
+                                if nx < exp_x0 as isize
+                                    || nx >= exp_x1 as isize
+                                    || ny < exp_y0 as isize
+                                    || ny >= exp_y1 as isize
+                                {
+                                    continue;
+                                }
+                                let nx = nx as usize;
+                                let ny = ny as usize;
+                                if grid[nx][ny] == CELL_EMPTY {
+                                    grid[nx][ny] = cell_tag;
+                                    claimed += 1;
+                                    changed = true;
+                                    let pr = &mut placed_rooms[i];
+                                    if nx < pr.1 {
+                                        pr.3 += pr.1 - nx;
+                                        pr.1 = nx;
+                                    }
+                                    if nx >= pr.1 + pr.3 {
+                                        pr.3 = nx - pr.1 + 1;
+                                    }
+                                    if ny < pr.2 {
+                                        pr.4 += pr.2 - ny;
+                                        pr.2 = ny;
+                                    }
+                                    if ny >= pr.2 + pr.4 {
+                                        pr.4 = ny - pr.2 + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if claimed > 0 {
+                log::info!(
+                    "Deck {}: cell-level expansion claimed {} cells",
+                    deck + 1,
+                    claimed
+                );
+            }
+        }
+
+        // ---- J10a: Populate cells field from grid ----
+        for &(room_id, rx, ry, rw, rh, ..) in &placed_rooms {
+            let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
+            let cells_data = encode_cell_mask(&grid, cell_tag, rx, ry, rw, rh, hw, hl);
+            if let Some(mut room) = ctx.db.room().id().find(room_id) {
+                room.x = rx as f32 + rw as f32 / 2.0;
+                room.y = ry as f32 + rh as f32 / 2.0;
+                room.width = rw as f32;
+                room.height = rh as f32;
+                room.cells = cells_data;
+                ctx.db.room().id().update(room);
             }
         }
 
@@ -2007,15 +2262,17 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
             dump.push_str(&format!("... ({} more rows)\n", hl - max_rows));
         }
         log::info!("{}", dump);
+        let placed_count = request_used.iter().filter(|&&u| u).count();
         log::info!(
             "Deck {}: placed {}/{} rooms ({:.0}/{:.0}m² area, {} segment area available)",
             deck + 1,
-            request_idx.min(deck_requests.len()),
+            placed_count,
             deck_requests.len(),
             deck_requests
                 .iter()
-                .take(request_idx)
-                .map(|r| r.target_area)
+                .enumerate()
+                .filter(|(i, _)| request_used[*i])
+                .map(|(_, r)| r.target_area)
                 .sum::<f32>(),
             total_request_area,
             total_seg_area,
@@ -2554,18 +2811,8 @@ fn bsp_subdivide(
     }
 
     if requests.len() == 1 {
-        let target = requests[0].target_area;
-        let max_area = target * 1.5;
-        let actual_area = (w * h) as f32;
-        if actual_area <= max_area || (w <= MIN_ROOM_DIM + 1 && h <= MIN_ROOM_DIM + 1) {
-            out.push((x, y, w, h));
-        } else if w > h {
-            let new_w = ((target / h as f32) as usize).max(MIN_ROOM_DIM).min(w);
-            out.push((x, y, new_w, h));
-        } else {
-            let new_h = ((target / w as f32) as usize).max(MIN_ROOM_DIM).min(h);
-            out.push((x, y, w, new_h));
-        }
+        // J5: Use full available sub-rect — rooms expand later anyway.
+        out.push((x, y, w, h));
         return;
     }
 
@@ -3135,4 +3382,83 @@ fn find_clear_rect_for_room(
     }
 
     best.map(|(x, y, w, h, _)| (x, y, w, h))
+}
+
+/// Encode a room's grid footprint as packed axis-aligned rects.
+/// Scans grid within bbox for cells matching `cell_tag`, produces a minimal
+/// set of rects (greedy row-merge) encoded as [(x0,y0,x1,y1) u16] bytes.
+#[allow(clippy::too_many_arguments)]
+fn encode_cell_mask(
+    grid: &[Vec<u8>],
+    cell_tag: u8,
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+    hw: usize,
+    hl: usize,
+) -> Vec<u8> {
+    // Greedy row-based rect merging
+    let mut rects: Vec<(u16, u16, u16, u16)> = Vec::new();
+    let mut used = vec![vec![false; rh]; rw];
+
+    for y in 0..rh {
+        let gy = ry + y;
+        if gy >= hl {
+            break;
+        }
+        let mut x = 0;
+        while x < rw {
+            let gx = rx + x;
+            if gx >= hw || used[x][y] || grid[gx][gy] != cell_tag {
+                x += 1;
+                continue;
+            }
+            // Find max width of this run
+            let mut run_w = 0;
+            while x + run_w < rw
+                && rx + x + run_w < hw
+                && !used[x + run_w][y]
+                && grid[rx + x + run_w][gy] == cell_tag
+            {
+                run_w += 1;
+            }
+            // Extend downward as far as all columns match
+            let mut run_h = 1;
+            'outer: while y + run_h < rh && ry + y + run_h < hl {
+                for dx in 0..run_w {
+                    if rx + x + dx >= hw
+                        || used[x + dx][y + run_h]
+                        || grid[rx + x + dx][ry + y + run_h] != cell_tag
+                    {
+                        break 'outer;
+                    }
+                }
+                run_h += 1;
+            }
+            // Mark used
+            for dy in 0..run_h {
+                for dx in 0..run_w {
+                    used[x + dx][y + dy] = true;
+                }
+            }
+            rects.push((
+                (rx + x) as u16,
+                (ry + y) as u16,
+                (rx + x + run_w) as u16,
+                (ry + y + run_h) as u16,
+            ));
+            x += run_w;
+        }
+    }
+
+    // Encode as bytes: 4 × u16 per rect = 8 bytes per rect
+    let mut bytes = Vec::with_capacity(rects.len() * 8);
+    for (x0, y0, x1, y1) in &rects {
+        bytes.extend_from_slice(&x0.to_le_bytes());
+        bytes.extend_from_slice(&y0.to_le_bytes());
+        bytes.extend_from_slice(&x1.to_le_bytes());
+        bytes.extend_from_slice(&y1.to_le_bytes());
+    }
+    bytes
 }

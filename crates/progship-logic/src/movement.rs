@@ -8,6 +8,38 @@
 //! 5. If player center crosses a wall, change room_id (no position jump)
 //! 6. Walls without doors use normal radius-inset bounds (wall slide)
 
+/// Decode packed cell mask bytes into axis-aligned rects.
+/// Each rect = 4 × u16 (x0, y0, x1, y1) = 8 bytes.
+pub fn decode_cell_rects(cells: &[u8]) -> Vec<(u16, u16, u16, u16)> {
+    let mut rects = Vec::with_capacity(cells.len() / 8);
+    let mut i = 0;
+    while i + 7 < cells.len() {
+        let x0 = u16::from_le_bytes([cells[i], cells[i + 1]]);
+        let y0 = u16::from_le_bytes([cells[i + 2], cells[i + 3]]);
+        let x1 = u16::from_le_bytes([cells[i + 4], cells[i + 5]]);
+        let y1 = u16::from_le_bytes([cells[i + 6], cells[i + 7]]);
+        rects.push((x0, y0, x1, y1));
+        i += 8;
+    }
+    rects
+}
+
+/// Check if a point is inside any of the cell mask rects.
+pub fn cell_mask_contains(cells: &[u8], x: f32, y: f32) -> bool {
+    let mut i = 0;
+    while i + 7 < cells.len() {
+        let x0 = u16::from_le_bytes([cells[i], cells[i + 1]]) as f32;
+        let y0 = u16::from_le_bytes([cells[i + 2], cells[i + 3]]) as f32;
+        let x1 = u16::from_le_bytes([cells[i + 4], cells[i + 5]]) as f32;
+        let y1 = u16::from_le_bytes([cells[i + 6], cells[i + 7]]) as f32;
+        if x >= x0 && x < x1 && y >= y0 && y < y1 {
+            return true;
+        }
+        i += 8;
+    }
+    false
+}
+
 /// Axis-aligned bounding box for a room (center + half-extents).
 #[derive(Debug, Clone, Copy)]
 pub struct RoomBounds {

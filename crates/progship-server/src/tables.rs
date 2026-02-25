@@ -241,6 +241,9 @@ pub struct Room {
     pub ceiling_height: f32,
     /// Number of decks this room spans (1 = normal, 2 = double-height).
     pub deck_span: u8,
+    /// Cell mask: packed list of axis-aligned rects [(x0,y0,x1,y1) as u16].
+    /// Each rect = 8 bytes (4 × u16). Empty means use bbox (x,y,width,height).
+    pub cells: Vec<u8>,
 }
 
 /// Logical graph node representing any functional entity in the ship's network.
