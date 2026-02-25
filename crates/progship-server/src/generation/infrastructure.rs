@@ -2151,6 +2151,7 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
 
         // ---- J10b: Cell-level irregular expansion ----
         // Grow rooms one cell at a time into adjacent empty cells, enabling L/T/U shapes.
+        // Collision is cell-mask-aware (RoomBounds::from_room uses cell_rects).
         {
             let mut claimed = 0u32;
             let mut changed = true;

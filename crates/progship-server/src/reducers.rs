@@ -178,7 +178,14 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
         let Some(room) = ctx.db.room().id().find(pos.room_id) else {
             return;
         };
-        let current = RoomBounds::new(room.id, room.x, room.y, room.width, room.height);
+        let current = RoomBounds::from_room(
+            room.id,
+            room.x,
+            room.y,
+            room.width,
+            room.height,
+            &room.cells,
+        );
 
         // Collect doors connected to the current room (same-deck only;
         // cross-deck doors are used via elevator/ladder reducers)
@@ -214,7 +221,7 @@ pub fn player_move(ctx: &ReducerContext, dx: f32, dy: f32) {
                 .room()
                 .id()
                 .find(id)
-                .map(|r| RoomBounds::new(r.id, r.x, r.y, r.width, r.height))
+                .map(|r| RoomBounds::from_room(r.id, r.x, r.y, r.width, r.height, &r.cells))
         };
 
         let result = compute_move(

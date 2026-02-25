@@ -30,13 +30,24 @@ pub struct ToggleDoorCallbackId(__sdk::CallbackId);
 /// Implemented for [`super::RemoteReducers`].
 pub trait toggle_door {
     /// Request that the remote module invoke the reducer `toggle_door` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed by listening for [`Self::on_toggle_door`] callbacks.
     fn toggle_door(&self, door_id: u64) -> __sdk::Result<()>;
     /// Register a callback to run whenever we are notified of an invocation of the reducer `toggle_door`.
+    ///
+    /// Callbacks should inspect the [`__sdk::ReducerEvent`] contained in the [`super::ReducerEventContext`]
+    /// to determine the reducer's status.
+    ///
+    /// The returned [`ToggleDoorCallbackId`] can be passed to [`Self::remove_on_toggle_door`]
+    /// to cancel the callback.
     fn on_toggle_door(
         &self,
         callback: impl FnMut(&super::ReducerEventContext, &u64) + Send + 'static,
     ) -> ToggleDoorCallbackId;
-    /// Cancel a callback previously registered by [`Self::on_toggle_door`].
+    /// Cancel a callback previously registered by [`Self::on_toggle_door`],
+    /// causing it not to run in the future.
     fn remove_on_toggle_door(&self, callback: ToggleDoorCallbackId);
 }
 
@@ -75,7 +86,15 @@ impl toggle_door for super::RemoteReducers {
 
 #[allow(non_camel_case_types)]
 #[doc(hidden)]
+/// Extension trait for setting the call-flags for the reducer `toggle_door`.
+///
+/// Implemented for [`super::SetReducerFlags`].
+///
+/// This type is currently unstable and may be removed without a major version bump.
 pub trait set_flags_for_toggle_door {
+    /// Set the call-reducer flags for the reducer `toggle_door` to `flags`.
+    ///
+    /// This type is currently unstable and may be removed without a major version bump.
     fn toggle_door(&self, flags: __ws::CallReducerFlags);
 }
 
