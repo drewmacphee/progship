@@ -2150,71 +2150,9 @@ pub(super) fn layout_ship(ctx: &ReducerContext, deck_count: u32, total_pop: u32)
         }
 
         // ---- J10b: Cell-level irregular expansion ----
-        // Grow rooms one cell at a time into adjacent empty cells, enabling L/T/U shapes.
-        {
-            let mut claimed = 0u32;
-            let mut changed = true;
-            while changed {
-                changed = false;
-                for i in 0..placed_rooms.len() {
-                    let (room_id, rx, ry, rw, rh, _rt, _ta, room_placement) = placed_rooms[i];
-                    let cell_tag = CELL_ROOM_BASE + (room_id as u8 % 246);
-                    let (exp_x0, exp_y0, exp_x1, exp_y1) =
-                        if room_placement == placement::HULL_FACING {
-                            (ring_x0, hull_y0, ring_x1, hull_y1)
-                        } else {
-                            (inner_x0, inner_y0, inner_x1, inner_y1)
-                        };
-                    for x in rx..(rx + rw).min(hw) {
-                        for y in ry..(ry + rh).min(hl) {
-                            if grid[x][y] != cell_tag {
-                                continue;
-                            }
-                            for &(dx, dy) in &[(0isize, 1isize), (0, -1), (1, 0), (-1, 0)] {
-                                let nx = x as isize + dx;
-                                let ny = y as isize + dy;
-                                if nx < exp_x0 as isize
-                                    || nx >= exp_x1 as isize
-                                    || ny < exp_y0 as isize
-                                    || ny >= exp_y1 as isize
-                                {
-                                    continue;
-                                }
-                                let nx = nx as usize;
-                                let ny = ny as usize;
-                                if grid[nx][ny] == CELL_EMPTY {
-                                    grid[nx][ny] = cell_tag;
-                                    claimed += 1;
-                                    changed = true;
-                                    let pr = &mut placed_rooms[i];
-                                    if nx < pr.1 {
-                                        pr.3 += pr.1 - nx;
-                                        pr.1 = nx;
-                                    }
-                                    if nx >= pr.1 + pr.3 {
-                                        pr.3 = nx - pr.1 + 1;
-                                    }
-                                    if ny < pr.2 {
-                                        pr.4 += pr.2 - ny;
-                                        pr.2 = ny;
-                                    }
-                                    if ny >= pr.2 + pr.4 {
-                                        pr.4 = ny - pr.2 + 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if claimed > 0 {
-                log::info!(
-                    "Deck {}: cell-level expansion claimed {} cells",
-                    deck + 1,
-                    claimed
-                );
-            }
-        }
+        // DISABLED: Irregular L/T/U expansion causes visual overlaps because the
+        // client renders walls from the rectangular bounding box, not from cell
+        // masks. Re-enable once wall rendering is cell-mask-aware.
 
         // ---- J10a: Populate cells field from grid ----
         for &(room_id, rx, ry, rw, rh, ..) in &placed_rooms {
