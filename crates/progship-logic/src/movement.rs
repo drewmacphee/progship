@@ -332,15 +332,28 @@ impl RoomBounds {
                 && y >= self.min_y() + radius
                 && y <= self.max_y() - radius
         } else {
-            // Irregular room — point must be inside at least one cell rect
-            self.cell_rects.iter().any(|&(x0, y0, x1, y1)| {
-                x >= x0 + radius && x <= x1 - radius && y >= y0 + radius && y <= y1 - radius
-            })
+            // Irregular room — check that the player's circle (approximated by
+            // 4 cardinal extremes) is entirely within the cell union. This avoids
+            // dead zones at internal boundaries between adjacent cell rects.
+            self.point_in_cells(x - radius, y)
+                && self.point_in_cells(x + radius, y)
+                && self.point_in_cells(x, y - radius)
+                && self.point_in_cells(x, y + radius)
         }
     }
 
+    /// Check if a point is inside any cell rect (no radius inset).
+    /// Used for gap detection — adjacent rects of the same room share edges
+    /// and have no wall between them, so no radius inset is needed internally.
+    pub fn point_in_cells(&self, x: f32, y: f32) -> bool {
+        self.cell_rects
+            .iter()
+            .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
+    }
+
     /// Clamp a point to stay inside this room (with radius padding).
-    /// For irregular rooms, clamps to the nearest cell rect.
+    /// For irregular rooms, clamps to the nearest cell rect edge (no per-rect
+    /// radius inset to avoid dead zones at shared boundaries).
     pub fn clamp(&self, x: f32, y: f32, radius: f32) -> (f32, f32) {
         if self.cell_rects.is_empty() {
             (
@@ -348,7 +361,7 @@ impl RoomBounds {
                 y.clamp(self.min_y() + radius, self.max_y() - radius),
             )
         } else {
-            clamp_to_cell_rects(&self.cell_rects, x, y, radius)
+            clamp_to_cell_union(&self.cell_rects, x, y)
         }
     }
 
@@ -366,20 +379,15 @@ impl RoomBounds {
     }
 }
 
-/// Clamp a point to the nearest valid position inside any cell rect (with radius).
-fn clamp_to_cell_rects(rects: &[(f32, f32, f32, f32)], x: f32, y: f32, r: f32) -> (f32, f32) {
+/// Clamp a point to the nearest position inside the cell rect union.
+/// No per-rect radius inset — adjacent rects share edges freely.
+fn clamp_to_cell_union(rects: &[(f32, f32, f32, f32)], x: f32, y: f32) -> (f32, f32) {
     let mut best = (x, y);
     let mut best_dist = f32::MAX;
     for &(x0, y0, x1, y1) in rects {
-        let lo_x = x0 + r;
-        let hi_x = x1 - r;
-        let lo_y = y0 + r;
-        let hi_y = y1 - r;
-        if hi_x < lo_x || hi_y < lo_y {
-            continue; // rect too small for player radius
-        }
-        let cx = x.clamp(lo_x, hi_x);
-        let cy = y.clamp(lo_y, hi_y);
+        // Use a tiny epsilon inset to keep the point strictly inside
+        let cx = x.clamp(x0 + 0.01, x1 - 0.01);
+        let cy = y.clamp(y0 + 0.01, y1 - 0.01);
         let dx = cx - x;
         let dy = cy - y;
         let d = dx * dx + dy * dy;
@@ -648,8 +656,9 @@ pub fn compute_move(
 
     // 7. Cell-mask gap check: if the room has irregular cell rects, ensure
     //    the final position is inside an actual cell (not in the L-shape gap).
+    //    Uses point_in_cells (no radius) so adjacent rects have no dead zone.
     //    Skip this check if the player is in a door overlap zone.
-    if !current_room.cell_rects.is_empty() && !current_room.contains(fx, fy, r) {
+    if !current_room.cell_rects.is_empty() && !current_room.point_in_cells(fx, fy) {
         let in_door_zone = room_doors.iter().any(|&(door, dw, _)| {
             let half_open = door.width / 2.0 - r;
             if half_open <= 0.0 {
@@ -1240,16 +1249,16 @@ mod tests {
         let res = compute_move(&mi(1.0, 1.0, 2.0, 2.5), &l_room, &[], &|_| None);
         match res {
             MoveResult::WallSlide { x, y } => {
+                // Clamped position must be inside the cell union
                 assert!(
-                    l_room.contains(x, y, r),
-                    "clamped pos ({x},{y}) must be inside room"
+                    l_room.point_in_cells(x, y),
+                    "clamped pos ({x},{y}) must be inside cell union"
                 );
             }
             MoveResult::InRoom { x, y } => {
-                // bbox might not clamp at all if target is well inside
                 assert!(
-                    l_room.contains(x, y, r) || (x <= 2.6 && y <= 3.6),
-                    "pos ({x},{y}) must be inside room or clamped"
+                    l_room.point_in_cells(x, y),
+                    "pos ({x},{y}) must be inside cell union"
                 );
             }
             _ => panic!("Unexpected {:?}", res),
@@ -1260,15 +1269,37 @@ mod tests {
     fn l_shape_clamp_to_nearest_rect() {
         let cells = encode_rects(&[(0, 0, 4, 2), (0, 2, 2, 5)]);
         let l_room = RoomBounds::from_room(1, 2.0, 2.5, 4.0, 5.0, &cells);
-        let r = 0.4;
 
         // Point in gap (3.0, 3.0) should clamp to nearest rect
-        let (cx, cy) = l_room.clamp(3.0, 3.0, r);
+        let (cx, cy) = l_room.clamp(3.0, 3.0, 0.4);
+        // Should be inside some cell rect (no-radius)
         assert!(
-            l_room.contains(cx, cy, r),
-            "clamped ({cx},{cy}) inside room"
+            l_room.point_in_cells(cx, cy),
+            "clamped ({cx},{cy}) inside cell union"
         );
         // Should clamp to the top rect (0,0)-(4,2) since it's closer
-        assert!(cy <= 2.0 - r + 0.01, "clamped to top rect, cy={cy}");
+        assert!(cy < 2.0, "clamped to top rect, cy={cy}");
+    }
+
+    #[test]
+    fn l_shape_no_dead_zone_at_boundary() {
+        // Two adjacent rects sharing edge at x=4:
+        //   (0,0)-(4,3) and (4,0)-(6,2)
+        // Player at (3.9, 1.0) should be contained (in left rect).
+        // Player at (4.1, 1.0) should be contained (in right rect).
+        // Player at (4.0, 1.0) should NOT have a dead zone.
+        let cells = encode_rects(&[(0, 0, 4, 3), (4, 0, 6, 2)]);
+        let room = RoomBounds::from_room(1, 3.0, 1.5, 6.0, 3.0, &cells);
+        let r = 0.4;
+
+        assert!(room.contains(3.5, 1.0, r), "deep in left rect");
+        assert!(room.contains(4.5, 0.8, r), "deep in right rect");
+        // At the shared boundary — should be contained since both rects
+        // cover x=4 (left goes to x<4, right starts at x>=4)
+        assert!(room.contains(3.8, 1.0, r), "near shared boundary from left");
+        assert!(
+            room.contains(4.2, 0.8, r),
+            "near shared boundary from right"
+        );
     }
 }
