@@ -40,14 +40,239 @@ pub fn cell_mask_contains(cells: &[u8], x: f32, y: f32) -> bool {
     false
 }
 
-/// Axis-aligned bounding box for a room (center + half-extents).
-#[derive(Debug, Clone, Copy)]
+/// A wall segment on the perimeter of a room's cell mask.
+/// Direction: NORTH=0 (edge at low Y), SOUTH=1 (high Y), EAST=2 (high X), WEST=3 (low X).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WallSegment {
+    /// World X of segment center.
+    pub x: f32,
+    /// World Z (Y in grid coords) of segment center.
+    pub z: f32,
+    /// Length of the segment in meters.
+    pub length: f32,
+    /// Cardinal direction the wall faces (NORTH=0, SOUTH=1, EAST=2, WEST=3).
+    pub direction: u8,
+}
+
+/// Door edge info for perimeter gap detection.
+#[derive(Debug, Clone)]
+pub struct DoorEdge {
+    /// Absolute world X of door center.
+    pub door_x: f32,
+    /// Absolute world Y of door center.
+    pub door_y: f32,
+    /// Door opening width in meters.
+    pub width: f32,
+    /// Wall side this door is on (NORTH=0, SOUTH=1, EAST=2, WEST=3).
+    pub wall_side: u8,
+}
+
+/// Compute wall segments from a room's cell mask, with door gaps excluded.
+///
+/// Algorithm:
+/// 1. Unpack cell rects into set of owned (x,y) integer cells
+/// 2. For each cell, check 4 neighbors — exposed edges become raw 1m segments
+/// 3. Greedy-merge adjacent same-direction segments into longer walls
+/// 4. Split merged segments at door positions
+pub fn compute_room_perimeter(cells: &[u8], doors: &[DoorEdge]) -> Vec<WallSegment> {
+    use std::collections::HashSet;
+
+    let rects = decode_cell_rects(cells);
+    if rects.is_empty() {
+        return Vec::new();
+    }
+
+    // Build set of owned cells
+    let mut owned: HashSet<(i32, i32)> = HashSet::new();
+    for &(x0, y0, x1, y1) in &rects {
+        for x in x0..x1 {
+            for y in y0..y1 {
+                owned.insert((x as i32, y as i32));
+            }
+        }
+    }
+
+    // Collect raw edges: (position along wall axis, position perpendicular, direction)
+    // For NORTH (dir=0): cell (cx,cy) has exposed north edge at y=cy. Wall runs at y=cy, x from cx to cx+1.
+    // For SOUTH (dir=1): cell (cx,cy) has exposed south edge at y=cy+1. Wall runs at y=cy+1, x from cx to cx+1.
+    // For WEST (dir=3): cell (cx,cy) has exposed west edge at x=cx. Wall runs at x=cx, y from cy to cy+1.
+    // For EAST (dir=2): cell (cx,cy) has exposed east edge at x=cx+1. Wall runs at x=cx+1, y from cy to cy+1.
+    //
+    // We group edges by (direction, perpendicular_position) then sort by axis position for merging.
+    struct RawEdge {
+        axis_start: i32, // start along the wall axis
+        perp: i32,       // perpendicular position (the wall's fixed coordinate)
+        dir: u8,
+    }
+    let mut edges: Vec<RawEdge> = Vec::new();
+
+    for &(cx, cy) in &owned {
+        // NORTH: neighbor at (cx, cy-1)
+        if !owned.contains(&(cx, cy - 1)) {
+            edges.push(RawEdge {
+                axis_start: cx,
+                perp: cy,
+                dir: 0,
+            });
+        }
+        // SOUTH: neighbor at (cx, cy+1)
+        if !owned.contains(&(cx, cy + 1)) {
+            edges.push(RawEdge {
+                axis_start: cx,
+                perp: cy + 1,
+                dir: 1,
+            });
+        }
+        // WEST: neighbor at (cx-1, cy)
+        if !owned.contains(&(cx - 1, cy)) {
+            edges.push(RawEdge {
+                axis_start: cy,
+                perp: cx,
+                dir: 3,
+            });
+        }
+        // EAST: neighbor at (cx+1, cy)
+        if !owned.contains(&(cx + 1, cy)) {
+            edges.push(RawEdge {
+                axis_start: cy,
+                perp: cx + 1,
+                dir: 2,
+            });
+        }
+    }
+
+    // Sort by (direction, perpendicular, axis_start) for greedy merge
+    edges.sort_by(|a, b| {
+        a.dir
+            .cmp(&b.dir)
+            .then(a.perp.cmp(&b.perp))
+            .then(a.axis_start.cmp(&b.axis_start))
+    });
+
+    // Greedy merge consecutive edges with same (dir, perp)
+    struct MergedSegment {
+        axis_start: i32,
+        axis_end: i32,
+        perp: i32,
+        dir: u8,
+    }
+    let mut merged: Vec<MergedSegment> = Vec::new();
+    let mut i = 0;
+    while i < edges.len() {
+        let e = &edges[i];
+        let mut seg = MergedSegment {
+            axis_start: e.axis_start,
+            axis_end: e.axis_start + 1,
+            perp: e.perp,
+            dir: e.dir,
+        };
+        i += 1;
+        while i < edges.len()
+            && edges[i].dir == seg.dir
+            && edges[i].perp == seg.perp
+            && edges[i].axis_start == seg.axis_end
+        {
+            seg.axis_end = edges[i].axis_start + 1;
+            i += 1;
+        }
+        merged.push(seg);
+    }
+
+    // Convert merged segments to WallSegments, splitting at door gaps
+    let mut result: Vec<WallSegment> = Vec::new();
+    for seg in &merged {
+        let len = (seg.axis_end - seg.axis_start) as f32;
+        let is_horizontal = seg.dir == 0 || seg.dir == 1;
+
+        // Collect door gaps that overlap this segment
+        let mut gaps: Vec<(f32, f32)> = Vec::new();
+        for door in doors {
+            if door.wall_side != seg.dir {
+                continue;
+            }
+            let (door_perp, door_axis) = if is_horizontal {
+                (door.door_y, door.door_x)
+            } else {
+                (door.door_x, door.door_y)
+            };
+            if (door_perp - seg.perp as f32).abs() > 0.5 {
+                continue;
+            }
+            let half_w = door.width / 2.0;
+            let gap_start = (door_axis - half_w).max(seg.axis_start as f32);
+            let gap_end = (door_axis + half_w).min(seg.axis_end as f32);
+            if gap_end > gap_start {
+                gaps.push((gap_start, gap_end));
+            }
+        }
+        gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        if gaps.is_empty() {
+            // No doors — emit full segment
+            let (x, z) = if is_horizontal {
+                (seg.axis_start as f32 + len / 2.0, seg.perp as f32)
+            } else {
+                (seg.perp as f32, seg.axis_start as f32 + len / 2.0)
+            };
+            result.push(WallSegment {
+                x,
+                z,
+                length: len,
+                direction: seg.dir,
+            });
+        } else {
+            // Split segment around door gaps
+            let mut cursor = seg.axis_start as f32;
+            for (gap_start, gap_end) in &gaps {
+                let sub_len = gap_start - cursor;
+                if sub_len > 0.01 {
+                    let (x, z) = if is_horizontal {
+                        (cursor + sub_len / 2.0, seg.perp as f32)
+                    } else {
+                        (seg.perp as f32, cursor + sub_len / 2.0)
+                    };
+                    result.push(WallSegment {
+                        x,
+                        z,
+                        length: sub_len,
+                        direction: seg.dir,
+                    });
+                }
+                cursor = *gap_end;
+            }
+            let sub_len = seg.axis_end as f32 - cursor;
+            if sub_len > 0.01 {
+                let (x, z) = if is_horizontal {
+                    (cursor + sub_len / 2.0, seg.perp as f32)
+                } else {
+                    (seg.perp as f32, cursor + sub_len / 2.0)
+                };
+                result.push(WallSegment {
+                    x,
+                    z,
+                    length: sub_len,
+                    direction: seg.dir,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+/// Room collision bounds — outer bbox plus optional cell-mask rects for
+/// irregular (L/T/U) rooms. When `cell_rects` is non-empty, containment
+/// and clamping use the actual cell shape instead of the bounding box.
+#[derive(Debug, Clone)]
 pub struct RoomBounds {
     pub id: u32,
     pub cx: f32,
     pub cy: f32,
     pub half_w: f32,
     pub half_h: f32,
+    /// Decoded cell rects as `(x0, y0, x1, y1)` in grid/world coords.
+    /// Empty ⇒ rectangular room, use bbox. Non-empty ⇒ irregular shape.
+    pub cell_rects: Vec<(f32, f32, f32, f32)>,
 }
 
 impl RoomBounds {
@@ -58,6 +283,30 @@ impl RoomBounds {
             cy: y,
             half_w: width / 2.0,
             half_h: height / 2.0,
+            cell_rects: Vec::new(),
+        }
+    }
+
+    /// Build from Room fields including cell mask bytes.
+    pub fn from_room(id: u32, x: f32, y: f32, width: f32, height: f32, cells: &[u8]) -> Self {
+        let decoded = decode_cell_rects(cells);
+        // Only use cell_rects when the mask is non-trivial (not a single rect
+        // covering the full bbox — that's just a normal rectangular room).
+        let cell_rects: Vec<(f32, f32, f32, f32)> = if decoded.len() > 1 {
+            decoded
+                .iter()
+                .map(|&(x0, y0, x1, y1)| (x0 as f32, y0 as f32, x1 as f32, y1 as f32))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            id,
+            cx: x,
+            cy: y,
+            half_w: width / 2.0,
+            half_h: height / 2.0,
+            cell_rects,
         }
     }
 
@@ -76,18 +325,44 @@ impl RoomBounds {
 
     /// Check if a point (with radius padding) is inside this room.
     pub fn contains(&self, x: f32, y: f32, radius: f32) -> bool {
-        x >= self.min_x() + radius
-            && x <= self.max_x() - radius
-            && y >= self.min_y() + radius
-            && y <= self.max_y() - radius
+        if self.cell_rects.is_empty() {
+            // Rectangular room — simple bbox check
+            x >= self.min_x() + radius
+                && x <= self.max_x() - radius
+                && y >= self.min_y() + radius
+                && y <= self.max_y() - radius
+        } else {
+            // Irregular room — check that the player's circle (approximated by
+            // 4 cardinal extremes) is entirely within the cell union. This avoids
+            // dead zones at internal boundaries between adjacent cell rects.
+            self.point_in_cells(x - radius, y)
+                && self.point_in_cells(x + radius, y)
+                && self.point_in_cells(x, y - radius)
+                && self.point_in_cells(x, y + radius)
+        }
+    }
+
+    /// Check if a point is inside any cell rect (no radius inset).
+    /// Used for gap detection — adjacent rects of the same room share edges
+    /// and have no wall between them, so no radius inset is needed internally.
+    pub fn point_in_cells(&self, x: f32, y: f32) -> bool {
+        self.cell_rects
+            .iter()
+            .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
     }
 
     /// Clamp a point to stay inside this room (with radius padding).
+    /// For irregular rooms, clamps to the nearest cell rect edge (no per-rect
+    /// radius inset to avoid dead zones at shared boundaries).
     pub fn clamp(&self, x: f32, y: f32, radius: f32) -> (f32, f32) {
-        (
-            x.clamp(self.min_x() + radius, self.max_x() - radius),
-            y.clamp(self.min_y() + radius, self.max_y() - radius),
-        )
+        if self.cell_rects.is_empty() {
+            (
+                x.clamp(self.min_x() + radius, self.max_x() - radius),
+                y.clamp(self.min_y() + radius, self.max_y() - radius),
+            )
+        } else {
+            clamp_to_cell_union(&self.cell_rects, x, y, radius)
+        }
     }
 
     fn x_lo(&self, r: f32) -> f32 {
@@ -102,6 +377,80 @@ impl RoomBounds {
     fn y_hi(&self, r: f32) -> f32 {
         self.max_y() - r
     }
+}
+
+/// Clamp a point to the nearest valid position inside the cell rect union,
+/// respecting radius at external walls but allowing free crossing at internal
+/// boundaries between adjacent rects.
+fn clamp_to_cell_union(rects: &[(f32, f32, f32, f32)], x: f32, y: f32, r: f32) -> (f32, f32) {
+    let point_in = |px: f32, py: f32| {
+        rects
+            .iter()
+            .any(|&(x0, y0, x1, y1)| px >= x0 && px < x1 && py >= y0 && py < y1)
+    };
+
+    // First ensure center is in a cell rect
+    let mut cx = x;
+    let mut cy = y;
+    if !point_in(cx, cy) {
+        // Find nearest cell rect center
+        let mut best_d = f32::MAX;
+        for &(x0, y0, x1, y1) in rects {
+            let nx = cx.clamp(x0 + 0.01, x1 - 0.01);
+            let ny = cy.clamp(y0 + 0.01, y1 - 0.01);
+            let d = (nx - cx) * (nx - cx) + (ny - cy) * (ny - cy);
+            if d < best_d {
+                best_d = d;
+                cx = nx;
+                cy = ny;
+            }
+        }
+    }
+
+    // Push inward from external walls (where cardinal extreme is outside all rects)
+    if !point_in(cx + r, cy) {
+        // Right side outside — find rightmost x1 among rects containing (cx, cy) vertically
+        let max_x1 = rects
+            .iter()
+            .filter(|&&(_, y0, _, y1)| cy >= y0 && cy < y1)
+            .map(|&(_, _, x1, _)| x1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if max_x1 > f32::NEG_INFINITY {
+            cx = cx.min(max_x1 - r);
+        }
+    }
+    if !point_in(cx - r, cy) {
+        let min_x0 = rects
+            .iter()
+            .filter(|&&(_, y0, _, y1)| cy >= y0 && cy < y1)
+            .map(|&(x0, _, _, _)| x0)
+            .fold(f32::INFINITY, f32::min);
+        if min_x0 < f32::INFINITY {
+            cx = cx.max(min_x0 + r);
+        }
+    }
+    if !point_in(cx, cy + r) {
+        let max_y1 = rects
+            .iter()
+            .filter(|&&(x0, _, x1, _)| cx >= x0 && cx < x1)
+            .map(|&(_, _, _, y1)| y1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if max_y1 > f32::NEG_INFINITY {
+            cy = cy.min(max_y1 - r);
+        }
+    }
+    if !point_in(cx, cy - r) {
+        let min_y0 = rects
+            .iter()
+            .filter(|&&(x0, _, x1, _)| cx >= x0 && cx < x1)
+            .map(|&(_, y0, _, _)| y0)
+            .fold(f32::INFINITY, f32::min);
+        if min_y0 < f32::INFINITY {
+            cy = cy.max(min_y0 + r);
+        }
+    }
+
+    (cx, cy)
 }
 
 /// Minimal door info needed for traversal checks.
@@ -194,6 +543,10 @@ fn door_at_wall(
 /// Compute the result of a movement within the given room, checking doors
 /// for room transitions. Extends room bounds at door openings so the player
 /// smoothly walks through without position jumps.
+///
+/// Movement uses bbox-based collision for door compatibility. For irregular
+/// (L/T/U) rooms, a post-movement gap check clamps the player out of areas
+/// not covered by cell_rects (e.g. the gap of an L-shape).
 pub fn compute_move(
     input: &MoveInput,
     current_room: &RoomBounds,
@@ -216,11 +569,10 @@ pub fn compute_move(
         })
         .collect();
 
-    // 1. Correct starting position: allow overlap zone at doors
+    // 1. Correct starting position: allow overlap zone at doors (bbox-based)
     let px = if input.px >= current_room.x_lo(r) && input.px <= current_room.x_hi(r) {
         input.px
     } else if input.px < current_room.x_lo(r) {
-        // Past min_x wall — allowed if in a door opening
         if input.px >= current_room.min_x()
             && door_at_wall(DoorWall::MinX, input.py, r, &room_doors).is_some()
         {
@@ -257,11 +609,11 @@ pub fn compute_move(
     let tx = px + input.dx;
     let ty = py + input.dy;
 
-    // 3. Compute extended bounds — extend at door openings
+    // 3. Compute extended bounds — extend at door openings (bbox-based)
     let x_lo = if door_at_wall(DoorWall::MinX, py, r, &room_doors).is_some() {
-        current_room.min_x() // extend to wall edge
+        current_room.min_x()
     } else {
-        current_room.x_lo(r) // normal: wall + radius
+        current_room.x_lo(r)
     };
     let x_hi = if door_at_wall(DoorWall::MaxX, py, r, &room_doors).is_some() {
         current_room.max_x()
@@ -284,16 +636,12 @@ pub fn compute_move(
     let cy = ty.clamp(y_lo, y_hi);
 
     // 5. Check if player center crossed a wall → room transition
-    // Player center crosses when it goes past the wall edge (min_x/max_x/min_y/max_y).
-    // We check the traversal axis: if cx is past the wall AND there's a door there.
-
     // X-axis: crossed min_x wall (moving left)
     if cx <= current_room.min_x() && input.dx < 0.0 {
         if let Some((door, other_id)) = door_at_wall(DoorWall::MinX, py, r, &room_doors) {
             if let Some(dest) = door_rooms(other_id) {
                 let half_open = door.width / 2.0 - r;
                 let fy = cy.clamp(door.door_y - half_open, door.door_y + half_open);
-                // Entering dest from its MaxX side — extend that bound to wall edge
                 let fx = tx.clamp(dest.x_lo(r), dest.max_x());
                 let fy = fy.clamp(dest.y_lo(r), dest.y_hi(r));
                 return MoveResult::DoorTraversal {
@@ -310,7 +658,6 @@ pub fn compute_move(
             if let Some(dest) = door_rooms(other_id) {
                 let half_open = door.width / 2.0 - r;
                 let fy = cy.clamp(door.door_y - half_open, door.door_y + half_open);
-                // Entering dest from its MinX side — extend that bound to wall edge
                 let fx = tx.clamp(dest.min_x(), dest.x_hi(r));
                 let fy = fy.clamp(dest.y_lo(r), dest.y_hi(r));
                 return MoveResult::DoorTraversal {
@@ -327,7 +674,6 @@ pub fn compute_move(
             if let Some(dest) = door_rooms(other_id) {
                 let half_open = door.width / 2.0 - r;
                 let fx = cx.clamp(door.door_x - half_open, door.door_x + half_open);
-                // Entering dest from its MaxY side — extend that bound to wall edge
                 let fx = fx.clamp(dest.x_lo(r), dest.x_hi(r));
                 let fy = ty.clamp(dest.y_lo(r), dest.max_y());
                 return MoveResult::DoorTraversal {
@@ -344,7 +690,6 @@ pub fn compute_move(
             if let Some(dest) = door_rooms(other_id) {
                 let half_open = door.width / 2.0 - r;
                 let fx = cx.clamp(door.door_x - half_open, door.door_x + half_open);
-                // Entering dest from its MinY side — extend that bound to wall edge
                 let fx = fx.clamp(dest.x_lo(r), dest.x_hi(r));
                 let fy = ty.clamp(dest.min_y(), dest.y_hi(r));
                 return MoveResult::DoorTraversal {
@@ -360,10 +705,55 @@ pub fn compute_move(
     let x_clamped = (cx - tx).abs() > 0.001;
     let y_clamped = (cy - ty).abs() > 0.001;
 
+    let mut fx = cx;
+    let mut fy = cy;
+
+    // 7. Cell-mask gap check: if the room has irregular cell rects, ensure
+    //    the final position (with radius) is fully inside the cell union.
+    //    Uses cardinal-extremes contains() — no dead zone at internal boundaries,
+    //    but enforces radius at external walls.
+    //    Skip this check if the player is in a door overlap zone.
+    if !current_room.cell_rects.is_empty() && !current_room.contains(fx, fy, r) {
+        let in_door_zone = room_doors.iter().any(|&(door, dw, _)| {
+            let half_open = door.width / 2.0 - r;
+            if half_open <= 0.0 {
+                return false;
+            }
+            match dw {
+                DoorWall::MinX => {
+                    fx >= current_room.min_x()
+                        && fx < current_room.min_x() + r
+                        && (fy - door.door_y).abs() <= half_open
+                }
+                DoorWall::MaxX => {
+                    fx <= current_room.max_x()
+                        && fx > current_room.max_x() - r
+                        && (fy - door.door_y).abs() <= half_open
+                }
+                DoorWall::MinY => {
+                    fy >= current_room.min_y()
+                        && fy < current_room.min_y() + r
+                        && (fx - door.door_x).abs() <= half_open
+                }
+                DoorWall::MaxY => {
+                    fy <= current_room.max_y()
+                        && fy > current_room.max_y() - r
+                        && (fx - door.door_x).abs() <= half_open
+                }
+            }
+        });
+        if !in_door_zone {
+            let (gx, gy) = current_room.clamp(fx, fy, r);
+            fx = gx;
+            fy = gy;
+            return MoveResult::WallSlide { x: fx, y: fy };
+        }
+    }
+
     if x_clamped || y_clamped {
-        MoveResult::WallSlide { x: cx, y: cy }
+        MoveResult::WallSlide { x: fx, y: fy }
     } else {
-        MoveResult::InRoom { x: cx, y: cy }
+        MoveResult::InRoom { x: fx, y: fy }
     }
 }
 
@@ -492,7 +882,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
         let res = compute_move(&mi(9.0, 5.0, 2.0, 0.0), &a, &[door], &lookup);
         match res {
             MoveResult::DoorTraversal { room_id, x, y } => {
@@ -532,7 +922,7 @@ mod tests {
             width: 3.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
         let res = compute_move(&mi(9.5, 5.0, 1.0, 0.0), &a, &[door], &lookup);
         match res {
             MoveResult::DoorTraversal { room_id, .. } => assert_eq!(room_id, 2),
@@ -552,7 +942,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // At door height — traverse
         let res = compute_move(&mi(9.5, 8.0, 1.5, 0.0), &a, &[door], &lookup);
@@ -575,7 +965,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // Player at y=2, far from door at y=5 — should NOT traverse
         let res = compute_move(&mi(9.0, 2.0, 5.0, 0.0), &a, &[door], &lookup);
@@ -602,7 +992,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(side) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(side.clone()) } else { None };
 
         let res = compute_move(&mi(10.5, 50.0, 2.0, 0.0), &corridor, &[door], &lookup);
         match res {
@@ -637,8 +1027,8 @@ mod tests {
             is_open: true,
         };
         let lookup = |id: u32| match id {
-            1 => Some(spine0),
-            2 => Some(spine1),
+            1 => Some(spine0.clone()),
+            2 => Some(spine1.clone()),
             _ => None,
         };
 
@@ -684,7 +1074,7 @@ mod tests {
             width: 3.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // At x=5 (door center), moving up past the wall
         let res = compute_move(&mi(5.0, 9.0, 0.5, 2.0), &a, &[door], &lookup);
@@ -709,7 +1099,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // Player very close to wall with tiny dx — should reach wall edge, not jump past
         let res = compute_move(&mi(9.5, 5.0, 0.2, 0.0), &a, &[door], &lookup);
@@ -737,7 +1127,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // Player at wall edge, dx=0.5 — target is 10.1, past wall at 10.0
         let res = compute_move(&mi(9.6, 5.0, 0.5, 0.0), &a, &[door], &lookup);
@@ -753,6 +1143,70 @@ mod tests {
     }
 
     #[test]
+    fn perimeter_simple_rect() {
+        // 3×2 room at (5,5) → cells = one rect (5,5,8,7)
+        let cells = encode_rects(&[(5, 5, 8, 7)]);
+        let segs = compute_room_perimeter(&cells, &[]);
+        // Should produce 4 wall segments: N, S, E, W
+        assert_eq!(segs.len(), 4, "segs: {segs:?}");
+        let n: Vec<_> = segs.iter().filter(|s| s.direction == 0).collect();
+        let s: Vec<_> = segs.iter().filter(|s| s.direction == 1).collect();
+        let e: Vec<_> = segs.iter().filter(|s| s.direction == 2).collect();
+        let w: Vec<_> = segs.iter().filter(|s| s.direction == 3).collect();
+        assert_eq!(n.len(), 1);
+        assert_eq!(s.len(), 1);
+        assert_eq!(e.len(), 1);
+        assert_eq!(w.len(), 1);
+        assert!((n[0].length - 3.0).abs() < 0.01, "N len={}", n[0].length);
+        assert!((s[0].length - 3.0).abs() < 0.01, "S len={}", s[0].length);
+        assert!((e[0].length - 2.0).abs() < 0.01, "E len={}", e[0].length);
+        assert!((w[0].length - 2.0).abs() < 0.01, "W len={}", w[0].length);
+    }
+
+    #[test]
+    fn perimeter_l_shape() {
+        // L-shape: two rects (5,5,8,7) and (8,5,10,6)
+        let cells = encode_rects(&[(5, 5, 8, 7), (8, 5, 10, 6)]);
+        let segs = compute_room_perimeter(&cells, &[]);
+        // L-shape has 6 wall segments (inner corner creates 2 extra)
+        assert_eq!(segs.len(), 6, "segs: {segs:?}");
+    }
+
+    #[test]
+    fn perimeter_with_door_gap() {
+        // 4×3 room at (10,10) → cells = (10,10,14,13)
+        // Door on north wall at x=12.0, width=2.0 → covers cells x=11..13
+        let cells = encode_rects(&[(10, 10, 14, 13)]);
+        let doors = vec![DoorEdge {
+            door_x: 12.0,
+            door_y: 10.0,
+            width: 2.0,
+            wall_side: 0, // NORTH
+        }];
+        let segs = compute_room_perimeter(&cells, &doors);
+        // N wall should be split into 2 segments (gap in the middle)
+        let n: Vec<_> = segs.iter().filter(|s| s.direction == 0).collect();
+        assert_eq!(n.len(), 2, "N segs: {n:?}");
+        let total_n: f32 = n.iter().map(|s| s.length).sum();
+        assert!(
+            (total_n - 2.0).abs() < 0.01,
+            "total N len={total_n} (4 - 2 door)"
+        );
+    }
+
+    /// Helper to encode rects into cells bytes for testing.
+    fn encode_rects(rects: &[(u16, u16, u16, u16)]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(rects.len() * 8);
+        for &(x0, y0, x1, y1) in rects {
+            bytes.extend_from_slice(&x0.to_le_bytes());
+            bytes.extend_from_slice(&y0.to_le_bytes());
+            bytes.extend_from_slice(&x1.to_le_bytes());
+            bytes.extend_from_slice(&y1.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
     fn overlap_zone_in_room() {
         // Player in the overlap zone (between wall-r and wall) stays in current room
         let a = room(1, 5.0, 5.0, 10.0, 10.0);
@@ -765,7 +1219,7 @@ mod tests {
             width: 2.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(b) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(b.clone()) } else { None };
 
         // Player at x=9.8 (past normal clamp of 9.6, but before wall at 10.0)
         // Moving right with tiny dx — should stay in room A
@@ -793,7 +1247,7 @@ mod tests {
             width: 4.0,
             is_open: true,
         };
-        let lookup = |id: u32| if id == 2 { Some(cross) } else { None };
+        let lookup = |id: u32| if id == 2 { Some(cross.clone()) } else { None };
 
         // Walking south in spine, approaching cross-corridor
         // Player at y=39.5 (near south wall at 40.0), dy=0.3
@@ -818,5 +1272,89 @@ mod tests {
             }
             _ => panic!("Expected DoorTraversal, got {:?}", res),
         }
+    }
+
+    // --- Cell-mask collision tests ---
+
+    #[test]
+    fn l_shape_blocks_gap_area() {
+        // L-shaped room: two cell rects forming an L
+        //   [0,0]-[3,2]  (left block, 3×2)
+        //   [0,2]-[2,4]  (bottom block, 2×2)
+        // The gap is at (2..3, 2..4) — NOT part of the room.
+        let cells = encode_rects(&[(0, 0, 3, 2), (0, 2, 2, 4)]);
+        let l_room = RoomBounds::from_room(
+            1, 1.5, 2.0, // center of bbox (0,0)-(3,4) → cx=1.5, cy=2.0
+            3.0, 4.0, // bbox dimensions
+            &cells,
+        );
+        assert_eq!(l_room.cell_rects.len(), 2, "Should have 2 cell rects");
+
+        let r = 0.4;
+        // Point inside the left block — should be contained
+        assert!(l_room.contains(1.0, 1.0, r));
+        // Point inside the bottom block — should be contained
+        assert!(l_room.contains(1.0, 3.0, r));
+        // Point in the gap (2.5, 3.0) — NOT contained
+        assert!(!l_room.contains(2.5, 3.0, r));
+
+        // Movement into the gap should be clamped by step 7 gap check.
+        // Target (3.0, 3.5) is inside bbox, bbox-clamp gives (2.6, 3.5).
+        // Gap check sees (2.6, 3.5) is NOT in any cell rect → clamps to nearest.
+        let res = compute_move(&mi(1.0, 1.0, 2.0, 2.5), &l_room, &[], &|_| None);
+        match res {
+            MoveResult::WallSlide { x, y } => {
+                // Clamped position must be inside the cell union
+                assert!(
+                    l_room.point_in_cells(x, y),
+                    "clamped pos ({x},{y}) must be inside cell union"
+                );
+            }
+            MoveResult::InRoom { x, y } => {
+                assert!(
+                    l_room.point_in_cells(x, y),
+                    "pos ({x},{y}) must be inside cell union"
+                );
+            }
+            _ => panic!("Unexpected {:?}", res),
+        }
+    }
+
+    #[test]
+    fn l_shape_clamp_to_nearest_rect() {
+        let cells = encode_rects(&[(0, 0, 4, 2), (0, 2, 2, 5)]);
+        let l_room = RoomBounds::from_room(1, 2.0, 2.5, 4.0, 5.0, &cells);
+
+        // Point in gap (3.0, 3.0) should clamp to nearest rect
+        let (cx, cy) = l_room.clamp(3.0, 3.0, 0.4);
+        // Should be inside some cell rect (no-radius)
+        assert!(
+            l_room.point_in_cells(cx, cy),
+            "clamped ({cx},{cy}) inside cell union"
+        );
+        // Should clamp to the top rect (0,0)-(4,2) since it's closer
+        assert!(cy < 2.0, "clamped to top rect, cy={cy}");
+    }
+
+    #[test]
+    fn l_shape_no_dead_zone_at_boundary() {
+        // Two adjacent rects sharing edge at x=4:
+        //   (0,0)-(4,3) and (4,0)-(6,2)
+        // Player at (3.9, 1.0) should be contained (in left rect).
+        // Player at (4.1, 1.0) should be contained (in right rect).
+        // Player at (4.0, 1.0) should NOT have a dead zone.
+        let cells = encode_rects(&[(0, 0, 4, 3), (4, 0, 6, 2)]);
+        let room = RoomBounds::from_room(1, 3.0, 1.5, 6.0, 3.0, &cells);
+        let r = 0.4;
+
+        assert!(room.contains(3.5, 1.0, r), "deep in left rect");
+        assert!(room.contains(4.5, 0.8, r), "deep in right rect");
+        // At the shared boundary — should be contained since both rects
+        // cover x=4 (left goes to x<4, right starts at x>=4)
+        assert!(room.contains(3.8, 1.0, r), "near shared boundary from left");
+        assert!(
+            room.contains(4.2, 0.8, r),
+            "near shared boundary from right"
+        );
     }
 }

@@ -177,67 +177,57 @@ pub fn sync_rooms(
         }
     }
 
-    // --- Phase 2: Per-room inset walls ---
-    // Every room gets 4 walls, each 0.15m thick, inset 0.15m from the room edge.
-    // Walls run the FULL length of each side (corners overlap at 90 deg, no gaps).
-    // Two adjacent rooms = two back-to-back 0.15m walls = 0.3m total visual thickness.
+    // --- Phase 2: Compute perimeter wall segments from cell masks ---
     let wt: f32 = 0.15;
     let inset = wt / 2.0;
 
-    struct RoomWalls {
+    // Lightweight per-room info for door frame positioning
+    struct RoomInfo {
         n_z: f32,
         s_z: f32,
         e_x: f32,
         w_x: f32,
-        h_len: f32,
-        v_len: f32,
-        cx: f32,
-        cz: f32,
         ceiling_height: f32,
-        n_gaps: Vec<(f32, f32)>,
-        s_gaps: Vec<(f32, f32)>,
-        e_gaps: Vec<(f32, f32)>,
-        w_gaps: Vec<(f32, f32)>,
     }
-
-    let mut room_walls: Vec<(u32, i32, u8, RoomWalls)> = Vec::new();
+    let mut room_info: Vec<(u32, i32, u8, RoomInfo)> = Vec::new();
     for room in &deck_rooms {
-        let cx = room.x;
-        let cz = room.y;
         let hw = room.width / 2.0;
         let hh = room.height / 2.0;
-        room_walls.push((
+        room_info.push((
             room.id,
             room.deck,
             room.room_type,
-            RoomWalls {
-                n_z: cz - hh + inset,
-                s_z: cz + hh - inset,
-                e_x: cx + hw - inset,
-                w_x: cx - hw + inset,
-                h_len: room.width,
-                v_len: room.height,
-                cx,
-                cz,
-                ceiling_height: room.ceiling_height,
-                n_gaps: Vec::new(),
-                s_gaps: Vec::new(),
-                e_gaps: Vec::new(),
-                w_gaps: Vec::new(),
+            RoomInfo {
+                n_z: room.y - hh + inset,
+                s_z: room.y + hh - inset,
+                e_x: room.x + hw - inset,
+                w_x: room.x - hw + inset,
+                ceiling_height: if room.ceiling_height > 0.0 {
+                    room.ceiling_height
+                } else {
+                    default_ceiling
+                },
             },
         ));
     }
-
-    // --- Phase 3+4: Door-table-driven wall cuts ---
-    // Read the Door table to determine where to cut gaps in walls.
-    // This guarantees visual openings match server-side movement exactly.
-    let post_w: f32 = 0.2;
 
     // Build room_id → deck_rooms index map
     let mut id_to_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     for (idx, room) in deck_rooms.iter().enumerate() {
         id_to_idx.insert(room.id, idx);
     }
+
+    // Iterate all same-deck doors (skip cross-deck doors)
+    let deck_doors: Vec<_> = conn
+        .db
+        .door()
+        .iter()
+        .filter(|d| id_to_idx.contains_key(&d.room_a) && id_to_idx.contains_key(&d.room_b))
+        .collect();
+
+    // Build per-room door edge lists for perimeter walk
+    let mut room_door_edges: Vec<Vec<progship_logic::movement::DoorEdge>> =
+        vec![Vec::new(); deck_rooms.len()];
 
     struct DoorwayCut {
         room_idx: usize,
@@ -249,13 +239,22 @@ pub fn sync_rooms(
         is_open: bool,
     }
     let mut doorway_cuts: Vec<DoorwayCut> = Vec::new();
+    let post_w: f32 = 0.2;
 
-    // Iterate all same-deck doors (skip cross-deck doors)
-    let deck_doors: Vec<_> = conn
-        .db
-        .door()
-        .iter()
-        .filter(|d| id_to_idx.contains_key(&d.room_a) && id_to_idx.contains_key(&d.room_b))
+    // Per-room gap lists for greeble compatibility
+    struct WallGapInfo {
+        n: Vec<(f32, f32)>,
+        s: Vec<(f32, f32)>,
+        e: Vec<(f32, f32)>,
+        w: Vec<(f32, f32)>,
+    }
+    let mut room_gaps: Vec<WallGapInfo> = (0..deck_rooms.len())
+        .map(|_| WallGapInfo {
+            n: Vec::new(),
+            s: Vec::new(),
+            e: Vec::new(),
+            w: Vec::new(),
+        })
         .collect();
 
     for door in &deck_doors {
@@ -270,8 +269,6 @@ pub fn sync_rooms(
         let both_plain = room_types::is_plain_corridor(ra.room_type)
             && room_types::is_plain_corridor(rb.room_type);
 
-        // Determine gap width: corridors open fully (minus wall insets),
-        // rooms/shafts use the Door table width directly.
         let gap_w = if both_plain {
             door.width - 2.0 * wt
         } else {
@@ -281,42 +278,36 @@ pub fn sync_rooms(
             continue;
         }
 
-        // Determine which wall the door is on using wall_a/wall_b
-        // wall_a is the wall side of room_a, wall_b is the wall side of room_b
-        // NORTH=0 (low Y), SOUTH=1 (high Y), EAST=2 (high X), WEST=3 (low X)
+        // Add door edges for perimeter walk
+        room_door_edges[idx_a].push(progship_logic::movement::DoorEdge {
+            door_x: door.door_x,
+            door_y: door.door_y,
+            width: gap_w,
+            wall_side: door.wall_a,
+        });
+        room_door_edges[idx_b].push(progship_logic::movement::DoorEdge {
+            door_x: door.door_x,
+            door_y: door.door_y,
+            width: gap_w,
+            wall_side: door.wall_b,
+        });
+
+        // Track gaps for greeble compatibility
         match door.wall_a {
-            0 => {
-                // room_a NORTH wall -> gap at door_x along x-axis
-                room_walls[idx_a].3.n_gaps.push((door.door_x, gap_w));
-            }
-            1 => {
-                room_walls[idx_a].3.s_gaps.push((door.door_x, gap_w));
-            }
-            2 => {
-                room_walls[idx_a].3.e_gaps.push((door.door_y, gap_w));
-            }
-            3 => {
-                room_walls[idx_a].3.w_gaps.push((door.door_y, gap_w));
-            }
+            0 => room_gaps[idx_a].n.push((door.door_x, gap_w)),
+            1 => room_gaps[idx_a].s.push((door.door_x, gap_w)),
+            2 => room_gaps[idx_a].e.push((door.door_y, gap_w)),
+            3 => room_gaps[idx_a].w.push((door.door_y, gap_w)),
             _ => {}
         }
         match door.wall_b {
-            0 => {
-                room_walls[idx_b].3.n_gaps.push((door.door_x, gap_w));
-            }
-            1 => {
-                room_walls[idx_b].3.s_gaps.push((door.door_x, gap_w));
-            }
-            2 => {
-                room_walls[idx_b].3.e_gaps.push((door.door_y, gap_w));
-            }
-            3 => {
-                room_walls[idx_b].3.w_gaps.push((door.door_y, gap_w));
-            }
+            0 => room_gaps[idx_b].n.push((door.door_x, gap_w)),
+            1 => room_gaps[idx_b].s.push((door.door_x, gap_w)),
+            2 => room_gaps[idx_b].e.push((door.door_y, gap_w)),
+            3 => room_gaps[idx_b].w.push((door.door_y, gap_w)),
             _ => {}
         }
 
-        // Only add door frame cuts for non-corridor-corridor pairs
         if !both_plain {
             doorway_cuts.push(DoorwayCut {
                 room_idx: idx_a,
@@ -334,104 +325,73 @@ pub fn sync_rooms(
         }
     }
 
-    // --- Phase 4.5: Greeble surface detail (after door gaps are known) ---
+    // --- Phase 4.5: Greeble surface detail ---
     if let Some(ref lib) = greeble_lib {
         for (idx, room) in deck_rooms.iter().enumerate() {
-            let w = &room_walls[idx].3;
+            let g = &room_gaps[idx];
             let gaps = crate::greeble::WallGaps {
-                n: w.n_gaps.clone(),
-                s: w.s_gaps.clone(),
-                e: w.e_gaps.clone(),
-                w: w.w_gaps.clone(),
+                n: g.n.clone(),
+                s: g.s.clone(),
+                e: g.e.clone(),
+                w: g.w.clone(),
             };
             crate::greeble::spawn_room_greebles(&mut commands, &mut meshes, lib, room, &gaps);
         }
     }
 
-    // --- Phase 5: Draw walls ---
-    for (room_id, deck, room_type, walls) in &room_walls {
-        let wh = walls.ceiling_height;
-        let wall_color = room_color(*room_type).with_luminance(0.3);
-        // N wall (horizontal)
-        let np: Vec<f32> = walls.n_gaps.iter().map(|g| g.0).collect();
-        let nw: Vec<f32> = walls.n_gaps.iter().map(|g| g.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            walls.cx,
-            walls.n_z,
-            walls.h_len,
-            wh,
-            wt,
-            true,
-            &np,
-            walls.cx,
-            &nw,
-            *room_id,
-            *deck,
-        );
-        // S wall
-        let sp: Vec<f32> = walls.s_gaps.iter().map(|g| g.0).collect();
-        let sw_: Vec<f32> = walls.s_gaps.iter().map(|g| g.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            walls.cx,
-            walls.s_z,
-            walls.h_len,
-            wh,
-            wt,
-            true,
-            &sp,
-            walls.cx,
-            &sw_,
-            *room_id,
-            *deck,
-        );
-        // E wall (vertical)
-        let ep: Vec<f32> = walls.e_gaps.iter().map(|g| g.0).collect();
-        let ew_: Vec<f32> = walls.e_gaps.iter().map(|g| g.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            walls.e_x,
-            walls.cz,
-            walls.v_len,
-            wh,
-            wt,
-            false,
-            &ep,
-            walls.cz,
-            &ew_,
-            *room_id,
-            *deck,
-        );
-        // W wall
-        let wp: Vec<f32> = walls.w_gaps.iter().map(|g| g.0).collect();
-        let ww: Vec<f32> = walls.w_gaps.iter().map(|g| g.1).collect();
-        spawn_wall_with_gaps(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            wall_color,
-            walls.w_x,
-            walls.cz,
-            walls.v_len,
-            wh,
-            wt,
-            false,
-            &wp,
-            walls.cz,
-            &ww,
-            *room_id,
-            *deck,
-        );
+    // --- Phase 5: Draw walls from cell-mask perimeter ---
+    for (idx, room) in deck_rooms.iter().enumerate() {
+        let wh = room_info[idx].3.ceiling_height;
+        let wall_color = room_color(room.room_type).with_luminance(0.3);
+        let mat = materials.add(wall_material(wall_color));
+
+        let segments =
+            progship_logic::movement::compute_room_perimeter(&room.cells, &room_door_edges[idx]);
+
+        for seg in &segments {
+            let is_horizontal = seg.direction == 0 || seg.direction == 1;
+            // Inset wall slightly from the cell edge toward room interior
+            let inset_offset = match seg.direction {
+                0 => inset,  // NORTH wall: move +z (inward)
+                1 => -inset, // SOUTH wall: move -z (inward)
+                2 => -inset, // EAST wall: move -x (inward)
+                3 => inset,  // WEST wall: move +x (inward)
+                _ => 0.0,
+            };
+            // E/W (vertical) walls extend by wt/2 at each end to fill corners
+            // behind N/S walls. Only one axis extends → no z-fighting.
+            let ext_len = if is_horizontal {
+                seg.length
+            } else {
+                seg.length + wt
+            };
+            let (wx, wz) = if is_horizontal {
+                (seg.x, seg.z + inset_offset)
+            } else {
+                (seg.x + inset_offset, seg.z)
+            };
+            if is_horizontal {
+                commands.spawn((
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(ext_len, wh, wt))),
+                    MeshMaterial3d(mat.clone()),
+                    Transform::from_xyz(wx, wh / 2.0, wz),
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            } else {
+                commands.spawn((
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(wt, wh, ext_len))),
+                    MeshMaterial3d(mat.clone()),
+                    Transform::from_xyz(wx, wh / 2.0, wz),
+                    RoomEntity {
+                        room_id: room.id,
+                        deck: room.deck,
+                    },
+                ));
+            }
+        }
     }
 
     // --- Phase 6: Door frames ---
@@ -455,20 +415,20 @@ pub fn sync_rooms(
     let panel_thickness = 0.06;
 
     for cut in &doorway_cuts {
-        let rwalls = &room_walls[cut.room_idx].3;
-        let cwalls = &room_walls[cut.other_idx].3;
-        let room_id = room_walls[cut.room_idx].0;
-        let deck = room_walls[cut.room_idx].1;
-        let rt_a = room_walls[cut.room_idx].2;
-        let rt_b = room_walls[cut.other_idx].2;
+        let rinfo = &room_info[cut.room_idx].3;
+        let cinfo = &room_info[cut.other_idx].3;
+        let room_id = room_info[cut.room_idx].0;
+        let deck = room_info[cut.room_idx].1;
+        let rt_a = room_info[cut.room_idx].2;
+        let rt_b = room_info[cut.other_idx].2;
         let door_h = progship_logic::constants::deck_heights::door_opening_height(rt_a, rt_b);
-        let wh = rwalls.ceiling_height;
+        let wh = rinfo.ceiling_height;
         // Place frame centered between the room's wall and the corridor's wall
         let (fx, fz, horiz) = match cut.wall_side {
-            0 => (cut.axis_pos, (rwalls.n_z + cwalls.s_z) / 2.0, true),
-            1 => (cut.axis_pos, (rwalls.s_z + cwalls.n_z) / 2.0, true),
-            2 => ((rwalls.e_x + cwalls.w_x) / 2.0, cut.axis_pos, false),
-            3 => ((rwalls.w_x + cwalls.e_x) / 2.0, cut.axis_pos, false),
+            0 => (cut.axis_pos, (rinfo.n_z + cinfo.s_z) / 2.0, true),
+            1 => (cut.axis_pos, (rinfo.s_z + cinfo.n_z) / 2.0, true),
+            2 => ((rinfo.e_x + cinfo.w_x) / 2.0, cut.axis_pos, false),
+            3 => ((rinfo.w_x + cinfo.e_x) / 2.0, cut.axis_pos, false),
             _ => continue,
         };
         spawn_door_frame(
@@ -534,7 +494,7 @@ pub fn sync_rooms(
 
         // Door plaque: icon + room name on the corridor side of non-corridor rooms
         let room = deck_rooms[cut.room_idx];
-        let other_rt = room_walls[cut.other_idx].2;
+        let other_rt = room_info[cut.other_idx].2;
         if !room_types::is_corridor(room.room_type) && room_types::is_corridor(other_rt) {
             let icon = room_type_icon(room.room_type);
             let label = if icon.is_empty() {
@@ -553,20 +513,20 @@ pub fn sync_rooms(
                 // Room's N wall: corridor is to the north, plaque faces north (-Z in Bevy)
                 0 => (
                     fx + offset,
-                    rwalls.n_z - wall_offset,
+                    rinfo.n_z - wall_offset,
                     Quat::from_rotation_y(std::f32::consts::PI),
                 ),
                 // Room's S wall: corridor is to the south, plaque faces south (+Z)
-                1 => (fx - offset, rwalls.s_z + wall_offset, Quat::IDENTITY),
+                1 => (fx - offset, rinfo.s_z + wall_offset, Quat::IDENTITY),
                 // Room's E wall: corridor is to the east, plaque faces east (+X)
                 2 => (
-                    rwalls.e_x + wall_offset,
+                    rinfo.e_x + wall_offset,
                     fz + offset,
                     Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
                 ),
                 // Room's W wall: corridor is to the west, plaque faces west (-X)
                 3 => (
-                    rwalls.w_x - wall_offset,
+                    rinfo.w_x - wall_offset,
                     fz - offset,
                     Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
                 ),
@@ -605,39 +565,39 @@ pub fn sync_rooms(
             0 => vec![
                 (
                     fx + btn_offset,
-                    rwalls.n_z - wall_off,
+                    rinfo.n_z - wall_off,
                     Quat::from_rotation_y(std::f32::consts::PI),
                 ),
-                (fx - btn_offset, cwalls.s_z + wall_off, Quat::IDENTITY),
+                (fx - btn_offset, cinfo.s_z + wall_off, Quat::IDENTITY),
             ],
             1 => vec![
-                (fx - btn_offset, rwalls.s_z + wall_off, Quat::IDENTITY),
+                (fx - btn_offset, rinfo.s_z + wall_off, Quat::IDENTITY),
                 (
                     fx + btn_offset,
-                    cwalls.n_z - wall_off,
+                    cinfo.n_z - wall_off,
                     Quat::from_rotation_y(std::f32::consts::PI),
                 ),
             ],
             2 => vec![
                 (
-                    rwalls.e_x + wall_off,
+                    rinfo.e_x + wall_off,
                     fz - btn_offset,
                     Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
                 ),
                 (
-                    cwalls.w_x - wall_off,
+                    cinfo.w_x - wall_off,
                     fz + btn_offset,
                     Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
                 ),
             ],
             3 => vec![
                 (
-                    rwalls.w_x - wall_off,
+                    rinfo.w_x - wall_off,
                     fz + btn_offset,
                     Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
                 ),
                 (
-                    cwalls.e_x + wall_off,
+                    cinfo.e_x + wall_off,
                     fz - btn_offset,
                     Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
                 ),
@@ -1242,123 +1202,6 @@ fn spawn_furniture(
     }
 }
 
-fn spawn_wall_with_gaps(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    color: Color,
-    wall_x: f32,
-    wall_z: f32, // 3D position of wall center
-    wall_length: f32,
-    wall_height: f32,
-    wall_thickness: f32,
-    horizontal: bool,       // true = runs along X, false = runs along Z
-    door_positions: &[f32], // door world positions along the wall axis
-    room_center: f32,       // room center along the wall axis (for converting door pos)
-    door_widths: &[f32],    // per-door widths
-    room_id: u32,
-    deck: i32,
-) {
-    let mat = materials.add(wall_material(color));
-
-    if door_positions.is_empty() {
-        // No doors — solid wall (corner posts handle corner fill)
-        if horizontal {
-            commands.spawn((
-                Mesh3d(add_mesh(
-                    meshes,
-                    Cuboid::new(wall_length, wall_height, wall_thickness),
-                )),
-                MeshMaterial3d(mat),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
-            ));
-        } else {
-            commands.spawn((
-                Mesh3d(add_mesh(
-                    meshes,
-                    Cuboid::new(wall_thickness, wall_height, wall_length),
-                )),
-                MeshMaterial3d(mat),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
-            ));
-        }
-        return;
-    }
-
-    // Build wall segments around door gaps
-    let mut gaps: Vec<(f32, f32)> = door_positions
-        .iter()
-        .zip(door_widths.iter())
-        .map(|(&dp, &dw)| {
-            let offset = dp - room_center;
-            (offset - dw / 2.0, offset + dw / 2.0)
-        })
-        .collect();
-    gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-    let half_len = wall_length / 2.0;
-    let mut cursor = -half_len;
-    let wall_end = half_len;
-
-    for (gap_start, gap_end) in &gaps {
-        let seg_len = gap_start - cursor;
-        if seg_len > 0.01 {
-            let seg_center = cursor + seg_len / 2.0;
-            if horizontal {
-                commands.spawn((
-                    Mesh3d(add_mesh(
-                        meshes,
-                        Cuboid::new(seg_len, wall_height, wall_thickness),
-                    )),
-                    MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
-                    RoomEntity { room_id, deck },
-                ));
-            } else {
-                commands.spawn((
-                    Mesh3d(add_mesh(
-                        meshes,
-                        Cuboid::new(wall_thickness, wall_height, seg_len),
-                    )),
-                    MeshMaterial3d(mat.clone()),
-                    Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
-                    RoomEntity { room_id, deck },
-                ));
-            }
-        }
-        cursor = *gap_end;
-    }
-
-    // Final segment after last gap
-    let seg_len = wall_end - cursor;
-    if seg_len > 0.01 {
-        let seg_center = cursor + seg_len / 2.0;
-        if horizontal {
-            commands.spawn((
-                Mesh3d(add_mesh(
-                    meshes,
-                    Cuboid::new(seg_len, wall_height, wall_thickness),
-                )),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(wall_x + seg_center, wall_height / 2.0, wall_z),
-                RoomEntity { room_id, deck },
-            ));
-        } else {
-            commands.spawn((
-                Mesh3d(add_mesh(
-                    meshes,
-                    Cuboid::new(wall_thickness, wall_height, seg_len),
-                )),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(wall_x, wall_height / 2.0, wall_z + seg_center),
-                RoomEntity { room_id, deck },
-            ));
-        }
-    }
-}
-
 /// Spawn a door frame (two posts + lintel + transom) at the given position.
 /// `door_height`: height of the door opening. `wall_height`: full ceiling height.
 /// `horizontal`: true if the wall runs along X (N/S walls), false for Z (E/W walls).
@@ -1835,12 +1678,11 @@ fn spawn_floor_markings(
         room_id: room.id,
         deck: room.deck,
     };
-    let hw = room.width / 2.0;
-    let hh = room.height / 2.0;
     let y = 0.11; // just above floor
     let stripe_w = 0.08;
+    let inset = 0.2; // stripe inset from wall edge
 
-    // Zone-colored perimeter border strip
+    // Zone-colored perimeter border strips from cell mask
     let zone_color = zone_stripe_color(room.room_type);
     let stripe_mat = materials.add(StandardMaterial {
         base_color: zone_color,
@@ -1848,30 +1690,48 @@ fn spawn_floor_markings(
         perceptual_roughness: 0.5,
         ..default()
     });
-    // North + south strips
-    let h_strip = add_mesh(meshes, Cuboid::new(room.width - 0.4, 0.01, stripe_w));
-    for z_off in [-(hh - 0.2), hh - 0.2] {
-        commands.spawn((
-            Mesh3d(h_strip.clone()),
-            MeshMaterial3d(stripe_mat.clone()),
-            Transform::from_xyz(room.x, y, room.y + z_off),
-            re.clone(),
-        ));
-    }
-    // East + west strips
-    let v_strip = add_mesh(meshes, Cuboid::new(stripe_w, 0.01, room.height - 0.4));
-    for x_off in [-(hw - 0.2), hw - 0.2] {
-        commands.spawn((
-            Mesh3d(v_strip.clone()),
-            MeshMaterial3d(stripe_mat.clone()),
-            Transform::from_xyz(room.x + x_off, y, room.y),
-            re.clone(),
-        ));
+
+    let segments = progship_logic::movement::compute_room_perimeter(&room.cells, &[]);
+    for seg in &segments {
+        if seg.length < 0.5 {
+            continue;
+        }
+        let stripe_len = seg.length - 2.0 * inset;
+        if stripe_len < 0.2 {
+            continue;
+        }
+        let is_horizontal = seg.direction == 0 || seg.direction == 1;
+        let inset_offset = match seg.direction {
+            0 => inset,
+            1 => -inset,
+            2 => -inset,
+            3 => inset,
+            _ => 0.0,
+        };
+        if is_horizontal {
+            let mesh = add_mesh(meshes, Cuboid::new(stripe_len, 0.01, stripe_w));
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(stripe_mat.clone()),
+                Transform::from_xyz(seg.x, y, seg.z + inset_offset),
+                re.clone(),
+            ));
+        } else {
+            let mesh = add_mesh(meshes, Cuboid::new(stripe_w, 0.01, stripe_len));
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(stripe_mat.clone()),
+                Transform::from_xyz(seg.x + inset_offset, y, seg.z),
+                re.clone(),
+            ));
+        }
     }
 
     // Hazard striping for dangerous rooms (engineering, cargo, airlock)
     let is_hazard = matches!(room.room_type, 60..=71 | 90..=94);
     if is_hazard {
+        let hw = room.width / 2.0;
+        let hh = room.height / 2.0;
         let yellow = materials.add(StandardMaterial {
             base_color: Color::srgb(0.9, 0.75, 0.0),
             emissive: Color::srgb(0.15, 0.12, 0.0).into(),
@@ -1879,7 +1739,6 @@ fn spawn_floor_markings(
             ..default()
         });
         let dash = add_mesh(meshes, Cuboid::new(0.5, 0.01, stripe_w * 2.0));
-        // Hazard dashes along north edge
         let n_z = room.y - hh + 0.5;
         let count = (room.width / 1.2).floor() as i32;
         for i in 0..count.min(20) {
