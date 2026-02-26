@@ -260,60 +260,6 @@ pub fn compute_room_perimeter(cells: &[u8], doors: &[DoorEdge]) -> Vec<WallSegme
     result
 }
 
-/// A corner post position where two perpendicular walls of a room meet.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CornerPost {
-    /// World X position of the corner.
-    pub x: f32,
-    /// World Z (Y in grid coords) position of the corner.
-    pub z: f32,
-}
-
-/// Find all corner positions in a room's cell mask where perpendicular
-/// walls meet. These need small posts to fill the visual gap.
-pub fn compute_room_corners(cells: &[u8]) -> Vec<CornerPost> {
-    use std::collections::HashSet;
-
-    let rects = decode_cell_rects(cells);
-    if rects.is_empty() {
-        return Vec::new();
-    }
-
-    let mut owned: HashSet<(i32, i32)> = HashSet::new();
-    for &(x0, y0, x1, y1) in &rects {
-        for x in x0..x1 {
-            for y in y0..y1 {
-                owned.insert((x as i32, y as i32));
-            }
-        }
-    }
-
-    // A corner exists at grid vertex (vx, vy) if:
-    // - exactly 1 or 3 of the 4 cells touching that vertex are owned (convex or concave corner)
-    let x_min = owned.iter().map(|c| c.0).min().unwrap();
-    let x_max = owned.iter().map(|c| c.0).max().unwrap() + 1;
-    let y_min = owned.iter().map(|c| c.1).min().unwrap();
-    let y_max = owned.iter().map(|c| c.1).max().unwrap() + 1;
-
-    let mut corners = Vec::new();
-    for vx in x_min..=x_max {
-        for vy in y_min..=y_max {
-            // 4 cells sharing vertex (vx, vy): (vx-1,vy-1), (vx,vy-1), (vx-1,vy), (vx,vy)
-            let count = [(vx - 1, vy - 1), (vx, vy - 1), (vx - 1, vy), (vx, vy)]
-                .iter()
-                .filter(|c| owned.contains(c))
-                .count();
-            if count == 1 || count == 3 {
-                corners.push(CornerPost {
-                    x: vx as f32,
-                    z: vy as f32,
-                });
-            }
-        }
-    }
-    corners
-}
-
 /// Room collision bounds — outer bbox plus optional cell-mask rects for
 /// irregular (L/T/U) rooms. When `cell_rects` is non-empty, containment
 /// and clamping use the actual cell shape instead of the bounding box.

@@ -358,6 +358,13 @@ pub fn sync_rooms(
                 3 => inset,  // WEST wall: move +x (inward)
                 _ => 0.0,
             };
+            // E/W (vertical) walls extend by wt/2 at each end to fill corners
+            // behind N/S walls. Only one axis extends → no z-fighting.
+            let ext_len = if is_horizontal {
+                seg.length
+            } else {
+                seg.length + wt
+            };
             let (wx, wz) = if is_horizontal {
                 (seg.x, seg.z + inset_offset)
             } else {
@@ -365,7 +372,7 @@ pub fn sync_rooms(
             };
             if is_horizontal {
                 commands.spawn((
-                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(seg.length, wh, wt))),
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(ext_len, wh, wt))),
                     MeshMaterial3d(mat.clone()),
                     Transform::from_xyz(wx, wh / 2.0, wz),
                     RoomEntity {
@@ -375,7 +382,7 @@ pub fn sync_rooms(
                 ));
             } else {
                 commands.spawn((
-                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(wt, wh, seg.length))),
+                    Mesh3d(add_mesh(&mut meshes, Cuboid::new(wt, wh, ext_len))),
                     MeshMaterial3d(mat.clone()),
                     Transform::from_xyz(wx, wh / 2.0, wz),
                     RoomEntity {
@@ -384,20 +391,6 @@ pub fn sync_rooms(
                     },
                 ));
             }
-        }
-
-        // Corner posts where perpendicular walls meet
-        let corners = progship_logic::movement::compute_room_corners(&room.cells);
-        for cp in &corners {
-            commands.spawn((
-                Mesh3d(add_mesh(&mut meshes, Cuboid::new(wt, wh, wt))),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_xyz(cp.x, wh / 2.0, cp.z),
-                RoomEntity {
-                    room_id: room.id,
-                    deck: room.deck,
-                },
-            ));
         }
     }
 
