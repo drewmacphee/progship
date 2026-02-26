@@ -260,6 +260,60 @@ pub fn compute_room_perimeter(cells: &[u8], doors: &[DoorEdge]) -> Vec<WallSegme
     result
 }
 
+/// A corner post position where two perpendicular walls of a room meet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CornerPost {
+    /// World X position of the corner.
+    pub x: f32,
+    /// World Z (Y in grid coords) position of the corner.
+    pub z: f32,
+}
+
+/// Find all corner positions in a room's cell mask where perpendicular
+/// walls meet. These need small posts to fill the visual gap.
+pub fn compute_room_corners(cells: &[u8]) -> Vec<CornerPost> {
+    use std::collections::HashSet;
+
+    let rects = decode_cell_rects(cells);
+    if rects.is_empty() {
+        return Vec::new();
+    }
+
+    let mut owned: HashSet<(i32, i32)> = HashSet::new();
+    for &(x0, y0, x1, y1) in &rects {
+        for x in x0..x1 {
+            for y in y0..y1 {
+                owned.insert((x as i32, y as i32));
+            }
+        }
+    }
+
+    // A corner exists at grid vertex (vx, vy) if:
+    // - exactly 1 or 3 of the 4 cells touching that vertex are owned (convex or concave corner)
+    let x_min = owned.iter().map(|c| c.0).min().unwrap();
+    let x_max = owned.iter().map(|c| c.0).max().unwrap() + 1;
+    let y_min = owned.iter().map(|c| c.1).min().unwrap();
+    let y_max = owned.iter().map(|c| c.1).max().unwrap() + 1;
+
+    let mut corners = Vec::new();
+    for vx in x_min..=x_max {
+        for vy in y_min..=y_max {
+            // 4 cells sharing vertex (vx, vy): (vx-1,vy-1), (vx,vy-1), (vx-1,vy), (vx,vy)
+            let count = [(vx - 1, vy - 1), (vx, vy - 1), (vx - 1, vy), (vx, vy)]
+                .iter()
+                .filter(|c| owned.contains(c))
+                .count();
+            if count == 1 || count == 3 {
+                corners.push(CornerPost {
+                    x: vx as f32,
+                    z: vy as f32,
+                });
+            }
+        }
+    }
+    corners
+}
+
 /// Room collision bounds — outer bbox plus optional cell-mask rects for
 /// irregular (L/T/U) rooms. When `cell_rects` is non-empty, containment
 /// and clamping use the actual cell shape instead of the bounding box.
@@ -361,7 +415,7 @@ impl RoomBounds {
                 y.clamp(self.min_y() + radius, self.max_y() - radius),
             )
         } else {
-            clamp_to_cell_union(&self.cell_rects, x, y)
+            clamp_to_cell_union(&self.cell_rects, x, y, radius)
         }
     }
 
@@ -379,24 +433,78 @@ impl RoomBounds {
     }
 }
 
-/// Clamp a point to the nearest position inside the cell rect union.
-/// No per-rect radius inset — adjacent rects share edges freely.
-fn clamp_to_cell_union(rects: &[(f32, f32, f32, f32)], x: f32, y: f32) -> (f32, f32) {
-    let mut best = (x, y);
-    let mut best_dist = f32::MAX;
-    for &(x0, y0, x1, y1) in rects {
-        // Use a tiny epsilon inset to keep the point strictly inside
-        let cx = x.clamp(x0 + 0.01, x1 - 0.01);
-        let cy = y.clamp(y0 + 0.01, y1 - 0.01);
-        let dx = cx - x;
-        let dy = cy - y;
-        let d = dx * dx + dy * dy;
-        if d < best_dist {
-            best_dist = d;
-            best = (cx, cy);
+/// Clamp a point to the nearest valid position inside the cell rect union,
+/// respecting radius at external walls but allowing free crossing at internal
+/// boundaries between adjacent rects.
+fn clamp_to_cell_union(rects: &[(f32, f32, f32, f32)], x: f32, y: f32, r: f32) -> (f32, f32) {
+    let point_in = |px: f32, py: f32| {
+        rects
+            .iter()
+            .any(|&(x0, y0, x1, y1)| px >= x0 && px < x1 && py >= y0 && py < y1)
+    };
+
+    // First ensure center is in a cell rect
+    let mut cx = x;
+    let mut cy = y;
+    if !point_in(cx, cy) {
+        // Find nearest cell rect center
+        let mut best_d = f32::MAX;
+        for &(x0, y0, x1, y1) in rects {
+            let nx = cx.clamp(x0 + 0.01, x1 - 0.01);
+            let ny = cy.clamp(y0 + 0.01, y1 - 0.01);
+            let d = (nx - cx) * (nx - cx) + (ny - cy) * (ny - cy);
+            if d < best_d {
+                best_d = d;
+                cx = nx;
+                cy = ny;
+            }
         }
     }
-    best
+
+    // Push inward from external walls (where cardinal extreme is outside all rects)
+    if !point_in(cx + r, cy) {
+        // Right side outside — find rightmost x1 among rects containing (cx, cy) vertically
+        let max_x1 = rects
+            .iter()
+            .filter(|&&(_, y0, _, y1)| cy >= y0 && cy < y1)
+            .map(|&(_, _, x1, _)| x1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if max_x1 > f32::NEG_INFINITY {
+            cx = cx.min(max_x1 - r);
+        }
+    }
+    if !point_in(cx - r, cy) {
+        let min_x0 = rects
+            .iter()
+            .filter(|&&(_, y0, _, y1)| cy >= y0 && cy < y1)
+            .map(|&(x0, _, _, _)| x0)
+            .fold(f32::INFINITY, f32::min);
+        if min_x0 < f32::INFINITY {
+            cx = cx.max(min_x0 + r);
+        }
+    }
+    if !point_in(cx, cy + r) {
+        let max_y1 = rects
+            .iter()
+            .filter(|&&(x0, _, x1, _)| cx >= x0 && cx < x1)
+            .map(|&(_, _, _, y1)| y1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if max_y1 > f32::NEG_INFINITY {
+            cy = cy.min(max_y1 - r);
+        }
+    }
+    if !point_in(cx, cy - r) {
+        let min_y0 = rects
+            .iter()
+            .filter(|&&(x0, _, x1, _)| cx >= x0 && cx < x1)
+            .map(|&(_, y0, _, _)| y0)
+            .fold(f32::INFINITY, f32::min);
+        if min_y0 < f32::INFINITY {
+            cy = cy.max(min_y0 + r);
+        }
+    }
+
+    (cx, cy)
 }
 
 /// Minimal door info needed for traversal checks.
@@ -655,10 +763,11 @@ pub fn compute_move(
     let mut fy = cy;
 
     // 7. Cell-mask gap check: if the room has irregular cell rects, ensure
-    //    the final position is inside an actual cell (not in the L-shape gap).
-    //    Uses point_in_cells (no radius) so adjacent rects have no dead zone.
+    //    the final position (with radius) is fully inside the cell union.
+    //    Uses cardinal-extremes contains() — no dead zone at internal boundaries,
+    //    but enforces radius at external walls.
     //    Skip this check if the player is in a door overlap zone.
-    if !current_room.cell_rects.is_empty() && !current_room.point_in_cells(fx, fy) {
+    if !current_room.cell_rects.is_empty() && !current_room.contains(fx, fy, r) {
         let in_door_zone = room_doors.iter().any(|&(door, dw, _)| {
             let half_open = door.width / 2.0 - r;
             if half_open <= 0.0 {

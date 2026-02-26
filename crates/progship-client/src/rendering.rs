@@ -385,6 +385,20 @@ pub fn sync_rooms(
                 ));
             }
         }
+
+        // Corner posts where perpendicular walls meet
+        let corners = progship_logic::movement::compute_room_corners(&room.cells);
+        for cp in &corners {
+            commands.spawn((
+                Mesh3d(add_mesh(&mut meshes, Cuboid::new(wt, wh, wt))),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_xyz(cp.x, wh / 2.0, cp.z),
+                RoomEntity {
+                    room_id: room.id,
+                    deck: room.deck,
+                },
+            ));
+        }
     }
 
     // --- Phase 6: Door frames ---
